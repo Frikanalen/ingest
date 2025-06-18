@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tus/tusd/v2/pkg/hooks/hook-request",
+  "$ref": "#/$defs/HookRequest",
+  "$defs": {
+    "FileInfo": {
+      "properties": {
+        "ID": {
+          "type": "string"
+        },
+        "Size": {
+          "type": "integer"
+        },
+        "SizeIsDeferred": {
+          "type": "boolean"
+        },
+        "Offset": {
+          "type": "integer"
+        },
+        "MetaData": {
+          "$ref": "#/$defs/MetaData"
+        },
+        "IsPartial": {
+          "type": "boolean"
+        },
+        "IsFinal": {
+          "type": "boolean"
+        },
+        "PartialUploads": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "Storage": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "ID",
+        "Size",
+        "SizeIsDeferred",
+        "Offset",
+        "MetaData",
+        "IsPartial",
+        "IsFinal",
+        "PartialUploads",
+        "Storage"
+      ]
+    },
+    "HTTPRequest": {
+      "properties": {
+        "Method": {
+          "type": "string"
+        },
+        "URI": {
+          "type": "string"
+        },
+        "RemoteAddr": {
+          "type": "string"
+        },
+        "Header": {
+          "$ref": "#/$defs/Header"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "Method",
+        "URI",
+        "RemoteAddr",
+        "Header"
+      ]
+    },
+    "Header": {
+      "additionalProperties": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "type": "object"
+    },
+    "HookEvent": {
+      "properties": {
+        "Upload": {
+          "$ref": "#/$defs/FileInfo"
+        },
+        "HTTPRequest": {
+          "$ref": "#/$defs/HTTPRequest"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "Upload",
+        "HTTPRequest"
+      ]
+    },
+    "HookRequest": {
+      "properties": {
+        "Type": {
+          "type": "string"
+        },
+        "Event": {
+          "$ref": "#/$defs/HookEvent"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "Type",
+        "Event"
+      ]
+    },
+    "MetaData": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    }
+  }
+}
