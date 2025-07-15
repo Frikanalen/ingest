@@ -1,13 +1,11 @@
 import logging
 import os
+import shutil
 import tempfile
 import unittest
 
-import move_and_process as mp
 
-import converter
-import interactive
-import measure_loudness
+from lib import interactive, measure_loudness
 import runner
 
 
@@ -75,7 +73,7 @@ class ProcessGenerate(unittest.TestCase):
 
     def test_get_loudness(self):
         # bs1770gain not exising shouldn't fail tests
-        if not mp.can_get_loudness():
+        if not can_get_loudness():
             return self.skipTest("bs1770gain missing")
         # sine.wav was generated using sox -b 16 -n sine.wav synth 3 sine 300-3300
         # white.png was generated using convert xc:white white.png
@@ -96,3 +94,7 @@ class ProcessGenerate(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def can_get_loudness():
+    return shutil.which("bs1770gain")
