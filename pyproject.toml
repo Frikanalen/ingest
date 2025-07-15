@@ -9,3 +9,8 @@ dependencies = [
     "inotify>=0.2.10",
     "requests>=2.32.4",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.3",
+]
