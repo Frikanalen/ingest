@@ -6,6 +6,8 @@ import unittest
 import move_and_process as mp
 
 import converter
+import interactive
+import measure_loudness
 import runner
 
 
@@ -65,7 +67,7 @@ class ProcessGenerate(unittest.TestCase):
             in_fn, out_fns = t
             cmds = []
 
-            mp.generate_videos(
+            interactive.generate_videos(
                 0, in_fn, runner_run=lambda c, **__: cmds.append(c), register=nop
             )
 
@@ -78,15 +80,17 @@ class ProcessGenerate(unittest.TestCase):
         # sine.wav was generated using sox -b 16 -n sine.wav synth 3 sine 300-3300
         # white.png was generated using convert xc:white white.png
         self.assertEqual(
-            mp.get_loudness("tests/data/sine.wav"),
+            measure_loudness.get_loudness("tests/data/sine.wav"),
             {"integrated_lufs": -2.2, "truepeak_lufs": 0.54},
         )
-        self.assertEqual(mp.get_loudness("tests/data/white.jpg"), None)
+        self.assertEqual(measure_loudness.get_loudness("tests/data/white.jpg"), None)
 
     def test_generate_wrong_format(self):
-        self.assertRaises(AssertionError, lambda: mp.generate_videos(0, "/a/b/c.d"))
         self.assertRaises(
-            AssertionError, lambda: mp.generate_videos(0, "/a/theora/c.d")
+            AssertionError, lambda: interactive.generate_videos(0, "/a/b/c.d")
+        )
+        self.assertRaises(
+            AssertionError, lambda: interactive.generate_videos(0, "/a/theora/c.d")
         )
 
 
