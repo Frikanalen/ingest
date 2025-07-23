@@ -26,7 +26,10 @@ def run_inotify(watch_dir, move_to_dir):
             logging.info("Skipped %s" % file_name)
             continue
         logging.info("Found %s" % file_name)
-        handle_file(watch_dir, move_to_dir, file_name)
+        try:
+            handle_file(watch_dir, move_to_dir, file_name)
+        except SkippableError:
+            continue
 
 
 def run_periodic(watch_dir, move_to_dir):
