@@ -1,0 +1,1 @@
+This is just a lil' hack which takes the hook request/response types from the tusd source and generates a JSON Schema from this, which is then turned into a Pydantic file.
