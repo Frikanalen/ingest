@@ -1,4 +1,4 @@
-import dataclasses
+from dataclasses import field, dataclass
 import os
 import queue
 from pathlib import Path
@@ -10,10 +10,10 @@ import subprocess
 
 from werkzeug import Request, Response
 
-from tests.get_free_port import get_free_port
-from tests.mock_hook_server import MockHookServer
-from tests.tusd_process import TusdProcess
-from tests.tusd_config import TusdHttpHookConfig, TusdConfig
+from tests.utils.get_free_port import get_free_port
+from tests.utils.mock_hook_server import MockHookServer
+from tests.utils.tusd_process import TusdProcess
+from tests.utils.tusd_command import TusdHttpHookConfig, TusdConfig
 
 
 def git_root():
@@ -21,7 +21,7 @@ def git_root():
 
 
 @pytest.fixture(scope="session")
-def tusd_binary():
+def tusd_binary() -> str:
     root = git_root()
     bin_path = os.path.join(root, "bin")
     tusd_path = os.path.join(bin_path, "tusd")
@@ -39,32 +39,14 @@ def tusd_binary():
 
 @pytest.fixture
 def tusd_server(tmp_path, tusd_binary):
-    """
-    Creates a pytest fixture that sets up and tears down a tusd server for
-    testing purposes. The server is configured using a temporary directory
-    for uploads and a specified binary path for the server executable.
-
-    This fixture ensures that the tusd server is properly initialized
-    and cleaned up after each test, providing an isolated test environment.
-
-    Parameters:
-        tmp_path (Path): A temporary directory provided by pytest for use during testing.
-        tusd_binary (Path): The file path to the tusd server binary.
-
-    Yields:
-        dict: A dictionary containing the following keys:
-            - url (str): The URL of the running tusd server.
-            - upload_dir (Path): The temporary directory used for uploads.
-            - proc (subprocess.Popen): The process object for the running tusd server.
-    """
     config = TusdConfig(binary_path=tusd_binary, upload_dir=tmp_path)
 
     with TusdProcess(config) as process:
-        yield {
-            "url": process.url,
-            "upload_dir": tmp_path,
-            "proc": process.proc,
-        }
+        yield TusdFixture(
+            url=process.url,
+            upload_dir=tmp_path,
+            proc=process.proc,
+        )
 
 
 @pytest.fixture
@@ -74,7 +56,7 @@ def tusd_server_with_hooks(tmp_path, tusd_binary, mock_hook_server):
     )
 
     with TusdProcess(config) as process:
-        yield TusdFixture(
+        yield TusdFixtureWithHooks(
             url=process.url,
             upload_dir=tmp_path,
             proc=process.proc,
@@ -82,20 +64,24 @@ def tusd_server_with_hooks(tmp_path, tusd_binary, mock_hook_server):
         )
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass(frozen=True)
 class MockHookServerFixture:
     url: str
     port: int
     configure_response: Callable[[Request], Response]
     clear_configuration: Callable[[], None]
-    recorded_requests: Queue[Request] = dataclasses.field(default_factory=queue.Queue)
+    recorded_requests: Queue[Request] = field(default_factory=queue.Queue)
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass(frozen=True)
 class TusdFixture:
     url: str
     upload_dir: Path
     proc: subprocess.Popen
+
+
+@dataclass(frozen=True)
+class TusdFixtureWithHooks(TusdFixture):
     mock_hook_server: MockHookServerFixture
 
 

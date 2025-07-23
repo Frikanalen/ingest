@@ -10,11 +10,21 @@ from typing import TextIO, List
 
 import requests
 
-from tests.tusd_config import TusdConfig, build_tusd_command
-from tests.tusd_log_parser import parse_tusd_line
+from tests.utils.tusd_command import TusdConfig, build_tusd_command
+from tests.utils.tusd_log_parser import parse_tusd_line
 
 
 class TusdProcess:
+    """
+    Handles the management of the tusd process.
+
+    This class is used to configure, start, and manage the lifecycle of a tusd server process.
+    It provides methods to initiate the tusd server, stop it, and manage its output streams.
+    Additionally, it supports context management to ensure proper startup and cleanup of
+    the process. The class makes use of configuration for setting up the server, and it
+    handles process outputs in a separate thread for both standard output and error streams.
+    """
+
     upload_dir: Path
     config: TusdConfig
     proc: subprocess.Popen | None
@@ -41,12 +51,12 @@ class TusdProcess:
         )
 
         self.stdout_thread = threading.Thread(
-            target=_stream_output,
+            target=_log_tusd_output,
             args=(self.proc.stdout, logging.getLogger("tusd.stdout")),
             daemon=True,
         )
         self.stderr_thread = threading.Thread(
-            target=_stream_output,
+            target=_log_tusd_output,
             args=(self.proc.stderr, logging.getLogger("tusd.stderr")),
             daemon=True,
         )
@@ -94,10 +104,5 @@ def wait_for_tusd(port, timeout=10):
     raise RuntimeError(f"tusd did not start in time on port {port}")
 
 
-def _stream_output(pipe: TextIO, logger: Logger):
-    for line in pipe:
-        parsed = parse_tusd_line(line)
-        if parsed.entry_type == "structured":
-            logger.info(parsed.fields, extra=parsed.fields)
-        else:
-            logger.info(parsed.message)
+def _log_tusd_output(pipe: TextIO, logger: Logger):
+    [logger.info(**parse_tusd_line(line)) for line in pipe]
