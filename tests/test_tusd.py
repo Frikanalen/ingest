@@ -2,9 +2,11 @@ import requests
 from tusclient import client
 import io
 
+from werkzeug import Response
 
-def test_tusd_options(tusd_server):
-    url = tusd_server["url"]
+
+def test_tusd_options(tusd_server_with_hooks):
+    url = tusd_server_with_hooks["url"]
 
     response = requests.options(url)
 
@@ -13,8 +15,17 @@ def test_tusd_options(tusd_server):
     assert "Tus-Version" in response.headers
 
 
-def test_tusd_upload(tusd_server):
-    my_client = client.TusClient(url=tusd_server["url"])
+def test_tusd_upload(tusd_server_with_hooks, mock_hook_server):
+    my_client = client.TusClient(url=tusd_server_with_hooks.url)
+
+    def success_response(request_data):
+        return Response(
+            status=200,
+            response="{}",
+        )
+
+    mock_hook_server.configure_response(success_response)
+
     data = b"some bytes\n" * 500
     fs = io.BytesIO(data)
 

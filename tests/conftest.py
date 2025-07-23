@@ -1,42 +1,23 @@
-import logging
+import dataclasses
 import os
-from typing import TextIO
+import queue
+from pathlib import Path
+from queue import Queue
+from typing import Callable
 
 import pytest
-import requests
-import socket
 import subprocess
-import threading
-import time
-import re
 
-from tusd_log_parser import parse_tusd_line
+from werkzeug import Request, Response
 
-_ts_prefix = re.compile(r"^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}\.\d{6}\s+")
+from tests.get_free_port import get_free_port
+from tests.mock_hook_server import MockHookServer
+from tests.tusd_process import TusdProcess
+from tests.tusd_config import TusdHttpHookConfig, TusdConfig
 
 
 def git_root():
     return subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
-
-
-def get_free_port():
-    with socket.socket() as s:
-        s.bind(("", 0))
-        return s.getsockname()[1]
-
-
-def wait_for_tusd(port, timeout=10):
-    url = f"http://localhost:{port}/files/"
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            r = requests.options(url)
-            if r.status_code in (200, 204):
-                return
-        except requests.exceptions.RequestException:
-            pass
-        time.sleep(0.2)
-    raise RuntimeError(f"tusd did not start in time on port {port}")
 
 
 @pytest.fixture(scope="session")
@@ -56,55 +37,80 @@ def tusd_binary():
     return tusd_path
 
 
-def _stream_output(pipe: TextIO, name: str):
-    logger = logging.getLogger(f"tusd.{name}")
+@pytest.fixture
+def tusd_server(tmp_path, tusd_binary):
+    """
+    Creates a pytest fixture that sets up and tears down a tusd server for
+    testing purposes. The server is configured using a temporary directory
+    for uploads and a specified binary path for the server executable.
 
-    for line in pipe:
-        parsed = parse_tusd_line(line)
-        if parsed.entry_type == "structured":
-            logger.info(parsed.fields, extra=parsed.fields)
-        else:
-            logger.info(parsed.message)
+    This fixture ensures that the tusd server is properly initialized
+    and cleaned up after each test, providing an isolated test environment.
+
+    Parameters:
+        tmp_path (Path): A temporary directory provided by pytest for use during testing.
+        tusd_binary (Path): The file path to the tusd server binary.
+
+    Yields:
+        dict: A dictionary containing the following keys:
+            - url (str): The URL of the running tusd server.
+            - upload_dir (Path): The temporary directory used for uploads.
+            - proc (subprocess.Popen): The process object for the running tusd server.
+    """
+    config = TusdConfig(binary_path=tusd_binary, upload_dir=tmp_path)
+
+    with TusdProcess(config) as process:
+        yield {
+            "url": process.url,
+            "upload_dir": tmp_path,
+            "proc": process.proc,
+        }
 
 
 @pytest.fixture
-def tusd_server(tmp_path, tusd_binary):
-    upload_dir = tmp_path / "uploads"
-    upload_dir.mkdir()
-    port = get_free_port()
-
-    proc = subprocess.Popen(
-        [tusd_binary, "-upload-dir", str(upload_dir), "-port", str(port)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=1,
-        universal_newlines=True,
+def tusd_server_with_hooks(tmp_path, tusd_binary, mock_hook_server):
+    config = TusdConfig(
+        binary_path=tusd_binary, upload_dir=tmp_path, hook_config=TusdHttpHookConfig(url=mock_hook_server.url)
     )
 
-    # Start background threads to stream stdout/stderr
-    stdout_thread = threading.Thread(
-        target=_stream_output, args=(proc.stdout, "stdout"), daemon=True
-    )
-    stderr_thread = threading.Thread(
-        target=_stream_output, args=(proc.stderr, "stderr"), daemon=True
-    )
-    stdout_thread.start()
-    stderr_thread.start()
+    with TusdProcess(config) as process:
+        yield TusdFixture(
+            url=process.url,
+            upload_dir=tmp_path,
+            proc=process.proc,
+            mock_hook_server=mock_hook_server,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class MockHookServerFixture:
+    url: str
+    port: int
+    configure_response: Callable[[Request], Response]
+    clear_configuration: Callable[[], None]
+    recorded_requests: Queue[Request] = dataclasses.field(default_factory=queue.Queue)
+
+
+@dataclasses.dataclass(frozen=True)
+class TusdFixture:
+    url: str
+    upload_dir: Path
+    proc: subprocess.Popen
+    mock_hook_server: MockHookServerFixture
+
+
+@pytest.fixture
+def mock_hook_server():
+    server = MockHookServer(port=get_free_port())
+    server.start()
 
     try:
-        wait_for_tusd(port)
-        yield {
-            "url": f"http://localhost:{port}/files/",
-            "upload_dir": upload_dir,
-            "proc": proc,
-        }
+        yield MockHookServerFixture(
+            url=f"http://localhost:{server.port}",
+            port=server.port,
+            recorded_requests=server.recorded_requests,
+            configure_response=lambda x: server.configure_response("/", x),
+            clear_configuration=server.clear_configuration,
+        )
     finally:
-        proc.terminate()
-        stderr_thread.join()
-        stdout_thread.join()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        # Let threads finish if there's anything buffered
-        time.sleep(0.5)
+        server.stop()
