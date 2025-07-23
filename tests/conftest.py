@@ -1,11 +1,18 @@
+import logging
 import os
-import subprocess
-import time
-import socket
-import requests
-import pytest
+from typing import TextIO
 
-print("conftest.py loaded")
+import pytest
+import requests
+import socket
+import subprocess
+import threading
+import time
+import re
+
+from tusd_log_parser import parse_tusd_line
+
+_ts_prefix = re.compile(r"^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}\.\d{6}\s+")
 
 
 def git_root():
@@ -19,7 +26,6 @@ def get_free_port():
 
 
 def wait_for_tusd(port, timeout=10):
-    print("wait_for_tusd")
     url = f"http://localhost:{port}/files/"
     start = time.time()
     while time.time() - start < timeout:
@@ -35,7 +41,6 @@ def wait_for_tusd(port, timeout=10):
 
 @pytest.fixture(scope="session")
 def tusd_binary():
-    print("tusd_binary")
     root = git_root()
     bin_path = os.path.join(root, "bin")
     tusd_path = os.path.join(bin_path, "tusd")
@@ -51,9 +56,19 @@ def tusd_binary():
     return tusd_path
 
 
+def _stream_output(pipe: TextIO, name: str):
+    logger = logging.getLogger(f"tusd.{name}")
+
+    for line in pipe:
+        parsed = parse_tusd_line(line)
+        if parsed.entry_type == "structured":
+            logger.info(parsed.fields, extra=parsed.fields)
+        else:
+            logger.info(parsed.message)
+
+
 @pytest.fixture
 def tusd_server(tmp_path, tusd_binary):
-    print("tusd_server")
     upload_dir = tmp_path / "uploads"
     upload_dir.mkdir()
     port = get_free_port()
@@ -62,7 +77,19 @@ def tusd_server(tmp_path, tusd_binary):
         [tusd_binary, "-upload-dir", str(upload_dir), "-port", str(port)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        bufsize=1,
+        universal_newlines=True,
     )
+
+    # Start background threads to stream stdout/stderr
+    stdout_thread = threading.Thread(
+        target=_stream_output, args=(proc.stdout, "stdout"), daemon=True
+    )
+    stderr_thread = threading.Thread(
+        target=_stream_output, args=(proc.stderr, "stderr"), daemon=True
+    )
+    stdout_thread.start()
+    stderr_thread.start()
 
     try:
         wait_for_tusd(port)
@@ -73,10 +100,11 @@ def tusd_server(tmp_path, tusd_binary):
         }
     finally:
         proc.terminate()
+        stderr_thread.join()
+        stdout_thread.join()
         try:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
-        out, err = proc.communicate()
-        if err:
-            print(f"[tusd stderr] {err.decode()}")
+        # Let threads finish if there's anything buffered
+        time.sleep(0.5)

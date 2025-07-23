@@ -16,7 +16,12 @@ dev = [
     "datamodel-code-generator>=0.31.1",
     "pytest>=8.4.1",
     "ruff>=0.12.3",
+    "tuspy>=1.1.0",
 ]
 
 [tool.ruff]
 line-length = 100
+
+[tool.pytest.ini_options]
+log_cli = true
+log_cli_level = "INFO"
