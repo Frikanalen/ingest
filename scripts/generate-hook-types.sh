@@ -16,6 +16,7 @@ uv run datamodel-codegen \
     --formatters isort ruff-check ruff-format \
     --input "$SCHEMA_JSON" \
     --force-optional \
+    --disable-timestamp \
     --snake-case-field \
     --input-file-type jsonschema \
     --output "$PYTHON_OUT" \
