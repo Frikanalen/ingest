@@ -4,6 +4,7 @@ import shutil
 
 from inotify import constants
 from inotify.adapters import Inotify
+from pathvalidate import sanitize_filename
 
 from .fk_exceptions import SkippableError
 from .interactive import _handle_file, get_metadata
@@ -40,16 +41,26 @@ def run_periodic(watch_dir, move_to_dir):
     return
 
 
-def handle_file(watch_dir, move_to_dir, video_id: str):
-    logging.info("Handling file id: %d - moving from %s to %s", video_id, watch_dir, move_to_dir)
-    from_dir = os.path.join(watch_dir, video_id)
-
+def get_file_info(source_path: str, video_id: str):
+    """
+    Get file information from the source directory.
+    Returns tuple of (file_name, metadata, source_directory)
+    """
+    from_dir = os.path.join(source_path, video_id)
     try:
         [file_name] = os.listdir(from_dir)
     except ValueError:
         raise SkippableError("Found no file in %s" % from_dir)
+
     metadata = get_metadata(os.path.join(from_dir, file_name))
-    to_dir = os.path.join(move_to_dir, video_id)
+    return sanitize_filename(file_name), metadata, from_dir
+
+
+def handle_file(source_path: str, archive_path: str, video_id: str):
+    logging.info("Handling file id: %d - moving from %s to %s", video_id, source_path, archive_path)
+
+    file_name, metadata, from_dir = get_file_info(source_path, video_id)
+    to_dir = os.path.join(archive_path, video_id)
 
     new_filepath = copy_original(from_dir, to_dir, file_name)
     _handle_file(id, new_filepath or video_id, metadata)

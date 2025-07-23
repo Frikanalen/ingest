@@ -1,17 +1,19 @@
-from dataclasses import field, dataclass
+import multiprocessing
+from dataclasses import dataclass
 import os
-import queue
 from pathlib import Path
-from queue import Queue
-from typing import Callable
+from typing import Generator
 
 import pytest
 import subprocess
 
-from werkzeug import Request, Response
+import uvicorn
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3 import Retry
 
+from libraries.hook_server import tusd_hook_server
 from tests.utils.get_free_port import get_free_port
-from tests.utils.mock_hook_server import MockHookServer
 from tests.utils.tusd_process import TusdProcess
 from tests.utils.tusd_command import TusdHttpHookConfig, TusdConfig
 
@@ -50,9 +52,9 @@ def tusd_server(tmp_path, tusd_binary):
 
 
 @pytest.fixture
-def tusd_server_with_hooks(tmp_path, tusd_binary, mock_hook_server):
+def tusd_server_with_hooks(tmp_path, tusd_binary, start_fastapi_server):
     config = TusdConfig(
-        binary_path=tusd_binary, upload_dir=tmp_path, hook_config=TusdHttpHookConfig(url=mock_hook_server.url)
+        binary_path=tusd_binary, upload_dir=tmp_path, hook_config=TusdHttpHookConfig(url=start_fastapi_server.url)
     )
 
     with TusdProcess(config) as process:
@@ -60,7 +62,7 @@ def tusd_server_with_hooks(tmp_path, tusd_binary, mock_hook_server):
             url=process.url,
             upload_dir=tmp_path,
             proc=process.proc,
-            mock_hook_server=mock_hook_server,
+            start_fastapi_server=start_fastapi_server,
         )
 
 
@@ -68,9 +70,6 @@ def tusd_server_with_hooks(tmp_path, tusd_binary, mock_hook_server):
 class MockHookServerFixture:
     url: str
     port: int
-    configure_response: Callable[[Request], Response]
-    clear_configuration: Callable[[], None]
-    recorded_requests: Queue[Request] = field(default_factory=queue.Queue)
 
 
 @dataclass(frozen=True)
@@ -82,21 +81,48 @@ class TusdFixture:
 
 @dataclass(frozen=True)
 class TusdFixtureWithHooks(TusdFixture):
-    mock_hook_server: MockHookServerFixture
+    start_fastapi_server: MockHookServerFixture
 
 
-@pytest.fixture
-def mock_hook_server():
-    server = MockHookServer(port=get_free_port())
-    server.start()
+def run_server(host="127.0.0.1", port=8001, log_level="debug"):
+    print(f"Trying to start server on port {port} with host {host}")
+    uvicorn.run(tusd_hook_server, host=host, port=port, log_level=log_level)
 
+
+def _wait_for_server(url: str, backoff_factor: float = 0.1, total: int = 15):
+    session = requests.Session()
+
+    session.mount(
+        "http://",
+        HTTPAdapter(
+            max_retries=(Retry(status_forcelist=[500, 502, 503, 504], backoff_factor=backoff_factor, total=total))
+        ),
+    )
+    response = session.get(f"{url}/isAlive", timeout=3)
+    response.raise_for_status()
+
+
+@pytest.fixture(scope="session")
+def start_fastapi_server() -> Generator[MockHookServerFixture, None, None]:
+    HOST = "localhost"
+    PORT = get_free_port()
+    URL = f"http://{HOST}:{PORT}"
+
+    proc = multiprocessing.Process(
+        target=run_server,
+        args=(
+            HOST,
+            PORT,
+        ),
+        daemon=True,
+    )
+    proc.start()
     try:
-        yield MockHookServerFixture(
-            url=f"http://localhost:{server.port}",
-            port=server.port,
-            recorded_requests=server.recorded_requests,
-            configure_response=lambda x: server.configure_response("/", x),
-            clear_configuration=server.clear_configuration,
-        )
-    finally:
-        server.stop()
+        _wait_for_server(url=URL)
+    except requests.RequestException as e:
+        proc.terminate()
+        proc.join()
+        raise RuntimeError("FastAPI server failed to start and respond to health check") from e
+    yield MockHookServerFixture(port=PORT, url=URL)
+    proc.terminate()
+    proc.join()
