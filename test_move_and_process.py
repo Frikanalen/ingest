@@ -5,8 +5,8 @@ import tempfile
 import unittest
 
 
-from lib import interactive, measure_loudness
 import runner
+from libraries import interactive, converter
 
 
 class ProcessConvert(unittest.TestCase):

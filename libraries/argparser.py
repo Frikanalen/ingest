@@ -3,9 +3,9 @@ import logging
 import os
 import sys
 
-from lib.fk_exceptions import SkippableError, AppError
-from lib.interactive import update_existing_file
-from lib.config import FK_API, FK_TOKEN, DIR, TO_DIR
+from .config import DIR, TO_DIR, FK_API, FK_TOKEN
+from .fk_exceptions import AppError, SkippableError
+from .interactive import update_existing_file
 from .notify_runner import run_inotify, handle_file
 
 

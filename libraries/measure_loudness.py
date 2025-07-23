@@ -3,7 +3,7 @@ import re
 import subprocess
 import time
 
-from lib.djangoapi import get_videofiles, update_videofile
+from libraries.djangoapi import get_videofiles, update_videofile
 
 
 def measure_loudness(watch_dir, move_to_dir):
