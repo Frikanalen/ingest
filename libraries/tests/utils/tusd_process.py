@@ -10,8 +10,8 @@ from typing import TextIO, List
 
 import requests
 
-from tests.utils.tusd_command import TusdConfig, build_tusd_command
-from tests.utils.tusd_log_parser import parse_tusd_line
+from libraries.tests.utils.tusd_command import TusdConfig, build_tusd_command
+from libraries.tests.utils.tusd_log_parser import parse_tusd_line
 
 
 class TusdProcess:

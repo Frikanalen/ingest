@@ -1,4 +1,6 @@
+import logging
 import multiprocessing
+from contextlib import contextmanager
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -13,9 +15,9 @@ from requests.adapters import HTTPAdapter
 from urllib3 import Retry
 
 from libraries.hook_server import tusd_hook_server
-from tests.utils.get_free_port import get_free_port
-from tests.utils.tusd_process import TusdProcess
-from tests.utils.tusd_command import TusdHttpHookConfig, TusdConfig
+from libraries.tests.utils.get_free_port import get_free_port
+from libraries.tests.utils.tusd_process import TusdProcess
+from libraries.tests.utils.tusd_command import TusdHttpHookConfig, TusdConfig
 
 
 def git_root():
@@ -89,6 +91,20 @@ def run_server(host="127.0.0.1", port=8001, log_level="debug"):
     uvicorn.run(tusd_hook_server, host=host, port=port, log_level=log_level)
 
 
+@contextmanager
+def suppress_urllib3_logging():
+    """
+    We expect to see a lot of urllib3 timeouts in the alive check, so let's suppress it.
+    """
+    logger = logging.getLogger("urllib3.connectionpool")
+    old_level = logger.level
+    logger.setLevel(logging.ERROR)
+    try:
+        yield
+    finally:
+        logger.setLevel(old_level)
+
+
 def _wait_for_server(url: str, backoff_factor: float = 0.1, total: int = 15):
     session = requests.Session()
 
@@ -98,8 +114,9 @@ def _wait_for_server(url: str, backoff_factor: float = 0.1, total: int = 15):
             max_retries=(Retry(status_forcelist=[500, 502, 503, 504], backoff_factor=backoff_factor, total=total))
         ),
     )
-    response = session.get(f"{url}/isAlive", timeout=3)
-    response.raise_for_status()
+    with suppress_urllib3_logging():
+        response = session.get(f"{url}/isAlive", timeout=3)
+        response.raise_for_status()
 
 
 @pytest.fixture(scope="session")

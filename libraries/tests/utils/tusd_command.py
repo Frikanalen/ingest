@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List
 
-from tests.utils.get_free_port import get_free_port
+from libraries.tests.utils.get_free_port import get_free_port
 
 
 @dataclass(frozen=True)
