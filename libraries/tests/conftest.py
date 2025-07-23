@@ -20,25 +20,24 @@ from libraries.tests.utils.tusd_process import TusdProcess
 from libraries.tests.utils.tusd_command import TusdHttpHookConfig, TusdConfig
 
 
-def git_root():
-    return subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
-
-
 @pytest.fixture(scope="session")
 def tusd_binary() -> str:
-    root = git_root()
-    bin_path = os.path.join(root, "bin")
-    tusd_path = os.path.join(bin_path, "tusd")
+    git_root = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
+    tusd_path = git_root / "bin" / "tusd"
 
-    if not os.path.exists(tusd_path):
-        os.makedirs(bin_path, exist_ok=True)
-        subprocess.run(
-            ["go", "install", "github.com/tus/tusd/v2/cmd/tusd@latest"],
-            check=True,
-            env={**os.environ, "GOBIN": bin_path},
-        )
+    if not tusd_path.exists():
+        logging.warning("tusd binary not found, installing it")
+        try:
+            subprocess.run(
+                ["go", "install", "github.com/tus/tusd/v2/cmd/tusd@latest"],
+                check=True,
+                env={**os.environ, "GOBIN": str(git_root / "bin")},
+            )
+        except FileNotFoundError:
+            logging.error("go not found, please install it and try again")
+            raise EnvironmentError('"go" not found in path, do you need to install golang?') from None
 
-    return tusd_path
+    return str(tusd_path)
 
 
 @pytest.fixture
