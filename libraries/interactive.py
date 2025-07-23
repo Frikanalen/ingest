@@ -29,7 +29,15 @@ def update_existing_file(id, to_dir, force):
         raise AppError("Found no file for %d, last checked in %s" % (id, path))
     filepath = os.path.join(path, fn)
     metadata = get_metadata(filepath)
-    _handle_file(id, filepath, metadata, reprocess=True)
+    update_video(
+        id,
+        {
+            "duration": metadata["pretty_duration"],
+            "uploadedTime": datetime.utcnow().isoformat(),
+        },
+    )
+    generate_videos(id, filepath, metadata, reprocess=True)
+    update_video(id, {"properImport": True})
 
 
 def get_metadata(filepath):
@@ -59,18 +67,6 @@ def pretty_duration(duration):
     min, sec = divmod(duration, 60)
     hours, _ = divmod(min, 60)
     return "{:d}:{:02d}:{:02f}".format(int(hours), int(min), sec)
-
-
-def _handle_file(id, filepath, metadata, reprocess=False):
-    update_video(
-        id,
-        {
-            "duration": metadata["pretty_duration"],
-            "uploadedTime": datetime.utcnow().isoformat(),
-        },
-    )
-    generate_videos(id, filepath, metadata, reprocess=reprocess)
-    update_video(id, {"properImport": True})
 
 
 def ffprobe_file(filepath):

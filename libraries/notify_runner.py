@@ -1,13 +1,15 @@
 import logging
 import os
 import shutil
+from datetime import datetime
 
 from inotify import constants
 from inotify.adapters import Inotify
 from pathvalidate import sanitize_filename
 
+from .djangoapi import update_video
 from .fk_exceptions import SkippableError
-from .interactive import _handle_file, get_metadata
+from .interactive import get_metadata, generate_videos
 from .measure_loudness import measure_loudness
 
 
@@ -63,7 +65,16 @@ def handle_file(source_path: str, archive_path: str, video_id: str):
     to_dir = os.path.join(archive_path, video_id)
 
     new_filepath = copy_original(from_dir, to_dir, file_name)
-    _handle_file(id, new_filepath or video_id, metadata)
+    filepath = new_filepath or video_id
+    update_video(
+        id,
+        {
+            "duration": metadata["pretty_duration"],
+            "uploadedTime": datetime.utcnow().isoformat(),
+        },
+    )
+    generate_videos(id, filepath, metadata, reprocess=False)
+    update_video(id, {"properImport": True})
     shutil.rmtree(from_dir)
 
 
