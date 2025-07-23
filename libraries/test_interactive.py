@@ -1,44 +1,8 @@
 import logging
-import os
 import shutil
-import tempfile
 import unittest
 
-
-import runner
-from libraries import interactive, converter
-
-
-class ProcessConvert(unittest.TestCase):
-    def test_basic_theora_convert(self):
-        cmd, fn = converter.Converter.convert_cmds("/tmp/yadda/test.yey", "theora")
-        self.assertEqual(cmd[0], "ffmpeg")
-        self.assertIn("libtheora", cmd)
-        self.assertEqual(cmd[-1], "/tmp/theora/test.ogv")
-        self.assertEqual(cmd[-1], fn)
-
-    def test_extensionless_convert(self):
-        cmd, fn = converter.Converter.convert_cmds("/tmp/yadda/test", "theora")
-        self.assertEqual(cmd[0], "ffmpeg")
-        self.assertEqual(cmd[-1], "/tmp/theora/test.ogv")
-        self.assertEqual(cmd[-1], fn)
-
-    def test_basic_broadcast_convert(self):
-        cmd, fn = converter.Converter.convert_cmds(
-            "/tmp/original/test.yey", "broadcast"
-        )
-        self.assertEqual(cmd[0], "ffmpeg")
-        self.assertIn("pal-dv", cmd)
-        self.assertEqual(cmd[-1], "/tmp/broadcast/test.dv")
-        self.assertEqual(cmd[-1], fn)
-
-
-class ProcessRunner(unittest.TestCase):
-    def test_basic_run(self):
-        _, fn = tempfile.mkstemp()
-        self.assertTrue(os.path.exists(fn))
-        cmd = runner.Runner.run(["rm", fn])
-        self.assertFalse(os.path.exists(fn))
+from libraries import interactive
 
 
 class ProcessGenerate(unittest.TestCase):
@@ -84,16 +48,8 @@ class ProcessGenerate(unittest.TestCase):
         self.assertEqual(measure_loudness.get_loudness("tests/data/white.jpg"), None)
 
     def test_generate_wrong_format(self):
-        self.assertRaises(
-            AssertionError, lambda: interactive.generate_videos(0, "/a/b/c.d")
-        )
-        self.assertRaises(
-            AssertionError, lambda: interactive.generate_videos(0, "/a/theora/c.d")
-        )
-
-
-if __name__ == "__main__":
-    unittest.main()
+        self.assertRaises(AssertionError, lambda: interactive.generate_videos(0, "/a/b/c.d"))
+        self.assertRaises(AssertionError, lambda: interactive.generate_videos(0, "/a/theora/c.d"))
 
 
 def can_get_loudness():

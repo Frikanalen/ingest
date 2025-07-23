@@ -280,3 +280,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# tusd binary should be built locally
+bin/
