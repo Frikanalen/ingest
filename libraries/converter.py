@@ -4,10 +4,7 @@ import os
 class Converter(object):
     CONVERT = {
         "theora": {
-            "ffmpeg": (
-                "-vcodec libtheora -acodec libvorbis "
-                "-qscale:v 7 -qscale:a 2 -vf scale=720:-1"
-            ),
+            "ffmpeg": ("-vcodec libtheora -acodec libvorbis -qscale:v 7 -qscale:a 2 -vf scale=720:-1"),
             "ext": "ogv",
         },
         "broadcast": {
@@ -24,9 +21,7 @@ class Converter(object):
     def new_filepath(cls, path, format):
         c = cls.CONVERT[format]
         fn = os.path.splitext(os.path.basename(path))[0]
-        return os.path.join(
-            os.path.dirname(os.path.dirname(path)), format, "%s.%s" % (fn, c["ext"])
-        )
+        return os.path.join(os.path.dirname(os.path.dirname(path)), format, "%s.%s" % (fn, c["ext"]))
 
     @classmethod
     def convert_cmds(cls, filepath, format, metadata=None):

@@ -29,9 +29,7 @@ class ProcessGenerate(unittest.TestCase):
             in_fn, out_fns = t
             cmds = []
 
-            interactive.generate_videos(
-                0, in_fn, runner_run=lambda c, **__: cmds.append(c), register=nop
-            )
+            interactive.generate_videos(0, in_fn, runner_run=lambda c, **__: cmds.append(c), register=nop)
 
             self.assertEqual(out_fns, [c[-1] for c in cmds])
 

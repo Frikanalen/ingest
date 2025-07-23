@@ -21,11 +21,7 @@ class ApiClient:
         self.no_api = no_api
 
     def _log_no_api(self, action, entity, entity_id, data):
-        logging.debug(
-            self.NO_API_LOG_FORMAT.format(
-                action=action, entity=entity, id=entity_id, data=data
-            )
-        )
+        logging.debug(self.NO_API_LOG_FORMAT.format(action=action, entity=entity, id=entity_id, data=data))
 
     def make_request(self, method, path, **kwargs):
         if self.no_api:
@@ -35,9 +31,7 @@ class ApiClient:
         headers = self.BASE_HEADERS.copy()
         headers["Authorization"] = headers["Authorization"].format(token=self.token)
 
-        response = session.request(
-            method, f"{self.base_url}{path}", headers=headers, **kwargs
-        )
+        response = session.request(method, f"{self.base_url}{path}", headers=headers, **kwargs)
         response.raise_for_status()
         return response
 

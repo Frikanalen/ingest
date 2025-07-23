@@ -37,9 +37,7 @@ def _create_common_arguments():
 
 class ArgumentParser:
     def __init__(self):
-        self.parser = argparse.ArgumentParser(
-            description="Moving frikanalen videos and processing media files"
-        )
+        self.parser = argparse.ArgumentParser(description="Moving frikanalen videos and processing media files")
         self.common_args = _create_common_arguments()
         self.subparsers = self.parser.add_subparsers()
 
@@ -111,11 +109,7 @@ def run_cmd(args):
 
 def run(watch_dir, move_to_dir):
     for folder in os.listdir(watch_dir):
-        if (
-            folder.startswith(".")
-            or not folder.isdigit()
-            or not os.path.isdir(os.path.join(watch_dir, folder))
-        ):
+        if folder.startswith(".") or not folder.isdigit() or not os.path.isdir(os.path.join(watch_dir, folder)):
             continue
         try:
             handle_file(watch_dir, move_to_dir, int(folder))
