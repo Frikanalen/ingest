@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.fk_exceptions import SkippableError
+from app.util.exceptions import SkippableError
 
 
 def get_single_file_from_directory(from_dir: Path) -> Path:

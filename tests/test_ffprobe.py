@@ -3,7 +3,7 @@ import pytest
 from app.ffprobe import do_probe
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_do_probe(color_bars_video):
     data = await do_probe(color_bars_video)
     assert data.format.duration == "1.000000"

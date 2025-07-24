@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app.fk_exceptions import SkippableError
+from app.util.exceptions import SkippableError
 from app.util.path_utils import get_single_file_from_directory
 
 

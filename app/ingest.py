@@ -7,7 +7,7 @@ from app.django_api.service import DjangoApiService
 from app.ffprobe import do_probe
 from app.tus_hook.hook_server import build_client
 
-from .interactive import generate_videos
+from .generate_assets import make_secondaries
 from .logging.video_id_filter import VideoIdFilter
 from .util.file_name_utils import original_file_location
 
@@ -28,7 +28,6 @@ async def ingest(video_id: str, original_file: Path):
     original_file_destination.parent.mkdir(exist_ok=True)
 
     await django_api.set_video_uploaded_time(video_id, datetime.now())
-
     metadata = await do_probe(original_file)
     logger.info("Got metadata: %s", metadata)
 
@@ -36,6 +35,5 @@ async def ingest(video_id: str, original_file: Path):
     shutil.move(original_file, original_file_destination)
 
     await django_api.set_video_duration(video_id, metadata["format"]["duration"])
-
-    await generate_videos(video_id, original_file_destination)
+    await make_secondaries(video_id, original_file_destination)
     await django_api.set_video_proper_import(video_id, True)
