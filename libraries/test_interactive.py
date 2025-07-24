@@ -6,7 +6,8 @@ from typing import List
 from unittest.mock import AsyncMock
 import pytest
 
-from libraries import interactive, measure_loudness
+import libraries.loudness.get_loudness
+from libraries import interactive
 
 
 class MockRunner:
@@ -50,11 +51,11 @@ def test_get_loudness():
 
     # sine.wav was generated using sox -b 16 -n sine.wav synth 3 sine 300-3300
     # white.png was generated using convert xc:white white.png
-    assert measure_loudness.get_loudness("tests/data/sine.wav") == {
+    assert libraries.loudness.get_loudness.get_loudness("tests/data/sine.wav") == {
         "integrated_lufs": -2.2,
         "truepeak_lufs": 0.54,
     }
-    assert measure_loudness.get_loudness("tests/data/white.jpg") is None
+    assert libraries.loudness.get_loudness.get_loudness("tests/data/white.jpg") is None
 
 
 @pytest.mark.anyio

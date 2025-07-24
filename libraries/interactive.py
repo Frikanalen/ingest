@@ -11,7 +11,7 @@ from frikanalen_django_api_client.models import VideoFile, VideoFileRequest
 from .converter import Converter
 from video_formats import VF_FORMATS
 from .fk_exceptions import AppError
-from .measure_loudness import get_loudness
+from .loudness.get_loudness import get_loudness
 from runner import Runner
 from libraries.django_api.service import DjangoApiService
 

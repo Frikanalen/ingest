@@ -2,7 +2,7 @@
 # encoding: utf-8
 import logging
 
-from libraries.argparser import ArgumentParser
+from libraries.manual_run import ArgumentParser
 
 logging.basicConfig(level=logging.DEBUG)
 

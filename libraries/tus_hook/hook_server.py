@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from frikanalen_django_api_client import AuthenticatedClient
 
 from libraries.config import config
-from libraries.hookschema import HookRequest
+from libraries.tus_hook.hookschema import HookRequest
 
 
 @dataclass

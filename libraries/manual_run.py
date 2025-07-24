@@ -8,7 +8,7 @@ from .notify_runner import handle_file
 from .path_utils import get_single_file_from_directory
 
 
-DROPFOLDER_VIDEO_DIR_REGEXP = r"^\d+$"
+UPLOAD_DROP_DIR_REGEXP = r"^\d+$"
 
 
 def is_valid_dropbox_dir(dirname: Path) -> bool:
@@ -16,7 +16,7 @@ def is_valid_dropbox_dir(dirname: Path) -> bool:
         logging.warning("Skipping %s because it is not a directory", dirname)
         return False
 
-    if not re.match(DROPFOLDER_VIDEO_DIR_REGEXP, dirname.name):
+    if not re.match(UPLOAD_DROP_DIR_REGEXP, dirname.name):
         logging.warning("Skipping %s because it is hidden/not numeric", dirname)
         return False
 

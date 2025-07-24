@@ -2,10 +2,10 @@ import runner
 
 
 def test_basic_run(tmp_path):
-    fn = tmp_path / "testfile"
-    fn.write_text("dummy content")
-    assert fn.exists()
+    test_path = tmp_path / "testfile"
+    test_path.touch()
+    assert test_path.exists()
 
-    runner.Runner.run(f"rm {fn}")
+    runner.Runner.run(f"rm {test_path}")
 
-    assert not fn.exists()
+    assert not test_path.exists()

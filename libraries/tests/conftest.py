@@ -14,7 +14,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
 
-from libraries.hook_server import tusd_hook_server
+from libraries.tus_hook.hook_server import tusd_hook_server
 from libraries.tests.utils.get_free_port import get_free_port
 from libraries.tests.utils.tusd_process import TusdProcess
 from libraries.tests.utils.tusd_command import TusdHttpHookConfig, TusdConfig

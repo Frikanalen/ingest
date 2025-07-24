@@ -2,7 +2,7 @@ import logging
 import subprocess
 
 
-class Runner(object):
+class Runner:
     @classmethod
     def run(cls, command: str):
         logging.info("Running: %s", command)

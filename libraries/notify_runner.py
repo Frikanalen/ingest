@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 from libraries.django_api.service import DjangoApiService
-from .hook_server import build_client
+from libraries.tus_hook.hook_server import build_client
 
 
 django_api = DjangoApiService(build_client())

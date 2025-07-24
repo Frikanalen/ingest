@@ -7,8 +7,8 @@ from frikanalen_django_api_client.api.videofiles import videofiles_list, videofi
 from frikanalen_django_api_client.api.videos import videos_partial_update, videos_list
 from frikanalen_django_api_client.models import VideoFile, VideoFileRequest, PatchedVideoRequest
 from libraries.django_api.pprint_object_list import pprint_object_list
-from libraries.hook_server import get_client_from_app_state, build_client
-from libraries.loudness_measurement import LoudnessMeasurement
+from libraries.tus_hook.hook_server import get_client_from_app_state, build_client
+from libraries.loudness.loudness_measurement import LoudnessMeasurement
 
 
 class DjangoApiService:
@@ -58,7 +58,7 @@ class DjangoApiService:
 
 if __name__ == "__main__":
     import asyncio
-    from libraries.hook_server import get_client_from_app_state
+    from libraries.tus_hook.hook_server import get_client_from_app_state
 
     async def main():
         service = DjangoApiService(build_client())
