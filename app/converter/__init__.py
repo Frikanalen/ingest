@@ -10,7 +10,7 @@ class ProfileMetadata(BaseModel):
 
 
 class Converter:
-    DESIRED_FORMATS = ["large_thumb"]
+    DESIRED_FORMATS = ("large_thumb",)
     env = Environment(loader=PackageLoader("ingest"), autoescape=select_autoescape())
 
     @staticmethod

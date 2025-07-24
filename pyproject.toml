@@ -28,6 +28,8 @@ dev = [
 
 [tool.ruff]
 line-length = 120
+# generated code files
+exclude = ["app/tus_hook/hook_schema.py", "app/ffprobe/ffprobe_schema.py"]
 [tool.ruff.lint]
 extend-select = [
     "I",     # isort: import sorting

@@ -14,8 +14,10 @@ from app.util.pprint_object_list import pprint_object_list
 class DjangoApiService:
     client: AuthenticatedClient
 
-    def __init__(self, state: AuthenticatedClient = Depends(get_client_from_app_state)):
-        self.client = state
+    def __init__(self, client: AuthenticatedClient = None):
+        if client is None:
+            client = Depends(get_client_from_app_state)
+        self.client = client
 
     async def set_video_duration(self, video_id: str, duration: str):
         return videos_partial_update.asyncio(video_id, client=self.client, body=PatchedVideoRequest(duration=duration))
