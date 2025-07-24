@@ -5,7 +5,7 @@ from typing import TypedDict
 
 
 from .notify_runner import handle_file
-from .path_utils import get_single_file_from_directory
+from libraries.util.path_utils import get_single_file_from_directory
 
 
 UPLOAD_DROP_DIR_REGEXP = r"^\d+$"

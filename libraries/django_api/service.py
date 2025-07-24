@@ -6,7 +6,7 @@ from frikanalen_django_api_client import AuthenticatedClient
 from frikanalen_django_api_client.api.videofiles import videofiles_list, videofiles_partial_update, videofiles_create
 from frikanalen_django_api_client.api.videos import videos_partial_update, videos_list
 from frikanalen_django_api_client.models import VideoFile, VideoFileRequest, PatchedVideoRequest
-from libraries.django_api.pprint_object_list import pprint_object_list
+from libraries.util.pprint_object_list import pprint_object_list
 from libraries.tus_hook.hook_server import get_client_from_app_state, build_client
 from libraries.loudness.loudness_measurement import LoudnessMeasurement
 

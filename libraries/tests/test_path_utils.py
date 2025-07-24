@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from libraries.fk_exceptions import SkippableError
-from libraries.path_utils import get_single_file_from_directory
+from libraries.util.path_utils import get_single_file_from_directory
 
 
 def test_single_file_in_directory(tmp_path):
