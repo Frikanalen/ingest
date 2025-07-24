@@ -1,6 +1,7 @@
 import logging
 import multiprocessing
 import os
+import shlex
 import subprocess
 import tempfile
 from collections.abc import Generator
@@ -154,7 +155,7 @@ def start_fastapi_server() -> Generator[MockHookServerFixture, None, None]:
 
 
 @pytest.fixture(scope="session")
-def color_bars_video():
+def color_bars_video() -> Generator[Path, None, None]:
     """
     Generate a 1-second color bars video using ffmpeg, once for the whole test session.
     Returns the path to the generated video file.
@@ -163,28 +164,13 @@ def color_bars_video():
         video_path = tmp.name
 
     try:
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-f",
-                "lavfi",
-                "-i",
-                "smptebars=size=1280x720:rate=25",
-                "-t",
-                "1",
-                "-nostats",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-c:v",
-                "libx264",
-                "-pix_fmt",
-                "yuv420p",
-                "-y",  # Overwrite output file without asking
-                video_path,
-            ],
-            check=True,
+        cmd = shlex.split(
+            "ffmpeg -f lavfi -i color=size=1280x720:rate=25 "
+            "-t 1 -y -nostats -hide_banner -loglevel error "
+            "-c:v libx264 -pix_fmt yuv420p"
         )
+
+        subprocess.run([*cmd, video_path], check=True)
 
         yield Path(video_path)
     finally:

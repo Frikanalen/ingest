@@ -9,15 +9,6 @@ from app.ffprobe import do_probe
 from app.make_secondaries import make_secondaries
 
 
-class MockRunner:
-    def __init__(self):
-        self.mocked_commands: list[str] = []
-
-    def run(self, cmd: str, **kwargs):
-        print(f"Running: {cmd}")
-        self.mocked_commands.append(cmd)
-
-
 @pytest.fixture(autouse=True)
 def set_log_level():
     logging.getLogger("").setLevel(logging.WARNING)
@@ -25,21 +16,17 @@ def set_log_level():
 
 @pytest.mark.asyncio
 async def test_generate(color_bars_video):
-    tests = (
-        (color_bars_video, f"/tmp/large_thumb/{color_bars_video.stem}.jpg"),
-        (color_bars_video, f"/tmp/large_thumb/{color_bars_video.stem}.jpg"),
-    )
+    expected_command_line_substring = f"/tmp/large_thumb/{color_bars_video.stem}.jpg"
 
-    for input_filename, expected_command_line_substring in tests:
-        runner = AsyncMock()
-        metadata = await do_probe(color_bars_video)
+    runner = AsyncMock()
+    metadata = await do_probe(color_bars_video)
 
-        mock_django_api = AsyncMock()
+    mock_django_api = AsyncMock()
 
-        await make_secondaries(0, input_filename, runner=runner, django_api=mock_django_api, metadata=metadata)
+    await make_secondaries(0, color_bars_video, runner=runner, django_api=mock_django_api, metadata=metadata)
 
-        runner.run.assert_called_once()
-        assert expected_command_line_substring in runner.run.call_args[0][0]
+    runner.run.assert_called_once()
+    assert expected_command_line_substring in runner.run.call_args[0][0]
 
 
 def test_get_loudness():
