@@ -2,6 +2,7 @@ import logging
 import multiprocessing
 import os
 import subprocess
+import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -64,6 +65,11 @@ def tusd_server_with_hooks(tmp_path, tusd_binary, start_fastapi_server):
             proc=process.proc,
             start_fastapi_server=start_fastapi_server,
         )
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
 
 
 @dataclass(frozen=True)
@@ -141,3 +147,42 @@ def start_fastapi_server() -> Generator[MockHookServerFixture, None, None]:
     yield MockHookServerFixture(port=PORT, url=URL)
     proc.terminate()
     proc.join()
+
+
+@pytest.fixture(scope="session")
+def color_bars_video():
+    """
+    Generate a 1-second color bars video using ffmpeg, once for the whole test session.
+    Returns the path to the generated video file.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+        video_path = tmp.name
+
+    try:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-f",
+                "lavfi",
+                "-i",
+                "smptebars=size=1280x720:rate=25",
+                "-t",
+                "1",
+                "-nostats",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-y",  # Overwrite output file without asking
+                video_path,
+            ],
+            check=True,
+        )
+
+        yield Path(video_path)
+    finally:
+        if os.path.exists(video_path):
+            os.remove(video_path)
