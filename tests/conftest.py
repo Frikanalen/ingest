@@ -22,7 +22,7 @@ from tests.utils.tusd_process import TusdProcess
 
 @pytest.fixture(scope="session")
 def tusd_binary() -> str:
-    git_root = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
+    git_root = get_git_root()
     tusd_path = git_root / "bin" / "tusd"
 
     if not tusd_path.exists():
@@ -38,6 +38,10 @@ def tusd_binary() -> str:
             raise OSError('"go" not found in path, do you need to install golang?') from None
 
     return str(tusd_path)
+
+
+def get_git_root():
+    return Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
 
 
 @pytest.fixture
