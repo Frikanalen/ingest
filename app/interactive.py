@@ -7,10 +7,11 @@ from frikanalen_django_api_client.models import VideoFile, VideoFileRequest
 
 from app.django_api.service import DjangoApiService
 from app.ffprobe import do_probe
+from ffmpeg.command_factory import FfmpegCommandFactory
 from runner import Runner
 from video_formats import VF_FORMATS
 
-from .converter import Converter
+from .ffprobe_schema import FfprobeOutput
 from .fk_exceptions import AppError
 from .loudness.get_loudness import get_loudness
 
@@ -80,16 +81,16 @@ async def register_video_files(video_id: str, video_path: Path, django_api=None)
 async def generate_videos(
     video_id,
     filepath: Path,
+    metadata: FfprobeOutput,
     runner=None,
-    converter=None,
+    ffmpeg_command_factory=None,
     django_api=None,
-    metadata=None,
     register=None,
 ):
     if runner is None:
         runner = Runner()
-    if converter is None:
-        converter = Converter()
+    if ffmpeg_command_factory is None:
+        ffmpeg_command_factory = FfmpegCommandFactory()
     if django_api is None:
         django_api = DjangoApiService()
     if register is None:
@@ -97,12 +98,12 @@ async def generate_videos(
 
     logging.info("Processing: %s", filepath)
     base_path = filepath.parent.parent
-    for format_name in converter.DESIRED_FORMATS:
-        cmd_line, target_file_name = converter.convert_cmds(filepath, format_name, metadata)
-        logging.info("Running: %s", cmd_line)
-        runner.run(cmd_line)
-        await django_api.create_video_file(
-            video_file=VideoFileRequest(filename=str(target_file_name), format_=format_name, video_id=video_id)
-        )
-
+    for format_name in ffmpeg_command_factory.DESIRED_FORMATS:
+        cmd_line, target_file_name = ffmpeg_command_factory.convert_cmds(filepath, format_name, metadata)
+        logging.info("Producing: %s", target_file_name)
+        await runner.run(cmd_line)
+        video_file = VideoFileRequest(filename=str(target_file_name), format_=format_name, video_id=video_id)
+        await django_api.create_video_file(video_file=video_file)
         await register(video_id, base_path)
+
+    logging.info("Finished processing: %s", video_id)

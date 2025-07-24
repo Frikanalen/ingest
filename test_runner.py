@@ -1,11 +1,14 @@
+import pytest
+
 import runner
 
 
-def test_basic_run(tmp_path):
+@pytest.mark.asyncio
+async def test_basic_run(tmp_path):
     test_path = tmp_path / "testfile"
     test_path.touch()
     assert test_path.exists()
 
-    runner.Runner.run(f"rm {test_path}")
+    await runner.Runner().run(["rm", str(test_path)])
 
     assert not test_path.exists()

@@ -1,17 +1,17 @@
+import asyncio
 import logging
-import subprocess
 
 
 class Runner:
     @classmethod
-    def run(cls, command: str):
+    async def run(cls, command: list[str]):
         logging.info("Running: %s", command)
 
-        output = ""
-        try:
-            output = subprocess.check_output(command, stderr=subprocess.STDOUT, shell=True)
-        except subprocess.CalledProcessError as e:
-            output = e.output
-            raise e
-        finally:
-            logging.debug(output)
+        proc = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+
+        assert proc.returncode == 0, f"Command {command} failed, stderr: {stderr.decode()}"
