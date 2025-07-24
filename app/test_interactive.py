@@ -2,7 +2,6 @@ import logging
 import shutil
 from pathlib import Path
 from subprocess import CalledProcessError
-from typing import List
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,7 +12,7 @@ from app import interactive
 
 class MockRunner:
     def __init__(self):
-        self.mocked_commands: List[str] = []
+        self.mocked_commands: list[str] = []
 
     def run(self, cmd: str, **kwargs):
         print(f"Running: {cmd}")

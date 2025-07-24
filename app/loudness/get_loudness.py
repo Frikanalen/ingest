@@ -14,7 +14,7 @@ def get_loudness(filepath) -> LoudnessMeasurement | None:
 
         return LoudnessMeasurement(
             integrated_lufs=float(integrated_lufs),
-            truepeak_lufs=None if "-inf" == truepeak_lufs else float(truepeak_lufs),
+            truepeak_lufs=None if truepeak_lufs == "-inf" else float(truepeak_lufs),
         )
 
     except (IndexError, ValueError, FileNotFoundError):

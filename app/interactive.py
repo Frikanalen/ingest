@@ -41,7 +41,7 @@ async def update_existing_file(video_id: str, archive_path: Path):
 def pretty_duration(duration):
     min, sec = divmod(duration, 60)
     hours, _ = divmod(min, 60)
-    return "{:d}:{:02d}:{:02f}".format(int(hours), int(min), sec)
+    return f"{int(hours):d}:{int(min):02d}:{sec:02f}"
 
 
 async def register_video_files(video_id: str, video_path: Path, django_api=DjangoApiService()):

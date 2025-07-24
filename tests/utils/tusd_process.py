@@ -6,7 +6,7 @@ import time
 from dataclasses import field
 from logging import Logger
 from pathlib import Path
-from typing import List, TextIO
+from typing import TextIO
 
 import requests
 
@@ -31,7 +31,7 @@ class TusdProcess:
     stdout_thread: threading.Thread | None
     stderr_thread: threading.Thread | None
     hooks_url: str = None
-    _extra_args: List[str] = field(default_factory=list)
+    _extra_args: list[str] = field(default_factory=list)
 
     def __init__(self, config: TusdConfig = None):
         self.config = config

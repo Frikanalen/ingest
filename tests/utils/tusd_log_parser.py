@@ -14,7 +14,10 @@ import re
 import shlex
 from typing import TypedDict
 
-TusdMessageLog = TypedDict("TusdMessageLog", {"msg": str, "extra": dict | None})
+
+class TusdMessageLog(TypedDict):
+    msg: str
+    extra: dict | None
 
 
 # Matches leading timestamp, e.g. "2025/07/23 14:34:43.763302 "

@@ -9,53 +9,53 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 
 class Header(RootModel[Optional[dict[str, list[str]]]]):
-    root: Optional[dict[str, list[str]]] = None
+    root: dict[str, list[str]] | None = None
 
 
 class MetaData(RootModel[Optional[dict[str, str]]]):
-    root: Optional[dict[str, str]] = None
+    root: dict[str, str] | None = None
 
 
 class FileInfo(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    id: Optional[str] = Field(None, alias="ID")
-    size: Optional[int] = Field(None, alias="Size")
-    size_is_deferred: Optional[bool] = Field(None, alias="SizeIsDeferred")
-    offset: Optional[int] = Field(None, alias="Offset")
-    meta_data: Optional[MetaData] = Field(None, alias="MetaData")
-    is_partial: Optional[bool] = Field(None, alias="IsPartial")
-    is_final: Optional[bool] = Field(None, alias="IsFinal")
-    partial_uploads: Optional[list[str]] = Field(None, alias="PartialUploads")
-    storage: Optional[dict[str, str]] = Field(None, alias="Storage")
+    id: str | None = Field(None, alias="ID")
+    size: int | None = Field(None, alias="Size")
+    size_is_deferred: bool | None = Field(None, alias="SizeIsDeferred")
+    offset: int | None = Field(None, alias="Offset")
+    meta_data: MetaData | None = Field(None, alias="MetaData")
+    is_partial: bool | None = Field(None, alias="IsPartial")
+    is_final: bool | None = Field(None, alias="IsFinal")
+    partial_uploads: list[str] | None = Field(None, alias="PartialUploads")
+    storage: dict[str, str] | None = Field(None, alias="Storage")
 
 
 class HTTPRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    method: Optional[str] = Field(None, alias="Method")
-    uri: Optional[str] = Field(None, alias="URI")
-    remote_addr: Optional[str] = Field(None, alias="RemoteAddr")
-    header: Optional[Header] = Field(None, alias="Header")
+    method: str | None = Field(None, alias="Method")
+    uri: str | None = Field(None, alias="URI")
+    remote_addr: str | None = Field(None, alias="RemoteAddr")
+    header: Header | None = Field(None, alias="Header")
 
 
 class HookEvent(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    upload: Optional[FileInfo] = Field(None, alias="Upload")
-    http_request: Optional[HTTPRequest] = Field(None, alias="HTTPRequest")
+    upload: FileInfo | None = Field(None, alias="Upload")
+    http_request: HTTPRequest | None = Field(None, alias="HTTPRequest")
 
 
 class HookRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    type: Optional[str] = Field(None, alias="Type")
-    event: Optional[HookEvent] = Field(None, alias="Event")
+    type: str | None = Field(None, alias="Type")
+    event: HookEvent | None = Field(None, alias="Event")
 
 
 class Model(RootModel[Optional[HookRequest]]):
-    root: Optional[HookRequest] = None
+    root: HookRequest | None = None

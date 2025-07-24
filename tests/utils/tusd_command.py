@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
 
 from tests.utils.get_free_port import get_free_port
 
@@ -8,7 +7,7 @@ from tests.utils.get_free_port import get_free_port
 @dataclass(frozen=True)
 class TusdHttpHookConfig:
     url: str
-    enabled_hooks: List[str] | None = None
+    enabled_hooks: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -19,7 +18,7 @@ class TusdConfig:
     port: int = field(default_factory=get_free_port)
 
 
-def _get_hook_config(hook_config: TusdHttpHookConfig) -> List[str]:
+def _get_hook_config(hook_config: TusdHttpHookConfig) -> list[str]:
     cmd = [
         "-hooks-http",
         hook_config.url,

@@ -25,7 +25,9 @@ def is_valid_dropbox_dir(dirname: Path) -> bool:
     return True
 
 
-PendingIngestJob = TypedDict("PendingIngestJob", {"video_file": Path, "video_id": str})
+class PendingIngestJob(TypedDict):
+    video_file: Path
+    video_id: str
 
 
 def run(input_base_path: Path, archive_path):

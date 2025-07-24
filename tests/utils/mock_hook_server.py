@@ -1,5 +1,5 @@
+from collections.abc import Callable
 from queue import Queue
-from typing import Callable, Dict
 
 from pytest_httpserver import HTTPServer
 from werkzeug.wrappers import Request, Response
@@ -11,7 +11,7 @@ class MockHookServer:
     def __init__(self, port: int = None):
         self.recorded_requests = Queue()
         self.server = HTTPServer(port=port)
-        self.response_handlers: Dict[str, Callable] = {}
+        self.response_handlers: dict[str, Callable] = {}
 
     def configure_response(
         self,

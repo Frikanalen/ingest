@@ -2,10 +2,10 @@ import logging
 import multiprocessing
 import os
 import subprocess
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generator
 
 import pytest
 import requests
@@ -34,7 +34,7 @@ def tusd_binary() -> str:
             )
         except FileNotFoundError:
             logging.error("go not found, please install it and try again")
-            raise EnvironmentError('"go" not found in path, do you need to install golang?') from None
+            raise OSError('"go" not found in path, do you need to install golang?') from None
 
     return str(tusd_path)
 

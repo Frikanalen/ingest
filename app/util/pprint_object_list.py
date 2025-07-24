@@ -1,10 +1,10 @@
-from typing import Any, List, Union
+from typing import Any
 
 from rich.console import Console
 from rich.table import Table
 
 
-def _deep_get(obj: Union[dict, Any], attr: str) -> Any:
+def _deep_get(obj: dict | Any, attr: str) -> Any:
     parts = attr.split(".")
     for part in parts:
         if isinstance(obj, dict):
@@ -16,7 +16,7 @@ def _deep_get(obj: Union[dict, Any], attr: str) -> Any:
     return obj
 
 
-def pprint_object_list(data_list: List[Any], fields: List[str], title: str = "Data"):
+def pprint_object_list(data_list: list[Any], fields: list[str], title: str = "Data"):
     table = Table(title=title, expand=True)
     for field in fields:
         table.add_column(field.capitalize())

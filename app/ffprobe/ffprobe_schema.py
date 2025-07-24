@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-from typing import Optional, Union
-
 from pydantic import BaseModel, ConfigDict
 
 
@@ -42,12 +40,12 @@ class Format(BaseModel):
     nb_programs: int
     format_name: str
     probe_score: int
-    format_long_name: Optional[str] = None
-    start_time: Optional[str] = None
-    duration: Optional[str] = None
-    size: Optional[str] = None
-    bit_rate: Optional[str] = None
-    tags: Optional[dict[str, str]] = None
+    format_long_name: str | None = None
+    start_time: str | None = None
+    duration: str | None = None
+    size: str | None = None
+    bit_rate: str | None = None
+    tags: dict[str, str] | None = None
 
 
 class Chapter(BaseModel):
@@ -57,27 +55,27 @@ class Chapter(BaseModel):
     start_time: str
     end: int
     end_time: str
-    tags: Optional[dict[str, str]] = None
+    tags: dict[str, str] | None = None
 
 
 class Disposition(BaseModel):
-    default: Optional[int] = None
-    dub: Optional[int] = None
-    original: Optional[int] = None
-    comment: Optional[int] = None
-    lyrics: Optional[int] = None
-    karaoke: Optional[int] = None
-    forced: Optional[int] = None
-    hearing_impaired: Optional[int] = None
-    visual_impaired: Optional[int] = None
-    clean_effects: Optional[int] = None
-    attached_pic: Optional[int] = None
-    timed_thumbnails: Optional[int] = None
-    captions: Optional[int] = None
-    descriptions: Optional[int] = None
-    metadata: Optional[int] = None
-    dependent: Optional[int] = None
-    still_image: Optional[int] = None
+    default: int | None = None
+    dub: int | None = None
+    original: int | None = None
+    comment: int | None = None
+    lyrics: int | None = None
+    karaoke: int | None = None
+    forced: int | None = None
+    hearing_impaired: int | None = None
+    visual_impaired: int | None = None
+    clean_effects: int | None = None
+    attached_pic: int | None = None
+    timed_thumbnails: int | None = None
+    captions: int | None = None
+    descriptions: int | None = None
+    metadata: int | None = None
+    dependent: int | None = None
+    still_image: int | None = None
 
 
 class Error(BaseModel):
@@ -89,48 +87,48 @@ class Stream(BaseModel):
     index: int
     codec_tag_string: str
     codec_tag: str
-    codec_name: Optional[str] = None
-    codec_long_name: Optional[str] = None
-    profile: Optional[str] = None
-    codec_type: Optional[str] = None
-    width: Optional[int] = None
-    height: Optional[int] = None
-    coded_width: Optional[int] = None
-    coded_height: Optional[int] = None
-    closed_captions: Optional[int] = None
-    has_b_frames: Optional[int] = None
-    sample_aspect_ratio: Optional[str] = None
-    display_aspect_ratio: Optional[str] = None
-    pix_fmt: Optional[str] = None
-    level: Optional[int] = None
-    color_range: Optional[str] = None
-    color_space: Optional[str] = None
-    color_transfer: Optional[str] = None
-    color_primaries: Optional[str] = None
-    chroma_location: Optional[str] = None
-    field_order: Optional[str] = None
-    refs: Optional[int] = None
-    sample_fmt: Optional[str] = None
-    sample_rate: Optional[str] = None
-    channels: Optional[int] = None
-    channel_layout: Optional[str] = None
-    bits_per_sample: Optional[int] = None
-    id: Optional[str] = None
-    r_frame_rate: Optional[str] = None
-    avg_frame_rate: Optional[str] = None
-    time_base: Optional[str] = None
-    start_pts: Optional[int] = None
-    start_time: Optional[str] = None
-    duration_ts: Optional[int] = None
-    duration: Optional[str] = None
-    bit_rate: Optional[str] = None
-    max_bit_rate: Optional[str] = None
-    bits_per_raw_sample: Optional[str] = None
-    nb_frames: Optional[str] = None
-    nb_read_frames: Optional[str] = None
-    nb_read_packets: Optional[str] = None
-    disposition: Optional[Disposition] = None
-    tags: Optional[dict[str, str]] = None
+    codec_name: str | None = None
+    codec_long_name: str | None = None
+    profile: str | None = None
+    codec_type: str | None = None
+    width: int | None = None
+    height: int | None = None
+    coded_width: int | None = None
+    coded_height: int | None = None
+    closed_captions: int | None = None
+    has_b_frames: int | None = None
+    sample_aspect_ratio: str | None = None
+    display_aspect_ratio: str | None = None
+    pix_fmt: str | None = None
+    level: int | None = None
+    color_range: str | None = None
+    color_space: str | None = None
+    color_transfer: str | None = None
+    color_primaries: str | None = None
+    chroma_location: str | None = None
+    field_order: str | None = None
+    refs: int | None = None
+    sample_fmt: str | None = None
+    sample_rate: str | None = None
+    channels: int | None = None
+    channel_layout: str | None = None
+    bits_per_sample: int | None = None
+    id: str | None = None
+    r_frame_rate: str | None = None
+    avg_frame_rate: str | None = None
+    time_base: str | None = None
+    start_pts: int | None = None
+    start_time: str | None = None
+    duration_ts: int | None = None
+    duration: str | None = None
+    bit_rate: str | None = None
+    max_bit_rate: str | None = None
+    bits_per_raw_sample: str | None = None
+    nb_frames: str | None = None
+    nb_read_frames: str | None = None
+    nb_read_packets: str | None = None
+    disposition: Disposition | None = None
+    tags: dict[str, str] | None = None
 
 
 class Program(BaseModel):
@@ -144,21 +142,21 @@ class Program(BaseModel):
     end_pts: int
     end_time: str
     streams: list[Stream]
-    tags: Optional[dict[str, str]] = None
+    tags: dict[str, str] | None = None
 
 
 class FfprobeOutput(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    program_version: Optional[ProgramVersion] = None
-    library_version: Optional[list[LibraryVersion]] = None
-    pixel_formats: Optional[list[PixelFormat]] = None
-    packets: Optional[list[Packet]] = None
-    frames: Optional[list[Frame]] = None
-    packets_and_frames: Optional[list[Union[Packet, Frame]]] = None
-    programs: Optional[list[Program]] = None
-    streams: Optional[list[Stream]] = None
-    format: Optional[Format] = None
-    chapters: Optional[list[Chapter]] = None
-    error: Optional[Error] = None
+    program_version: ProgramVersion | None = None
+    library_version: list[LibraryVersion] | None = None
+    pixel_formats: list[PixelFormat] | None = None
+    packets: list[Packet] | None = None
+    frames: list[Frame] | None = None
+    packets_and_frames: list[Packet | Frame] | None = None
+    programs: list[Program] | None = None
+    streams: list[Stream] | None = None
+    format: Format | None = None
+    chapters: list[Chapter] | None = None
+    error: Error | None = None

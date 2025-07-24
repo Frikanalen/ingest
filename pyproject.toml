@@ -29,8 +29,19 @@ dev = [
 [tool.ruff]
 line-length = 120
 [tool.ruff.lint]
-extend-select = ["I"]
-
+extend-select = [
+    "I",     # isort: import sorting
+    "F",     # pyflakes: undefined names, unused imports
+    "E",     # pycodestyle: basic style issues
+    "W",     # pycodestyle: warnings
+    "C90",   # mccabe: complexity
+    "UP",    # pyupgrade: suggest modern syntax
+    "B",     # flake8-bugbear: likely bugs, bad patterns
+    "A",     # flake8-builtins: avoid shadowing built-ins
+    "SIM",   # flake8-simplify: simplify redundant code
+    "TID",   # flake8-tidy-imports: disallow relative imports
+    "RUF",   # Ruff-specific rules (e.g. `RUF100` for `__all__` sorted)
+]
 [tool.pytest.ini_options]
 log_cli = true
 log_cli_level = "INFO"

@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import List
 
 from fastapi import Depends
 from frikanalen_django_api_client import AuthenticatedClient
@@ -31,7 +30,7 @@ class DjangoApiService:
             video_id, client=self.client, body=PatchedVideoRequest(proper_import=proper_import)
         )
 
-    async def get_original_files_without_loudness(self, limit=5) -> List[VideoFile]:
+    async def get_original_files_without_loudness(self, limit=5) -> list[VideoFile]:
         return (
             await videofiles_list.asyncio(
                 client=self.client,
