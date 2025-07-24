@@ -27,13 +27,6 @@ def test_tusd_upload(tusd_server):
 def test_tusd_upload_hooks(tusd_server_with_hooks, start_fastapi_server):
     my_client = client.TusClient(url=tusd_server_with_hooks.url)
 
-    # def success_response(request_data):
-    # return Response(
-    # status=200,
-    # response="{}",
-    # )
-    # mock_hook_server.configure_response(success_response)
-
     uploader = my_client.uploader(file_stream=(io.BytesIO(b"X" * 1337)), chunk_size=500)
 
     uploader.upload()
