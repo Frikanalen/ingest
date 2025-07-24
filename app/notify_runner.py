@@ -4,9 +4,9 @@ from datetime import datetime
 from pathlib import Path
 
 from app.django_api.service import DjangoApiService
+from app.ffprobe import do_probe
 from app.tus_hook.hook_server import build_client
 
-from .ffprobe.probe import ffprobe_file
 from .interactive import generate_videos
 from .logging.video_id_filter import VideoIdFilter
 from .util.file_name_utils import original_file_location
@@ -29,7 +29,7 @@ async def ingest(video_id: str, original_file: Path):
 
     await django_api.set_video_uploaded_time(video_id, datetime.now())
 
-    metadata = await ffprobe_file(original_file)
+    metadata = await do_probe(original_file)
     logger.info("Got metadata: %s", metadata)
 
     logger.info("Moving from %s to %s", original_file, original_file_destination)

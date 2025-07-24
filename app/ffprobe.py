@@ -2,7 +2,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from app.ffprobe.ffprobe_schema import FfprobeOutput
+from app.ffprobe_schema import FfprobeOutput
 
 
 async def _run_ffprobe(filepath: Path) -> str:
@@ -22,7 +22,7 @@ async def _run_ffprobe(filepath: Path) -> str:
     return stdout.decode()
 
 
-async def ffprobe_file(filepath: Path) -> FfprobeOutput:
+async def do_probe(filepath: Path) -> FfprobeOutput:
     data = await _run_ffprobe(filepath)
     logging.debug("Validating ffprobe output against JSON Schema: %s", data)
     return FfprobeOutput.model_validate_json(data)
@@ -32,7 +32,7 @@ if __name__ == "__main__":
     import sys
 
     async def main():
-        result = await ffprobe_file(Path(sys.argv[1]))
+        result = await do_probe(Path(sys.argv[1]))
         print(result)
 
     asyncio.run(main())

@@ -8,7 +8,7 @@ FFPROBE_SCHEMA_JSON=$PWD"/ffprobe.json"
 
 
 TUSD_SCHEMA_OUTPUT="../app/tus_hook/hook_schema.py"
-FFPROBE_SCHEMA_OUTPUT="../app/ffprobe/ffprobe_schema.py"
+FFPROBE_SCHEMA_OUTPUT="../app/ffprobe_schema.py"
 
 echo " - Compiling and running Go program to generate JSON Schema..."
 go run gen_hook_schema.go > "$TUSD_SCHEMA_JSON"

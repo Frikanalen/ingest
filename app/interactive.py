@@ -6,11 +6,11 @@ from pathlib import Path
 from frikanalen_django_api_client.models import VideoFile, VideoFileRequest
 
 from app.django_api.service import DjangoApiService
+from app.ffprobe import do_probe
 from runner import Runner
 from video_formats import VF_FORMATS
 
 from .converter import Converter
-from .ffprobe.probe import ffprobe_file
 from .fk_exceptions import AppError
 from .loudness.get_loudness import get_loudness
 
@@ -30,7 +30,7 @@ async def update_existing_file(video_id: str, archive_path: Path):
         [file_name] = [f for f in path.iterdir()]
 
     filepath = path / file_name
-    metadata = await ffprobe_file(filepath)
+    metadata = await do_probe(filepath)
     django_api = DjangoApiService()
     await django_api.set_video_duration(video_id, metadata["format"]["duration"])
     await django_api.set_video_uploaded_time(video_id, datetime.now())
