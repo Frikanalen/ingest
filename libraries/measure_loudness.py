@@ -1,53 +1,38 @@
+import logging
 import os
 import re
 import subprocess
-import time
+from libraries.django_api.service import DjangoApiService
+from libraries.loudness_measurement import LoudnessMeasurement
 
-from libraries.djangoapi import get_videofiles, update_videofile
 
-
-def measure_loudness(watch_dir, move_to_dir):
+async def run_missing_loudness_measurements(move_to_dir):
     """Measure loudness for all video files missing it, a few at the time.
 
     Process latest videos first.
     """
+    django_api = DjangoApiService()
+    video_files = django_api.get_original_files_without_loudness()
 
-    maxtime = 60  # stop processing after this amount of seconds
-    pagesize = 5  # Process this amount of video file per format at the time
-    start = time.time()
-    for fsname in ("original", "broadcast", "theora"):
-        params = {
-            "format__fsname": fsname,
-            "integratedLufs__isnull": True,
-            "page_size": pagesize,
-            "order": "-video",
-        }
+    logging.info("found %d files with outstanding loudness measurements", video_files.count)
 
-        for data in get_videofiles(params):
-            newdata = data.copy()
-            filepath = data["filename"]
-            loudness = get_loudness(os.path.join(move_to_dir, filepath))
-            if loudness:
-                newdata.update(loudness)
-            if data != newdata:
-                update_videofile(newdata)
-        if time.time() - start > maxtime:  # Time to stop?
-            break
-    return
+    for video_file in video_files:
+        if loudness := get_loudness(os.path.join(move_to_dir, video_file["filename"])):
+            await django_api.set_video_loudness(video_file["video_id"], loudness)
 
 
-def get_loudness(filepath):
+def get_loudness(filepath) -> LoudnessMeasurement | None:
     try:
         cmd = ["bs1770gain", "--xml", "--truepeak", filepath]
         output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
         output = output.decode("utf-8")
         integrated_lufs = re.findall(r'<integrated lufs="([\d.-]+)"', output)[-1]
         truepeak_lufs = re.findall(r'<true-peak tpfs="([\d.-]+|-inf)"', output)[-1]
-        data = {
-            "integratedLufs": float(integrated_lufs),
-        }
-        if "-inf" != truepeak_lufs:
-            data["truepeakLufs"] = float(truepeak_lufs)
-        return data
+
+        return LoudnessMeasurement(
+            integrated_lufs=float(integrated_lufs),
+            truepeak_lufs=None if "-inf" == truepeak_lufs else float(truepeak_lufs),
+        )
+
     except (IndexError, ValueError, FileNotFoundError):
         return None

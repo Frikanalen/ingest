@@ -1,0 +1,1 @@
+ffmpeg -nostats -i "{{ input }}" -y -threads 8 -vf scale=720:-1 -aspect 16:9 -vframes 1 -ss {{ thumb_sec }} "{{ output }}.jpg"

@@ -1,13 +1,11 @@
-import os
-import tempfile
-import unittest
-
 import runner
 
 
-class ProcessRunner(unittest.TestCase):
-    def test_basic_run(self):
-        _, fn = tempfile.mkstemp()
-        self.assertTrue(os.path.exists(fn))
-        cmd = runner.Runner.run(["rm", fn])
-        self.assertFalse(os.path.exists(fn))
+def test_basic_run(tmp_path):
+    fn = tmp_path / "testfile"
+    fn.write_text("dummy content")
+    assert fn.exists()
+
+    runner.Runner.run(f"rm {fn}")
+
+    assert not fn.exists()

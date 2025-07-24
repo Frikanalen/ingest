@@ -1,0 +1,1 @@
+ffmpeg -nostats -i "{{ input }}" -y -threads 8 -vf "scale=1280:-2" -aspect 16:9 -c:v libx264 -preset medium -crf 23 -c:a aac -b:a 128k "{{ output }}.mp4"

@@ -17,7 +17,7 @@ class IngestConfiguration:
     django: DjangoConfiguration
 
 
-FK_API = os.environ.get("FK_API", "https://frikanalen.no/api")
+FK_API = os.environ.get("FK_API", "https://frikanalen.no/")
 FK_TOKEN = os.environ.get("FK_TOKEN")
 
 config = IngestConfiguration(

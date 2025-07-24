@@ -1,43 +1,42 @@
 import json
 import logging
 import os
+from pathlib import Path
 import re
 import subprocess
 from datetime import datetime
 
+from frikanalen_django_api_client.models import VideoFile, VideoFileRequest
+
 from .converter import Converter
-from .djangoapi import update_video, get_videofiles, create_videofile
 from video_formats import VF_FORMATS
 from .fk_exceptions import AppError
 from .measure_loudness import get_loudness
 from runner import Runner
+from libraries.django_api.service import DjangoApiService
 
 
-def update_existing_file(id, to_dir, force):
-    logging.info("Trying to update existing file id: %d in folder %s", id, to_dir)
-    str_id = str(id)
-    if not os.path.isdir(os.path.join(to_dir, str_id)):
-        raise AppError("No folder %d/ in %s" % (id, to_dir))
-    fn = None
-    path = None
+async def update_existing_file(video_id: str, archive_path: Path):
+    logging.info("Trying to update existing file id: %d in folder %s", video_id, archive_path)
+    if not (archive_path / video_id).is_dir():
+        raise AppError("No folder %s/ in %s" % (video_id, archive_path))
+
+    # FIXME: Broken code
     for folder in ["original", "broadcast"]:
-        path = os.path.join(to_dir, str_id, folder)
-        if os.path.isdir(path):
-            fn = os.listdir(path)[0]
-            break
-    else:
-        raise AppError("Found no file for %d, last checked in %s" % (id, path))
-    filepath = os.path.join(path, fn)
+        path = archive_path / video_id / folder
+
+        if not path.is_dir():
+            raise AppError("Found no file for %s" % (video_id,))
+
+        [file_name] = [f for f in path.iterdir()]
+
+    filepath = path / file_name
     metadata = get_metadata(filepath)
-    update_video(
-        id,
-        {
-            "duration": metadata["pretty_duration"],
-            "uploadedTime": datetime.utcnow().isoformat(),
-        },
-    )
-    generate_videos(id, filepath, metadata, reprocess=True)
-    update_video(id, {"properImport": True})
+    django_api = DjangoApiService()
+    await django_api.set_video_duration(video_id, metadata["duration"])
+    await django_api.set_video_uploaded_time(video_id, datetime.now())
+    await generate_videos(video_id, filepath)
+    await django_api.set_video_proper_import(video_id)
 
 
 def get_metadata(filepath):
@@ -84,41 +83,62 @@ def ffprobe_file(filepath):
     return json.loads(output.decode("utf-8"))
 
 
-def register_videofiles(id, folder, videofiles=None):
-    files = get_videofiles({"video_id": id})
-    videofiles = (videofiles or set()).union({f["filename"].strip() for f in files})
-    for file_folder in os.listdir(folder):
-        for fn in os.listdir(os.path.join(folder, file_folder)):
-            filepath = os.path.join(str(id), file_folder, fn)
-            if filepath in videofiles:
+async def register_video_files(video_id: str, video_path: Path, django_api=DjangoApiService()):
+    logging.info("Registering files for video %s in folder %s", video_id, video_path)
+
+    files = await django_api.get_files_for_video(video_id)
+    existing_file_names = [f["filename"].strip() for f in files]
+
+    logging.info("Found %d existing files for video %s", len(files), video_id)
+
+    for format_path in video_path.iterdir():
+        logging.info("Registering files in folder %s", format_path)
+        for file_name in (video_path / format_path).iterdir():
+            logging.info("Registering file %s", file_name)
+            filename = os.path.join(video_id, format_path, file_name)
+            if filename in existing_file_names:
+                logging.error("Not writing file because a file with the same name already exists: %s", filename)
                 continue
-            data = {
-                "filename": filepath,
-                "format": VF_FORMATS[file_folder],
-            }
-            loudness = get_loudness(os.path.join(folder, "..", filepath))
-            # Handle images, which do not have loudness
-            if loudness:
-                data.update(loudness)
-            create_videofile(id, data)
-            videofiles.add(filepath)
-    return videofiles
+
+            loudness = get_loudness(os.path.join(video_path, "..", filename))
+            await django_api.create_video_file(
+                video_file=VideoFile.from_dict(
+                    {
+                        "filename": filename,
+                        "format_": VF_FORMATS[format_path],
+                        "loudness": loudness,
+                        "video": video_id,
+                    }
+                ),
+            )
 
 
-def generate_videos(
-    id,
-    filepath,
+async def generate_videos(
+    video_id,
+    filepath: Path,
+    runner=None,
+    converter=None,
+    django_api=None,
     metadata=None,
-    runner_run=Runner.run,
-    converter=Converter,
-    register=register_videofiles,
-    reprocess=False,
+    register=None,
 ):
+    if runner is None:
+        runner = Runner()
+    if converter is None:
+        converter = Converter()
+    if django_api is None:
+        django_api = DjangoApiService()
+    if register is None:
+        register = register_video_files
+
     logging.info("Processing: %s", filepath)
-    base_path = os.path.dirname(os.path.dirname(filepath))
-    formats = converter.get_formats(filepath)
-    videofiles = set()
-    for t in formats:
-        cmds, new_fn = converter.convert_cmds(filepath, t, metadata)
-        runner_run(cmds, filepath=new_fn, reprocess=reprocess)
-        videofiles = register(id, base_path, videofiles=videofiles)
+    base_path = filepath.parent.parent
+    for format_name in converter.DESIRED_FORMATS:
+        cmd_line, target_file_name = converter.convert_cmds(filepath, format_name, metadata)
+        logging.info("Running: %s", cmd_line)
+        runner.run(cmd_line)
+        await django_api.create_video_file(
+            video_file=VideoFileRequest(filename=str(target_file_name), format_=format_name, video_id=video_id)
+        )
+
+        await register(video_id, base_path)
