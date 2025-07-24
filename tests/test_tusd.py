@@ -24,11 +24,12 @@ def test_tusd_upload(tusd_server):
     assert uploader.offset == 1337
 
 
-def test_tusd_upload_hooks(tusd_server_with_hooks, start_fastapi_server):
+def test_tusd_upload_hooks(tusd_server_with_hooks, start_fastapi_server, color_bars_video):
     my_client = client.TusClient(url=tusd_server_with_hooks.url)
 
-    uploader = my_client.uploader(file_stream=(io.BytesIO(b"X" * 1337)), chunk_size=500)
+    with color_bars_video.open("rb") as f:
+        uploader = my_client.uploader(file_stream=f, chunk_size=500)
 
-    uploader.upload()
+        uploader.upload()
 
-    assert uploader.offset == 1337
+        assert uploader.offset == color_bars_video.stat().st_size
