@@ -1,6 +1,6 @@
 import pytest
 
-import runner
+from runner import Runner
 
 
 @pytest.mark.asyncio
@@ -9,6 +9,7 @@ async def test_basic_run(tmp_path):
     test_path.touch()
     assert test_path.exists()
 
-    await runner.Runner().run(["rm", str(test_path)])
+    run = await Runner().run(f"rm {test_path}")
+    await run.wait_for_completion()
 
     assert not test_path.exists()
