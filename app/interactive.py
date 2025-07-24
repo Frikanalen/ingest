@@ -18,14 +18,14 @@ from .loudness.get_loudness import get_loudness
 async def update_existing_file(video_id: str, archive_path: Path):
     logging.info("Trying to update existing file id: %d in folder %s", video_id, archive_path)
     if not (archive_path / video_id).is_dir():
-        raise AppError("No folder %s/ in %s" % (video_id, archive_path))
+        raise AppError(f"No folder {video_id}/ in {archive_path}")
 
     # FIXME: Broken code
     for folder in ["original", "broadcast"]:
         path = archive_path / video_id / folder
 
         if not path.is_dir():
-            raise AppError("Found no file for %s" % (video_id,))
+            raise AppError(f"Found no file for {video_id}")
 
         [file_name] = [f for f in path.iterdir()]
 

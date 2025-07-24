@@ -19,7 +19,7 @@ def is_valid_dropbox_dir(dirname: Path) -> bool:
         logging.warning("Skipping %s because it is hidden/not numeric", dirname)
         return False
 
-    if not len(list(dirname.iterdir())) == 1:
+    if len(list(dirname.iterdir())) != 1:
         logging.warning("Skipping %s because it does not contain exactly one file", dirname)
 
     return True

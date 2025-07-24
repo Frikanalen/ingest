@@ -7,10 +7,7 @@ from rich.table import Table
 def _deep_get(obj: dict | Any, attr: str) -> Any:
     parts = attr.split(".")
     for part in parts:
-        if isinstance(obj, dict):
-            obj = obj.get(part, "UNSET")
-        else:
-            obj = getattr(obj, part, "UNSET")
+        obj = obj.get(part, "UNSET") if isinstance(obj, dict) else getattr(obj, part, "UNSET")
         if obj is None:
             return "UNSET"
     return obj

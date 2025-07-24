@@ -14,4 +14,4 @@ def get_single_file_from_directory(from_dir: Path) -> Path:
         [file_name] = [x for x in from_dir.iterdir()]
         return file_name
     except ValueError:
-        raise SkippableError("Found no file in %s" % from_dir)
+        raise SkippableError(f"Found no file in {from_dir}")

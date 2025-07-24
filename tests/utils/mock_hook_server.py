@@ -8,7 +8,7 @@ from werkzeug.wrappers import Request, Response
 class MockHookServer:
     recorded_requests: Queue[Request]
 
-    def __init__(self, port: int = None):
+    def __init__(self, port: int | None = None):
         self.recorded_requests = Queue()
         self.server = HTTPServer(port=port)
         self.response_handlers: dict[str, Callable] = {}
