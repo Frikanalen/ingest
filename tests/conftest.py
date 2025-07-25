@@ -11,11 +11,11 @@ from pathlib import Path
 
 import pytest
 import requests
-import uvicorn
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
 
-from app.tus_hook.hook_server import tusd_hook_server
+from tests.get_git_root import get_git_root
+from tests.run_test_server import run_server
 from tests.utils.get_free_port import get_free_port
 from tests.utils.tusd_command import TusdConfig, TusdHttpHookConfig
 from tests.utils.tusd_process import TusdProcess
@@ -39,10 +39,6 @@ def tusd_binary() -> str:
             raise OSError('"go" not found in path, do you need to install golang?') from None
 
     return str(tusd_path)
-
-
-def get_git_root():
-    return Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
 
 
 @pytest.fixture
@@ -93,11 +89,6 @@ class TusdFixture:
 @dataclass(frozen=True)
 class TusdFixtureWithHooks(TusdFixture):
     start_fastapi_server: MockHookServerFixture
-
-
-def run_server(host="127.0.0.1", port=8001, log_level="debug"):
-    print(f"Trying to start server on port {port} with host {host}")
-    uvicorn.run(tusd_hook_server, host=host, port=port, log_level=log_level)
 
 
 @contextmanager
@@ -165,7 +156,7 @@ def color_bars_video() -> Generator[Path, None, None]:
 
     try:
         cmd = shlex.split(
-            "ffmpeg -f lavfi -i color=size=1280x720:rate=25 "
+            "ffmpeg -f lavfi -i smptebars=size=1280x720:rate=25 "
             "-t 1 -y -nostats -hide_banner -loglevel error "
             "-c:v libx264 -pix_fmt yuv420p"
         )

@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi[standard]>=0.116.1",
+    "frikanalen-django-api-client",
     "httpx>=0.28.1",
     "inotify>=0.2.10",
     "pathvalidate>=3.3.1",
@@ -47,3 +48,6 @@ extend-select = [
 [tool.pytest.ini_options]
 log_cli = true
 log_cli_level = "INFO"
+
+[tool.uv.sources]
+frikanalen-django-api-client = { path = "../frikanalen-django-api-client" }

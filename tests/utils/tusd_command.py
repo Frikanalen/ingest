@@ -36,6 +36,8 @@ def build_tusd_command(config: TusdConfig):
         config.binary_path,
         "-upload-dir",
         str(config.upload_dir.absolute()),
+        "-hooks-http-forward-headers",
+        "Cookie",
         "-port",
         str(config.port),
     ]

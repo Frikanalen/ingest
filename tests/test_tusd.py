@@ -3,6 +3,8 @@ import io
 import requests
 from tusclient import client
 
+from app.main import UploadMetaData
+
 
 def test_tusd_options(tusd_server_with_hooks):
     url = tusd_server_with_hooks.url
@@ -28,7 +30,13 @@ def test_tusd_upload_hooks(tusd_server_with_hooks, start_fastapi_server, color_b
     my_client = client.TusClient(url=tusd_server_with_hooks.url)
 
     with color_bars_video.open("rb") as f:
-        uploader = my_client.uploader(file_stream=f, chunk_size=500)
+        uploader = my_client.uploader(
+            file_stream=f,
+            chunk_size=500,
+            metadata=UploadMetaData(VideoID="12345", OrigFileName="orig_file_name.mov", UploadToken="asdf").model_dump(
+                by_alias=True
+            ),
+        )
 
         uploader.upload()
 

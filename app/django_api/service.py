@@ -1,22 +1,24 @@
 from datetime import datetime
 
-from fastapi import Depends
 from frikanalen_django_api_client import AuthenticatedClient
 from frikanalen_django_api_client.api.videofiles import videofiles_create, videofiles_list, videofiles_partial_update
 from frikanalen_django_api_client.api.videos import videos_list, videos_partial_update
-from frikanalen_django_api_client.models import PatchedVideoRequest, VideoFile, VideoFileRequest
+from frikanalen_django_api_client.models import (
+    PatchedVideoRequest,
+    VideoFile,
+    VideoFileRequest,
+    VideofilesListFormatFsname,
+)
 
+from app.django_api.build_client import build_client
 from app.loudness.loudness_measurement import LoudnessMeasurement
-from app.tus_hook.hook_server import build_client, get_client_from_app_state
 from app.util.pprint_object_list import pprint_object_list
 
 
 class DjangoApiService:
     client: AuthenticatedClient
 
-    def __init__(self, client: AuthenticatedClient = None):
-        if client is None:
-            client = Depends(get_client_from_app_state)
+    def __init__(self, client: AuthenticatedClient):
         self.client = client
 
     async def set_video_duration(self, video_id: str, duration: str):
@@ -36,7 +38,7 @@ class DjangoApiService:
         return (
             await videofiles_list.asyncio(
                 client=self.client,
-                format_fsname="original",
+                format_fsname=VideofilesListFormatFsname.ORIGINAL,
                 integrated_lufs_isnull=True,
                 limit=limit,
                 ordering="-video",
@@ -60,8 +62,6 @@ class DjangoApiService:
 
 if __name__ == "__main__":
     import asyncio
-
-    from app.tus_hook.hook_server import get_client_from_app_state
 
     async def main():
         service = DjangoApiService(build_client())

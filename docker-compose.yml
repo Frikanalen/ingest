@@ -1,0 +1,27 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: frikanalen
+      POSTGRES_USER: frikanalen
+      POSTGRES_PASSWORD: frikanalen
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U frikanalen"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  django-api:
+    image: ghcr.io/frikanalen/django-api:latest
+    environment:
+      DATABASE_URL: postgres://frikanalen:frikanalen@db:5432/frikanalen
+      DJANGO_SETTINGS_MODULE: fkweb.settings.production
+      ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0"
+      DEBUG: "1"
+      SECRET_KEY: "dummy"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "18000:8080"
