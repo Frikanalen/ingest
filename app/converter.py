@@ -27,6 +27,7 @@ class Converter:
     ):
         logging.info("Producing: %s", output_format_name)
         ffmpeg_command_factory = FfmpegCommandFactory()
+
         cmd_line, target_file_name = ffmpeg_command_factory.build_ffmpeg_command(
             input_file_path, output_format_name, metadata
         )

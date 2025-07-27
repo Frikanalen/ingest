@@ -21,8 +21,9 @@ class ProfileTemplateArguments(TypedDict):
 
 class FfmpegCommandFactory:
     @staticmethod
-    def _load_template_with_metadata(path: Path) -> tuple[ProfileMetadata, Template]:
-        content = path.read_text()
+    def _load_template_with_metadata(format_name: str) -> tuple[ProfileMetadata, Template]:
+        template_path = get_git_root() / "templates" / f"{format_name}.j2"
+        content = template_path.read_text()
         _, yaml_block, template_body = content.split("---", 2)
         metadata = ProfileMetadata(**yaml.safe_load(yaml_block))
 
@@ -31,8 +32,7 @@ class FfmpegCommandFactory:
     def build_ffmpeg_command(
         self, input_file_path: Path, format_name: str, metadata: FfprobeOutput
     ) -> tuple[str, Path]:
-        template_path = get_git_root() / "templates" / f"{format_name}.j2"
-        template_metadata, tmpl = self._load_template_with_metadata(template_path)
+        template_metadata, tmpl = self._load_template_with_metadata(format_name)
 
         output_directory = input_file_path.parent.parent / format_name
         output_directory.mkdir(exist_ok=True)
@@ -42,5 +42,4 @@ class FfmpegCommandFactory:
         template_args = ProfileTemplateArguments(input=input_file_path, output=output_file_spec, thumbs_sec=thumbs_sec)
 
         cmd = tmpl.render(**template_args)
-        print(cmd)
         return cmd, output_file_spec
