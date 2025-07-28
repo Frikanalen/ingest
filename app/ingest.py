@@ -39,7 +39,7 @@ class Ingester:
 
         for format_name in DESIRED_FORMATS:
             self.logger.info("Processing: %s", original_file_destination)
-            output_directory = original_file_destination.parent.parent / format_name
+            output_directory = original_file_destination.parent / format_name
             output_directory.mkdir(exist_ok=True)
 
             template = TemplatedCommandGenerator(format_name)
