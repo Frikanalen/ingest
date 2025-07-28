@@ -7,7 +7,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class ApiConfig(BaseModel):
     url: HttpUrl = Field()
-    key: SecretStr = Field()
+    username: str = Field()
+    password: SecretStr = Field()
 
 
 class DebugConfig(BaseModel):

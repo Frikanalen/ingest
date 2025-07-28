@@ -15,8 +15,10 @@ services:
   django-api:
     image: ghcr.io/frikanalen/django-api:latest
     environment:
+      DJANGO_SUPERUSER_EMAIL: test@superuser.lol
+      DJANGO_SUPERUSER_PASSWORD: "superuser"
       DATABASE_URL: postgres://frikanalen:frikanalen@db:5432/frikanalen
-      DJANGO_SETTINGS_MODULE: fkweb.settings.production
+      DJANGO_SETTINGS_MODULE: fkweb.settings.local
       ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0"
       DEBUG: "1"
       SECRET_KEY: "dummy"
