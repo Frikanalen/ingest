@@ -1,8 +1,10 @@
 import logging
 import os
 
-from app.django_api.service import DjangoApiService
-from app.loudness.get_loudness import get_loudness
+from app.django_client.service import DjangoApiService
+from app.media.loudness.get_loudness import get_loudness
+
+logger = logging.getLogger(__name__)
 
 
 async def run_missing_loudness_measurements(move_to_dir):
@@ -13,7 +15,7 @@ async def run_missing_loudness_measurements(move_to_dir):
     django_api = DjangoApiService()
     video_files = await django_api.get_original_files_without_loudness()
 
-    logging.info("found %d files with outstanding loudness measurements", video_files.count)
+    logger.info("found %d files with outstanding loudness measurements", video_files.count)
 
     for video_file in video_files:
         if loudness := get_loudness(os.path.join(move_to_dir, video_file["filename"])):

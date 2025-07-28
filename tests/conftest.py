@@ -20,6 +20,8 @@ from tests.utils.get_free_port import get_free_port
 from tests.utils.tusd_command import TusdConfig, TusdHttpHookConfig
 from tests.utils.tusd_process import TusdProcess
 
+logger = logging.getLogger(__name__)
+
 
 @pytest.fixture(scope="session")
 def tusd_binary() -> str:
@@ -27,7 +29,7 @@ def tusd_binary() -> str:
     tusd_path = git_root / "bin" / "tusd"
 
     if not tusd_path.exists():
-        logging.warning("tusd binary not found, installing it")
+        logger.warning("tusd binary not found, installing it")
         try:
             subprocess.run(
                 ["go", "install", "github.com/tus/tusd/v2/cmd/tusd@latest"],
@@ -96,13 +98,13 @@ def suppress_urllib3_logging():
     """
     We expect to see a lot of urllib3 timeouts in the alive check, so let's suppress it.
     """
-    logger = logging.getLogger("urllib3.connectionpool")
-    old_level = logger.level
-    logger.setLevel(logging.ERROR)
+    url_lib_logger = logging.getLogger("urllib3.connectionpool")
+    old_level = url_lib_logger.level
+    url_lib_logger.setLevel(logging.ERROR)
     try:
         yield
     finally:
-        logger.setLevel(old_level)
+        url_lib_logger.setLevel(old_level)
 
 
 def _wait_for_server(url: str, backoff_factor: float = 0.1, total: int = 15):

@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
+from app.api.hooks.schema import FileInfo, Header, HookEvent, HookRequest, HTTPRequest, MetaData
 from app.main import app
-from app.tus_hook.hook_schema import FileInfo, Header, HookEvent, HookRequest, HTTPRequest, MetaData
 
 hook_request = HookRequest(
     Type="pre-create",

@@ -43,7 +43,7 @@ class HTTPRequest(BaseModel):
 
 class HookEvent(BaseModel):
     model_config = ConfigDict(
-        extra="forbid",
+        # extra="forbid",
     )
     upload: FileInfo | None = Field(None, alias="Upload")
     http_request: HTTPRequest | None = Field(None, alias="HTTPRequest")
@@ -51,7 +51,7 @@ class HookEvent(BaseModel):
 
 class HookRequest(BaseModel):
     model_config = ConfigDict(
-        extra="forbid",
+        # extra="forbid",
     )
     type: str | None = Field(None, alias="Type")
     event: HookEvent | None = Field(None, alias="Event")

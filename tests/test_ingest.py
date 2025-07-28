@@ -2,19 +2,17 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.archive import Archive
-from app.converter import Converter
-from app.django_api.service import DjangoApiService
+from app.archive_store import Archive
+from app.django_client.service import DjangoApiService
 from app.ingest import Ingester
+from app.media.converter import Converter
 from runner import Runner
 
 
 @pytest.mark.asyncio
 async def test_ingest_runs(color_bars_video):
     django_api = AsyncMock(spec=DjangoApiService)
-    ingester = Ingester(
-        "1234", django_api=django_api, converter_service=Converter(django_api, Runner()), archive=Archive()
-    )
+    ingester = Ingester("1234", django_api=django_api, converter=Converter(django_api, Runner()), archive=Archive())
     result = await ingester.ingest(color_bars_video)
 
     assert result is not None  # Replace with actual assertions based on the ingest function's behavior

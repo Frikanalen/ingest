@@ -1,4 +1,4 @@
 ---
 output_file_extension: jpg
 ---
-ffmpeg -nostats -i "{{ input }}" -y -threads 8 -vf scale=720:-1 -aspect 16:9 -vframes 1 -ss {{ thumbs_sec }} "{{ output }}"
+ffmpeg -nostats -i "{{ input_file }}" -y -threads 8 -vf scale=720:-1 -aspect 16:9 -vframes 1 -ss {{ seek_s }} "{{ output_file }}"

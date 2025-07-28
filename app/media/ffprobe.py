@@ -2,12 +2,14 @@ import asyncio
 import logging
 from pathlib import Path
 
-from app.ffprobe_schema import FfprobeOutput
+from app.media.ffprobe_schema import FfprobeOutput
+
+logger = logging.getLogger(__name__)
 
 
 async def _run_ffprobe(filepath: Path) -> str:
-    cmd = ["ffprobe", "-v", "quiet", "-show_format", "-show_streams", "-of", "json", str(filepath)]
-    logging.debug("Running ffprobe command: %s", cmd)
+    cmd = ["/usr/bin/ffprobe", "-v", "quiet", "-show_format", "-show_streams", "-of", "json", str(filepath)]
+    logger.debug("Running ffprobe command: %s", " ".join(cmd))
 
     process = await asyncio.create_subprocess_exec(
         *cmd,
@@ -24,7 +26,7 @@ async def _run_ffprobe(filepath: Path) -> str:
 
 async def do_probe(filepath: Path) -> FfprobeOutput:
     data = await _run_ffprobe(filepath)
-    logging.debug("Validating ffprobe output against JSON Schema: %s", data)
+    logger.debug("Validating ffprobe output against JSON Schema: %s", data)
     return FfprobeOutput.model_validate_json(data)
 
 

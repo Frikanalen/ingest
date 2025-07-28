@@ -1,7 +1,7 @@
 import re
 import subprocess
 
-from app.loudness.loudness_measurement import LoudnessMeasurement
+from app.media.loudness.loudness_measurement import LoudnessMeasurement
 
 
 def get_loudness(filepath) -> LoudnessMeasurement | None:

@@ -2,6 +2,8 @@ import asyncio
 import logging
 import shlex
 
+logger = logging.getLogger(__name__)
+
 
 class Runner:
     def __init__(self):
@@ -10,7 +12,7 @@ class Runner:
 
     async def run(self, command: str):
         self.command = command
-        logging.info("Running: %s", command)
+        logger.info("Running: %s", command)
 
         self.proc = await asyncio.create_subprocess_exec(
             *shlex.split(command),

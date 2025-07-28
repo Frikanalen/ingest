@@ -3,7 +3,7 @@ import io
 import requests
 from tusclient import client
 
-from app.main import UploadMetaData
+from app.api.hooks import UploadMetaData
 
 
 def test_tusd_options(tusd_server_with_hooks):

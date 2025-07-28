@@ -10,9 +10,9 @@ from frikanalen_django_api_client.models import (
     VideofilesListFormatFsname,
 )
 
-from app.django_api.build_client import build_client
-from app.loudness.loudness_measurement import LoudnessMeasurement
+from app.media.loudness.loudness_measurement import LoudnessMeasurement
 from app.util.pprint_object_list import pprint_object_list
+from app.util.settings import settings
 
 
 class DjangoApiService:
@@ -64,7 +64,9 @@ if __name__ == "__main__":
     import asyncio
 
     async def main():
-        service = DjangoApiService(build_client())
+        service = DjangoApiService(
+            AuthenticatedClient(base_url=str(settings.api.url), token=settings.api.key, raise_on_unexpected_status=True)
+        )
         videos = await service.get_videos()
         pprint_object_list(
             videos,

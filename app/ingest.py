@@ -2,14 +2,15 @@ from datetime import datetime
 from logging import Logger, getLogger
 from pathlib import Path
 
-from frikanalen_django_api_client.models import FormatEnum
+from frikanalen_django_api_client.models import FormatEnum, VideoFileRequest
 
-from app.django_api.service import DjangoApiService
-from app.ffprobe import do_probe
+from app.django_client.service import DjangoApiService
+from app.media.converter import Converter
+from app.util.logging import VideoIdFilter
 
-from .archive import Archive
-from .converter import Converter
-from .logging.video_id_filter import VideoIdFilter
+from .archive_store import Archive
+from .media.comand_template import TemplatedCommandGenerator
+from .media.ffprobe_schema import FfprobeOutput
 
 DESIRED_FORMATS = (FormatEnum("large_thumb"),)
 
@@ -17,33 +18,38 @@ DESIRED_FORMATS = (FormatEnum("large_thumb"),)
 class Ingester:
     video_id: str
     django_api: DjangoApiService
-    converter_service: Converter
+    converter: Converter
     archive: Archive
     logger: Logger
 
-    def __init__(self, video_id: str, django_api: DjangoApiService, converter_service: Converter, archive: Archive):
+    def __init__(self, django_api: DjangoApiService, converter: Converter, archive: Archive):
         self.logger = getLogger(__name__)
-        self.logger.addFilter(VideoIdFilter(video_id))
-        self.video_id = video_id
         self.django_api = django_api
-        self.converter_service = converter_service
+        self.converter = converter
         self.archive = archive
 
-    async def ingest(self, original_file: Path):
-        self.logger.info("Ingesting file with video_id: %s, original_file: %s", self.video_id, original_file)
+    async def ingest(self, video_id: str, original_file: Path, metadata: FfprobeOutput):
+        self.logger.addFilter(VideoIdFilter(video_id))
+        self.logger.info("Ingesting file with video_id: %s, original_file: %s", video_id, original_file)
 
-        await self.django_api.set_video_uploaded_time(self.video_id, datetime.now())
-        metadata = await do_probe(original_file)
-        self.logger.info("Got metadata, %d streams", len(metadata.streams))
+        await self.django_api.set_video_uploaded_time(video_id, datetime.now())
 
-        original_file_destination = self.archive.move_original_to_archive(self.video_id, original_file)
-        await self.django_api.set_video_duration(self.video_id, metadata.format.duration)
+        original_file_destination = self.archive.move_original_to_archive(video_id, original_file)
+        await self.django_api.set_video_duration(video_id, metadata.format.duration)
 
         for format_name in DESIRED_FORMATS:
             self.logger.info("Processing: %s", original_file_destination)
-            await self.converter_service.process_format(
-                original_file_destination, format_name, metadata, int(self.video_id)
-            )
-            self.logger.info("Finished processing: %s", self.video_id)
+            output_directory = original_file_destination.parent.parent / format_name
+            output_directory.mkdir(exist_ok=True)
 
-        await self.django_api.set_video_proper_import(self.video_id, True)
+            template = TemplatedCommandGenerator(format_name)
+            output_file_name = f"{original_file_destination.stem}.{template.metadata.output_file_extension}"
+            output_file = output_directory / output_file_name
+            self.logger.info("Producing: %s", format_name)
+
+            await self.converter.process_format(original_file_destination, output_file, template, metadata)
+            self.logger.info("Finished processing: %s", video_id)
+            req = VideoFileRequest(filename=str(output_file), format_=format_name, video_id=int(video_id))
+            await self.django_api.create_video_file(video_file=req)
+
+        await self.django_api.set_video_proper_import(video_id, True)

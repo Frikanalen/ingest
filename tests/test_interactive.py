@@ -1,18 +1,12 @@
-import logging
 import shutil
 from unittest.mock import AsyncMock
 
 import pytest
 from frikanalen_django_api_client.models import FormatEnum
 
-import app.loudness.get_loudness
-from app.converter import Converter
-from app.ffprobe import do_probe
-
-
-@pytest.fixture(autouse=True)
-def set_log_level():
-    logging.getLogger("").setLevel(logging.INFO)
+import app.media.loudness.get_loudness
+from app.media.converter import Converter
+from app.media.ffprobe import do_probe
 
 
 @pytest.mark.asyncio
@@ -36,11 +30,11 @@ def test_get_loudness():
 
     # sine.wav was generated using sox -b 16 -n sine.wav synth 3 sine 300-3300
     # white.png was generated using convert xc:white white.png
-    assert app.loudness.get_loudness.get_loudness("../tests/data/sine.wav") == {
+    assert app.media.loudness.get_loudness.get_loudness("../tests/data/sine.wav") == {
         "integrated_lufs": -2.2,
         "truepeak_lufs": 0.54,
     }
-    assert app.loudness.get_loudness.get_loudness("../tests/data/white.jpg") is None
+    assert app.media.loudness.get_loudness.get_loudness("../tests/data/white.jpg") is None
 
 
 def can_get_loudness():

@@ -1,6 +1,6 @@
 import pytest
 
-from app.ffprobe import do_probe
+from app.media.ffprobe import do_probe
 
 
 @pytest.mark.asyncio

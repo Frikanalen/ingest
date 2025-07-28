@@ -1,0 +1,31 @@
+import os
+
+from pydantic import BaseModel, Field, HttpUrl, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class ApiConfig(BaseModel):
+    url: HttpUrl = Field()
+    key: SecretStr = Field()
+
+
+class DebugConfig(BaseModel):
+    watchdir: str = Field(default="./upload", description="Directory to watch for new files")
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_nested_delimiter="_", env_nested_max_split=1, env_prefix="FK_")
+
+    api: ApiConfig = Field(default_factory=ApiConfig, description="API configuration settings")
+    debug: DebugConfig = Field(default_factory=DebugConfig, description="Debug configuration settings")
+
+    port: int = Field(default=8000, description="Port for the FastAPI server")
+    host: str = Field(default="0.0.0.0", description="Host for the FastAPI server")
+
+
+settings = Settings()  # Will raise ValidationError if any required vars are missing
+
+
+DIR = "/tmp"
+TO_DIR = "/tank/media/"
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
