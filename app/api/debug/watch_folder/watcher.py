@@ -50,16 +50,18 @@ def _list_directory_recursive(path: Path) -> DirectoryEntryList:
 
 
 async def watch_directory(directory: Path) -> ServerSentEvent:
-    yield ServerSentEvent(data="Watching directory...", event="status").encode()
+    yield ServerSentEvent(event="path", data=str(directory.absolute())).encode()
+    yield ServerSentEvent(event="status", data="Watching directory...").encode()
     print(f"Watching directory: {directory}")
     files = _list_directory_recursive(directory).model_dump_json()
-    yield ServerSentEvent(data=files, event="directoryUpdate").encode()
+    yield ServerSentEvent(event="directoryUpdate", data=files).encode()
 
     while True:
         await _change_event.wait()
         _change_event.clear()
+        # "When in doubt, use brute force" - Ken Thompson
         files = _list_directory_recursive(directory).model_dump_json()
-        yield ServerSentEvent(data=files, event="directoryUpdate").encode()
+        yield ServerSentEvent(event="directoryUpdate", data=files).encode()
 
 
 def stop_observer():
