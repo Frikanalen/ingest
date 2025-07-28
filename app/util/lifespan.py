@@ -20,6 +20,7 @@ async def lifespan(app: FastAPI):
             base_url=str(settings.api.url),
             token=settings.api.key,
             raise_on_unexpected_status=True,
+            follow_redirects=True,
         )
 
         django_api = DjangoApiService(client)
@@ -27,7 +28,7 @@ async def lifespan(app: FastAPI):
 
         app.state.app_state = IngestAppState(django_api=django_api)  # type: ignore[attr-defined]
 
+        yield  # App runs here
+
         # stop the watch folder observer if it was running
         stop_observer()
-
-        yield  # App runs here

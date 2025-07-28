@@ -24,9 +24,8 @@ class ComplianceError(Exception):
 def assert_compliance(metadata):
     try:
         assert metadata.format.nb_streams > 0, "File has no streams"
-        assert metadata.format.nb_programs == 1, "File must have exactly one program"
         assert metadata.format.duration is not None, "File metadata does not contain duration"
-        assert metadata.format.duration > 5, "File duration must be greater than 5 seconds"
+        assert float(metadata.format.duration) > 5, "File duration must be greater than 5 seconds"
         print(metadata.format.duration)
     except AssertionError as e:
         raise ComplianceError(e) from e

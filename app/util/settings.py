@@ -1,6 +1,7 @@
 import os
+from pathlib import Path
 
-from pydantic import BaseModel, Field, HttpUrl, SecretStr
+from pydantic import BaseModel, DirectoryPath, Field, HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,7 +11,7 @@ class ApiConfig(BaseModel):
 
 
 class DebugConfig(BaseModel):
-    watchdir: str = Field(default="./upload", description="Directory to watch for new files")
+    watchdir: DirectoryPath = Path("./upload")
 
 
 class Settings(BaseSettings):

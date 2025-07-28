@@ -1,51 +1,71 @@
 import asyncio
-import json
 import logging
-import os
+from pathlib import Path
 
+from pydantic import BaseModel
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
+from app.api.debug.watch_folder.server_sent_event import ServerSentEvent
 from app.util.settings import settings
 
 _change_event = asyncio.Event()
 
 
 class ChangeHandler(FileSystemEventHandler):
-    def __init__(self):
+    def __init__(self, loop: asyncio.AbstractEventLoop):
         super().__init__()
+        self.loop = loop
         self.logger = logging.getLogger(__name__)
 
     def on_any_event(self, event):
-        self.logger.debug("Received event", extra={"event": event})
-        loop = asyncio.get_event_loop()
-        loop.call_soon_threadsafe(_change_event.set)
+        self.loop.call_soon_threadsafe(_change_event.set)
 
 
 _observer = Observer()
-_observer.schedule(ChangeHandler(), path=settings.debug.watchdir, recursive=False)
+print(f"Starting directory watcher for {settings.debug.watchdir}")
+_observer.schedule(ChangeHandler(asyncio.get_running_loop()), path=settings.debug.watchdir, recursive=True)
 _observer.start()
 
 
-async def watch_directory():
-    yield 'event: status\ndata: "Watching directory..."\n\n'
+class DirectoryEntry(BaseModel):
+    name: str
+    size: int
+
+
+class DirectoryEntryList(BaseModel):
+    entries: list[DirectoryEntry] = []
+
+
+def _list_directory_recursive(path: Path) -> DirectoryEntryList:
+    """
+    List all files in the given directory recursively.
+    Returns a list of dictionaries with file names and sizes.
+    """
+    files = []
+    for entry in path.rglob("*"):
+        if entry.is_file():
+            files.append(DirectoryEntry(name=str(entry.relative_to(path)), size=entry.stat().st_size))
+    return DirectoryEntryList(entries=files)
+
+
+async def watch_directory(directory: Path) -> ServerSentEvent:
+    yield ServerSentEvent(data="Watching directory...", event="status").encode()
+    print(f"Watching directory: {directory}")
+    files = _list_directory_recursive(directory).model_dump_json()
+    yield ServerSentEvent(data=files, event="directoryUpdate").encode()
 
     while True:
         await _change_event.wait()
         _change_event.clear()
-
-        files = []
-        for entry in os.scandir(settings.debug.watchdir):
-            if entry.is_file():
-                files.append({"name": entry.name, "size": entry.stat().st_size})
-
-        data = json.dumps(files)
-        yield f"event: directoryUpdate\ndata: {data}\n\n"
+        files = _list_directory_recursive(directory).model_dump_json()
+        yield ServerSentEvent(data=files, event="directoryUpdate").encode()
 
 
 def stop_observer():
     """
     Stop the directory watcher observer cleanly.
     """
+    print("Stopping directory watcher")
     _observer.stop()
     _observer.join()
