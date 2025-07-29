@@ -32,24 +32,49 @@ class Ingester:
         self.logger.addFilter(VideoIdFilter(video_id))
         self.logger.info("Ingesting file with video_id: %s, original_file: %s", video_id, original_file)
 
-        await self.django_api.set_video_uploaded_time(video_id, datetime.now())
+        try:
+            await self.django_api.set_video_uploaded_time(video_id, datetime.now())
+        except Exception as e:
+            self.logger.error("Failed to set video uploaded time: %s", e)
+            raise
 
-        original_file_destination = self.archive.move_original_to_archive(video_id, original_file)
-        await self.django_api.set_video_duration(video_id, metadata.format.duration)
+        try:
+            self.logger.info("Moving original file to archive")
+            archive_original = self.archive.move_original_to_archive(video_id, original_file)
+        except Exception as e:
+            self.logger.error("Failed to move original file to archive: %s", e)
+            raise
 
-        for format_name in DESIRED_FORMATS:
-            self.logger.info("Processing: %s", original_file_destination)
-            output_directory = original_file_destination.parent / format_name
-            output_directory.mkdir(exist_ok=True)
-
-            template = TemplatedCommandGenerator(format_name)
-            output_file_name = f"{original_file_destination.stem}.{template.metadata.output_file_extension}"
-            output_file = output_directory / output_file_name
-            self.logger.info("Producing: %s", format_name)
-
-            await self.converter.process_format(original_file_destination, output_file, template, metadata)
-            self.logger.info("Finished processing: %s", video_id)
-            req = VideoFileRequest(filename=str(output_file), format_=format_name, video_id=int(video_id))
+        try:
+            self.logger.info("Setting video duration: %s", metadata.format.duration)
+            await self.django_api.set_video_duration(video_id, metadata.format.duration)
+            req = VideoFileRequest(filename=str(archive_original), format_=FormatEnum.ORIGINAL, video=int(video_id))
             await self.django_api.create_video_file(video_file=req)
+        except Exception as e:
+            self.logger.error("django-api error post original ingest: %s", e)
+            raise
+
+        for format in DESIRED_FORMATS:
+            await self._process_format(format, metadata, archive_original, video_id)
 
         await self.django_api.set_video_proper_import(video_id, True)
+
+    async def _process_format(self, format: FormatEnum, metadata: FfprobeOutput, archive_original: Path, video_id: str):
+        self.logger.info("Processing: %s", archive_original)
+        output_directory = archive_original.parent.parent / format
+
+        self.logger.info("Creating directory: %s", output_directory)
+        output_directory.mkdir(exist_ok=True)
+
+        self.logger.info("Building command for format: %s", format)
+        template = TemplatedCommandGenerator(format)
+
+        output_file_name = f"{archive_original.stem}.{template.metadata.output_file_extension}"
+        output_file = output_directory / output_file_name
+
+        self.logger.info("Storing %s to %s", format, output_file)
+        await self.converter.process_format(archive_original, output_file, template, metadata)
+
+        self.logger.info("Creating video file entry for %s", output_file)
+        req = VideoFileRequest(filename=str(output_file), format_=format, video=int(video_id))
+        await self.django_api.create_video_file(video_file=req)
