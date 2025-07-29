@@ -1,6 +1,7 @@
 FROM python:3.11-alpine3.20 AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:0.6.9 /uv /uvx /bin/
+RUN apk add git
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 # Disable Python downloads, because we want to use the system interpreter
 # across both images. If using a managed Python version, it needs to be
