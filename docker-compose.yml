@@ -17,13 +17,14 @@ services:
     environment:
       DJANGO_SUPERUSER_EMAIL: test@superuser.lol
       DJANGO_SUPERUSER_PASSWORD: "superuser"
+      DJANGO_LOAD_FIXTURES: "true"
       DATABASE_URL: postgres://frikanalen:frikanalen@db:5432/frikanalen
-      DJANGO_SETTINGS_MODULE: fkweb.settings.local
-      ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0"
+      DJANGO_SETTINGS_MODULE: fkweb.settings.production
+      ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0,host.docker.internal"
       DEBUG: "1"
       SECRET_KEY: "dummy"
     depends_on:
       db:
         condition: service_healthy
     ports:
-      - "18000:8080"
+      - "8000:8080"
