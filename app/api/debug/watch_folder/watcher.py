@@ -4,7 +4,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 from watchdog.events import FileSystemEventHandler
-from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver as Observer
 
 from app.api.debug.watch_folder.server_sent_event import ServerSentEvent
 from app.util.settings import settings
@@ -22,7 +22,7 @@ class ChangeHandler(FileSystemEventHandler):
         self.loop.call_soon_threadsafe(_change_event.set)
 
 
-_observer = Observer()
+_observer = Observer(timeout=1.0)
 print(f"Starting directory watcher for {settings.debug.watchdir}")
 _observer.schedule(ChangeHandler(asyncio.get_running_loop()), path=settings.debug.watchdir, recursive=True)
 _observer.start()
