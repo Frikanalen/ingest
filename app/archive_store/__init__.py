@@ -3,11 +3,10 @@ from logging import getLogger
 from pathlib import Path
 
 from app.util.file_name_utils import original_file_location
-from app.util.settings import settings
 
 
 class Archive:
-    def __init__(self, archive_base_path: Path = Path(settings.archive_dir)):
+    def __init__(self, archive_base_path: Path):
         self.archive_base_path = archive_base_path
         self.logger = getLogger(__name__)
 

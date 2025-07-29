@@ -7,7 +7,6 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers.polling import PollingObserver as Observer
 
 from app.api.debug.watch_folder.server_sent_event import ServerSentEvent
-from app.util.settings import settings
 
 _change_event = asyncio.Event()
 
@@ -23,9 +22,21 @@ class ChangeHandler(FileSystemEventHandler):
 
 
 _observer = Observer(timeout=1.0)
-print(f"Starting directory watcher for {settings.debug.watchdir}")
-_observer.schedule(ChangeHandler(asyncio.get_running_loop()), path=settings.debug.watchdir, recursive=True)
-_observer.start()
+
+
+def start_watchfolder(watchdir: Path | None = None):
+    print(f"Starting directory watcher for {watchdir}")
+    _observer.schedule(ChangeHandler(asyncio.get_running_loop()), path=watchdir, recursive=True)
+    _observer.start()
+
+
+def stop_watch_folder():
+    """
+    Stop the directory watcher observer cleanly.
+    """
+    print("Stopping directory watcher")
+    _observer.stop()
+    _observer.join()
 
 
 class DirectoryEntry(BaseModel):
@@ -62,12 +73,3 @@ async def watch_directory(directory: Path) -> ServerSentEvent:
         # "When in doubt, use brute force" - Ken Thompson
         files = _list_directory_recursive(directory).model_dump_json()
         yield ServerSentEvent(event="directoryUpdate", data=files).encode()
-
-
-def stop_observer():
-    """
-    Stop the directory watcher observer cleanly.
-    """
-    print("Stopping directory watcher")
-    _observer.stop()
-    _observer.join()

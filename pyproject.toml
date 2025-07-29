@@ -53,3 +53,5 @@ log_cli_level = "INFO"
 
 [tool.uv.sources]
 frikanalen-django-api-client = { git = "https://github.com/frikanalen/frikanalen-python-client.git", rev = "main" }
+[tool.ruff.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.params.Depends", "fastapi.Query", "fastapi.params.Query"]

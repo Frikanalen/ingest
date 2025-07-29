@@ -1,27 +1,8 @@
 import shutil
-from unittest.mock import AsyncMock
 
 import pytest
-from frikanalen_django_api_client.models import FormatEnum
 
 import app.media.loudness.get_loudness
-from app.media.converter import Converter
-from app.media.ffprobe import do_probe
-
-
-@pytest.mark.asyncio
-async def test_generate(color_bars_video):
-    expected_command_line_substring = f"/tmp/large_thumb/{color_bars_video.stem}.jpg"
-
-    runner = AsyncMock()
-    mock_django_api = AsyncMock()
-
-    metadata = await do_probe(color_bars_video)
-    converter = Converter(runner=runner, django_api=mock_django_api)
-    await converter.process_format(color_bars_video, FormatEnum.LARGE_THUMB, metadata, 0)
-
-    runner.run.assert_called_once()
-    assert expected_command_line_substring in runner.run.call_args[0][0]
 
 
 def test_get_loudness():

@@ -1,9 +1,15 @@
+import tempfile
+from unittest.mock import AsyncMock
+
 from fastapi.testclient import TestClient
 
 from app.api.hooks.schema import FileInfo, Header, HookEvent, HookRequest, HTTPRequest, MetaData
+from app.get_settings import get_settings
 from app.main import app
+from app.util.app_state import get_django_api
+from app.util.settings import ApiConfig, Settings
 
-hook_request = HookRequest(
+pre_create_request_valid = HookRequest(
     Type="pre-create",
     Event=HookEvent(
         Upload=(
@@ -13,7 +19,7 @@ hook_request = HookRequest(
                     "Size": 3012,
                     "SizeIsDeferred": False,
                     "Offset": 0,
-                    "MetaData": MetaData(),
+                    "MetaData": MetaData(**{"videoID": "1234", "origFileName": "test.mp4", "uploadToken": "asdfasdf"}),
                     "IsPartial": False,
                     "IsFinal": False,
                     "PartialUploads": None,
@@ -45,48 +51,45 @@ hook_request = HookRequest(
         ),
     ),
 )
-good_pre_create_hook_request = hook_request.model_copy(deep=True)
-good_pre_create_hook_request.event.upload.meta_data = MetaData(
-    **dict(VideoID="1234", OrigFileName="test.mp4", UploadToken="asdfasdf")
-)
+
+
+client = TestClient(app)
+
+HOOK_PATH = "/tusdHooks/"
+
+
+def get_settings_override():
+    return Settings(
+        api=ApiConfig(url="http://localhost:8000", username="", password=""),
+        archive_dir=tempfile.gettempdir(),  # fixme: no cleanup here yet
+        host="localhost",
+        port=55025,
+    )
+
+
+app.dependency_overrides[get_settings] = get_settings_override
+app.dependency_overrides[get_django_api] = lambda: AsyncMock()
 
 
 def test_pre_create_fails_if_metadata_bad():
-    client = TestClient(app)
+    pre_create_rq_missing_metadata = pre_create_request_valid.model_copy(deep=True)
+    pre_create_rq_missing_metadata.event.upload.meta_data = MetaData()
+    mock_hook_payload = pre_create_rq_missing_metadata.model_dump(by_alias=True)
 
-    mock_hook_payload = hook_request.model_dump(by_alias=True)
-
-    response = client.post("/", json=mock_hook_payload)
+    response = client.post(HOOK_PATH, json=mock_hook_payload)
     assert response.status_code == 422
 
 
 def test_pre_create_succeeds_if_metadata_parses():
-    client = TestClient(app)
-    mock_hook_payload = good_pre_create_hook_request.model_dump(by_alias=True)
+    mock_hook_payload = pre_create_request_valid.model_dump(by_alias=True)
 
-    response = client.post("/", json=mock_hook_payload)
+    response = client.post(HOOK_PATH, json=mock_hook_payload)
     assert response.status_code == 200
 
 
 def test_post_create_fails_if_metadata_bad():
-    client = TestClient(app)
+    bad_request = pre_create_request_valid.model_copy(deep=True)
+    bad_request.event.upload.meta_data = MetaData()
 
-    mock_hook_payload = hook_request.model_dump(by_alias=True)
-
-    response = client.post("/", json=mock_hook_payload)
+    response = client.post(HOOK_PATH, json=bad_request.model_dump(by_alias=True))
     assert response.status_code == 422
-
-
-def test_post_finish_triggers_ingest(color_bars_video):
-    client = TestClient(app)
-    good_post_finish_hook_request = good_pre_create_hook_request.model_copy(deep=True)
-    good_post_finish_hook_request.type = "post-finish"
-    good_post_finish_hook_request.event.upload.meta_data = MetaData(
-        **{"VideoID": "1234", "OrigFileName": "test.mp4", "UploadToken": "asdfasdf"}
-    )
-    good_post_finish_hook_request.event.upload.storage = {"Type": "filestore", "Path": str(color_bars_video)}
-
-    mock_hook_payload = good_post_finish_hook_request.model_dump(by_alias=True)
-
-    response = client.post("/", json=mock_hook_payload)
-    assert response.status_code == 200

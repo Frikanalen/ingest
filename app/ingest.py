@@ -5,12 +5,12 @@ from pathlib import Path
 from frikanalen_django_api_client.models import FormatEnum, VideoFileRequest
 
 from app.django_client.service import DjangoApiService
-from app.media.converter import Converter
 from app.util.logging import VideoIdFilter
 
 from .archive_store import Archive
-from .media.comand_template import TemplatedCommandGenerator
+from .media.comand_template import ProfileTemplateArguments, TemplatedCommandGenerator
 from .media.ffprobe_schema import FfprobeOutput
+from .task_builder import TKB
 
 DESIRED_FORMATS = (FormatEnum("large_thumb"),)
 
@@ -18,15 +18,17 @@ DESIRED_FORMATS = (FormatEnum("large_thumb"),)
 class Ingester:
     video_id: str
     django_api: DjangoApiService
-    converter: Converter
     archive: Archive
     logger: Logger
 
-    def __init__(self, django_api: DjangoApiService, converter: Converter, archive: Archive):
+    def __init__(
+        self,
+        archive_base_path: Path,
+        django_api: DjangoApiService,
+    ):
         self.logger = getLogger(__name__)
+        self.archive = Archive(archive_base_path)
         self.django_api = django_api
-        self.converter = converter
-        self.archive = archive
 
     async def ingest(self, video_id: str, original_file: Path, metadata: FfprobeOutput):
         self.logger.addFilter(VideoIdFilter(video_id))
@@ -73,7 +75,15 @@ class Ingester:
         output_file = output_directory / output_file_name
 
         self.logger.info("Storing %s to %s", format, output_file)
-        await self.converter.process_format(archive_original, output_file, template, metadata)
+
+        template_args = ProfileTemplateArguments(
+            input_file=archive_original,
+            output_file=output_file,
+            seek_s=(float(metadata.format.duration) * 0.25 or 30),
+        )
+
+        command = template.render(template_args)
+        await TKB(command).execute()
 
         self.logger.info("Creating video file entry for %s", output_file)
         req = VideoFileRequest(filename=str(output_file), format_=format, video=int(video_id))
