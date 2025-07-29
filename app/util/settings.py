@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     port: int = Field(default=8000, description="Port for the FastAPI server")
     host: str = Field(default="0.0.0.0", description="Host for the FastAPI server")
 
-    archive_dir: DirectoryPath = Path("/tmp/upload")
+    archive_dir: DirectoryPath = Path("./archive")
 
 
 settings = Settings()  # Will raise ValidationError if any required vars are missing

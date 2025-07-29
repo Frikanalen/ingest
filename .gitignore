@@ -287,3 +287,4 @@ bin/
 # Apparently there are ways to do this with a finer tooth comb, but I just want noise out of my git
 .idea
 /upload/
+/archive/
