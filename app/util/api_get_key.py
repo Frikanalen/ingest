@@ -1,0 +1,24 @@
+import logging
+
+from app.util.settings import settings
+from frikanalen_django_api_client import Client
+from frikanalen_django_api_client.api.obtain_token_v2 import obtain_token_v2_create
+from frikanalen_django_api_client.models import AuthTokenRequest
+
+logger = logging.getLogger(__name__)
+
+
+def api_get_key(username: str, password: str) -> str:
+    """
+    Helper function to obtain an API key using the provided username and password.
+    This is used to authenticate the client with the Django API service.
+    """
+    logger.info("Obtaining API key for user: %s", username)
+    login_client = Client(
+        raise_on_unexpected_status=True,
+        follow_redirects=True,
+        base_url=str(settings.api.url),
+    )
+    response = obtain_token_v2_create.sync_detailed(body=(AuthTokenRequest(username, password)), client=login_client)
+
+    return response.parsed.token

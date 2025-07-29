@@ -11,6 +11,7 @@ from frikanalen_django_api_client.models import (
 )
 
 from app.media.loudness.loudness_measurement import LoudnessMeasurement
+from app.util.api_get_key import api_get_key
 from app.util.pprint_object_list import pprint_object_list
 from app.util.settings import settings
 
@@ -66,10 +67,15 @@ if __name__ == "__main__":
     import asyncio
 
     async def main():
+        token = api_get_key(
+            settings.api.username,
+            settings.api.password.get_secret_value(),
+        )
+
         service = DjangoApiService(
             AuthenticatedClient(
                 base_url=str(settings.api.url),
-                token=settings.api.key,
+                token=token,
                 raise_on_unexpected_status=True,
                 follow_redirects=True,
             )
