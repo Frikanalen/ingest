@@ -28,6 +28,7 @@ async def lifespan(app: FastAPI):
         client = AuthenticatedClient(
             base_url=str(settings.api.url),
             token=token,
+            prefix="Token",
             raise_on_unexpected_status=True,
             follow_redirects=True,
         )
