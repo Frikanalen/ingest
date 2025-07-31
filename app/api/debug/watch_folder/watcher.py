@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -60,7 +61,7 @@ def _list_directory_recursive(path: Path) -> DirectoryEntryList:
     return DirectoryEntryList(entries=files)
 
 
-async def watch_directory(directory: Path) -> ServerSentEvent:
+async def watch_directory(directory: Path) -> AsyncGenerator[str]:
     yield ServerSentEvent(event="path", data=str(directory.absolute())).encode()
     yield ServerSentEvent(event="status", data="Watching directory...").encode()
     print(f"Watching directory: {directory}")
