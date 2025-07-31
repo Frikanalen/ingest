@@ -2,9 +2,7 @@ from datetime import datetime
 from logging import Logger, getLogger
 from pathlib import Path
 
-from frikanalen_django_api_client.models import FormatEnum, VideoFileRequest
-
-from app.django_client.service import DjangoApiService
+from app.django_client.service import DjangoApiService, FormatEnum
 from app.util.logging import VideoIdFilter
 
 from .archive_store import Archive
@@ -50,31 +48,35 @@ class Ingester:
         try:
             self.logger.info("Setting video duration: %s", metadata.format.duration)
             await self.django_api.set_video_duration(video_id, metadata.format.duration)
-            req = VideoFileRequest(filename=str(archive_original), format_=FormatEnum.ORIGINAL, video=int(video_id))
-            await self.django_api.create_video_file(video_file=req)
+
+            await self.django_api.create_video_file(
+                filename=archive_original, file_format=FormatEnum.ORIGINAL, video_id=video_id
+            )
         except Exception as e:
             self.logger.error("django-api error post original ingest: %s", e)
             raise
 
-        for format in DESIRED_FORMATS:
-            await self._process_format(format, metadata, archive_original, video_id)
+        for file_format in DESIRED_FORMATS:
+            await self._process_format(file_format, metadata, archive_original, video_id)
 
         await self.django_api.set_video_proper_import(video_id, True)
 
-    async def _process_format(self, format: FormatEnum, metadata: FfprobeOutput, archive_original: Path, video_id: str):
+    async def _process_format(
+        self, file_format: FormatEnum, metadata: FfprobeOutput, archive_original: Path, video_id: str
+    ):
         self.logger.info("Processing: %s", archive_original)
-        output_directory = archive_original.parent.parent / format
+        output_directory = archive_original.parent.parent / file_format
 
         self.logger.info("Creating directory: %s", output_directory)
         output_directory.mkdir(exist_ok=True)
 
-        self.logger.info("Building command for format: %s", format)
-        template = TemplatedCommandGenerator(format)
+        self.logger.info("Building command for format: %s", file_format)
+        template = TemplatedCommandGenerator(file_format)
 
         output_file_name = f"{archive_original.stem}.{template.metadata.output_file_extension}"
         output_file = output_directory / output_file_name
 
-        self.logger.info("Storing %s to %s", format, output_file)
+        self.logger.info("Storing %s to %s", file_format, output_file)
 
         template_args = ProfileTemplateArguments(
             input_file=archive_original,
@@ -86,5 +88,4 @@ class Ingester:
         await TKB(command).execute()
 
         self.logger.info("Creating video file entry for %s", output_file)
-        req = VideoFileRequest(filename=str(output_file), format_=format, video=int(video_id))
-        await self.django_api.create_video_file(video_file=req)
+        await self.django_api.create_video_file(filename=str(output_file), file_format=file_format, video_id=video_id)

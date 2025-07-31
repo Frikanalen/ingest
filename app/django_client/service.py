@@ -1,4 +1,5 @@
 from datetime import datetime
+from enum import Enum
 
 from frikanalen_django_api_client import AuthenticatedClient
 from frikanalen_django_api_client.api.videofiles import videofiles_create, videofiles_list, videofiles_partial_update
@@ -13,6 +14,33 @@ from frikanalen_django_api_client.models import (
 from app.media.loudness.loudness_measurement import LoudnessMeasurement
 from app.util.api_get_key import api_get_key
 from app.util.pprint_object_list import pprint_object_list
+
+
+class FormatEnum(str, Enum):
+    BROADCAST = "broadcast"
+    CLOUDFLARE_ID = "cloudflare_id"
+    LARGE_THUMB = "large_thumb"
+    MED_THUMB = "med_thumb"
+    ORIGINAL = "original"
+    SMALL_THUMB = "small_thumb"
+    SRT = "srt"
+    THEORA = "theora"
+    VC1 = "vc1"
+
+    def __str__(self) -> str:
+        return str(self.value)
+
+
+class IntFormatEnum(int, Enum):
+    LARGE_THUMB = 1
+    BROADCAST = 2
+    VC1 = 3
+    MED_THUMB = 4
+    SMALL_THUMB = 5
+    ORIGINAL = 6
+    THEORA = 7
+    SRT = 8
+    CLOUDFLARE_ID = 9
 
 
 class DjangoApiService:
@@ -55,8 +83,11 @@ class DjangoApiService:
     async def get_files_for_video(self, video_id: str):
         return await videofiles_list.asyncio(client=self.client, video_id=int(video_id))
 
-    async def create_video_file(self, video_file: VideoFileRequest):
-        return await videofiles_create.asyncio(client=self.client, body=video_file)
+    async def create_video_file(self, filename: str, video_id: str, file_format: FormatEnum):
+        req = VideoFileRequest(
+            filename=str(filename), video=int(video_id), format_=IntFormatEnum[file_format.name].value
+        )
+        return await videofiles_create.asyncio(client=self.client, body=req)
 
     async def get_videos(self, limit=10):
         return (await videos_list.asyncio(client=self.client, limit=limit, ordering="-uploaded_time")).results or []
@@ -70,7 +101,7 @@ if __name__ == "__main__":
 
         settings = get_settings()
         token = api_get_key(
-            settings.api.url,
+            str(settings.api.url),
             settings.api.username,
             settings.api.password.get_secret_value(),
         )
