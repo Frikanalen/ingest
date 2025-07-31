@@ -26,6 +26,7 @@ class FormatEnum(str, Enum):
     SRT = "srt"
     THEORA = "theora"
     VC1 = "vc1"
+    WEBM_MED = "webm_med"
 
     def __str__(self) -> str:
         return str(self.value)
@@ -41,6 +42,7 @@ class IntFormatEnum(int, Enum):
     THEORA = 7
     SRT = 8
     CLOUDFLARE_ID = 9
+    WEBM_MED = 10
 
 
 class DjangoApiService:

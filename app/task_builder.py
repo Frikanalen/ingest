@@ -1,5 +1,4 @@
 import asyncio
-import shlex
 
 from app.runner import Task
 
@@ -16,8 +15,8 @@ def TKB(command: str) -> Task:
 
     """
     return Task(
-        asyncio.create_subprocess_exec(
-            *shlex.split(command),
+        asyncio.create_subprocess_shell(
+            command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

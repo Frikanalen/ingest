@@ -10,7 +10,10 @@ from .media.comand_template import ProfileTemplateArguments, TemplatedCommandGen
 from .media.ffprobe_schema import FfprobeOutput
 from .task_builder import TKB
 
-DESIRED_FORMATS = (FormatEnum("large_thumb"),)
+DESIRED_FORMATS = (
+    FormatEnum.LARGE_THUMB,
+    FormatEnum.WEBM_MED,
+)
 
 
 class Ingester:
@@ -85,6 +88,8 @@ class Ingester:
         )
 
         command = template.render(template_args)
+        self.logger.debug("Generated command: %s", command)
+
         await TKB(command).execute()
 
         self.logger.info("Creating video file entry for %s", output_file)

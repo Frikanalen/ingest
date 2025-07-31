@@ -35,15 +35,15 @@ async def receive_hook(
         new_file = Path(f"{upload_id}/{sanitized_filename}")
 
         if (settings.tusd_dir / new_file).exists():
-            logger.warning("File already exists, deleting!: %s", new_file)
-            new_file.unlink()
+            logger.warning("File already exists, deleting!: %s", (settings.tusd_dir / new_file))
+            (settings.tusd_dir / new_file).unlink()
 
         return HookResponse(ChangeFileInfo=FileInfoChanges(ID=upload_id, Storage={"Path": str(new_file)}))
 
     if hook_request.type == "post-finish":
         ingest = Ingester(archive_base_path=settings.archive_dir, django_api=django_api)
         upload_meta = get_upload_metadata(hook_request)
-        upload_file = Path(hook_request.event.upload.storage["Path"])
+        upload_file = Path(hook_request.event.upload.storage["Path"]).relative_to(Path("/"))
 
         try:
             metadata = await metadata_extractor.assert_compliance(upload_file)

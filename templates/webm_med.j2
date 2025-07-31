@@ -1,0 +1,14 @@
+---
+output_file_extension: webm
+---
+ffmpeg -i "{{ input_file }}"
+    -passlogfile "{{ output_file }}"
+    -c:v libvpx-vp9 -crf 30 -b:v 10M
+    -pass 1 -an -f null /dev/null &&
+ffmpeg -i "{{ input_file }}"
+    -passlogfile "{{ output_file }}"
+    -c:v libvpx-vp9 -crf 30 -b:v 10M
+    -pass 2 -cpu-used 3 -row-mt 1 -tile-rows 2 -threads 8
+    -c:a libopus
+    -vf "pad=ceil(max(iw\,ih*16/9)/2)*2:ceil(max(ih\,iw*9/16)/2)*2:(ow-iw)/2:(oh-ih)/2,setsar=1"
+    "{{ output_file }}"

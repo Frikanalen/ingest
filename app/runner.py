@@ -16,7 +16,7 @@ class Task:
     def __init__(self, proc: Coroutine[Any, Any, Process]):
         self.proc = proc
 
-    async def execute(self) -> str:
+    async def execute(self) -> tuple[str, str]:
         proc = await self.proc
         stdout, stderr = await proc.communicate()
 
