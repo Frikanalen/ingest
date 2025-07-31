@@ -1,12 +1,10 @@
 from pathlib import Path
 
-import pytest
 from frikanalen_django_api_client.models import FormatEnum
 
 from app.media.comand_template import ProfileTemplateArguments, TemplatedCommandGenerator
 
 
-@pytest.mark.asyncio
 def test_large_thumb_command_looks_as_expected():
     template = TemplatedCommandGenerator(FormatEnum.LARGE_THUMB)
     template_args = ProfileTemplateArguments(
