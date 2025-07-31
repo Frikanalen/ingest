@@ -34,4 +34,6 @@ COPY --from=builder --chown=app:app /app .
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
 
+USER 1000
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

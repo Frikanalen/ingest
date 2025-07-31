@@ -48,8 +48,8 @@ async def lifespan(app: FastAPI):
         # fixme: should only happen in debug mode
         from app.api.debug.watch_folder.watcher import start_watchfolder
 
-        logger.info("Starting directory watcher for %s", settings.debug.watchdir)
-        start_watchfolder(settings.debug.watchdir)
+        logger.info("Starting directory watcher for %s", settings.tusd_dir)
+        start_watchfolder(settings.tusd_dir)
 
         yield  # App runs here
 

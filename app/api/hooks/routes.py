@@ -32,9 +32,9 @@ async def receive_hook(
         # construct updated values for the file info
         sanitized_filename = secure_filename(metadata.orig_file_name)
         upload_id = f"{metadata.video_id}"
-        new_file = settings.tusd_dir / f"{upload_id}/{sanitized_filename}"
+        new_file = Path(f"{upload_id}/{sanitized_filename}")
 
-        if new_file.exists():
+        if (settings.tusd_dir / new_file).exists():
             logger.warning("File already exists, deleting!: %s", new_file)
             new_file.unlink()
 
@@ -43,11 +43,8 @@ async def receive_hook(
     if hook_request.type == "post-finish":
         ingest = Ingester(archive_base_path=settings.archive_dir, django_api=django_api)
         upload_meta = get_upload_metadata(hook_request)
+        upload_file = Path(hook_request.event.upload.storage["Path"])
 
-        # As it's presently configured, tusd sees it at /upload/<video_id>/<sanitized_filename>
-        # and it's mounted at ./upload for ingest.
-        # It's a janky way to turn an absolute path to a relative one, but it works
-        upload_file = Path(f".{hook_request.event.upload.storage['Path']}")
         try:
             metadata = await metadata_extractor.assert_compliance(upload_file)
         except ComplianceError as e:
