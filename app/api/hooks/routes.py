@@ -6,7 +6,7 @@ from starlette.exceptions import HTTPException
 
 from app.api.hooks.metadata import ComplianceError, MetadataExtractor, get_upload_metadata
 from app.api.hooks.pre_create import pre_create
-from app.api.hooks.schema import HookRequest
+from app.api.hooks.schema.request import HookRequest
 from app.django_client.service import DjangoApiService
 from app.get_settings import get_settings
 from app.ingest import Ingester

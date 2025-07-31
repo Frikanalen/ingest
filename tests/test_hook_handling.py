@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
-from app.api.hooks.schema import FileInfo, Header, HookEvent, HookRequest, HTTPRequest, MetaData
 from app.get_settings import get_settings
+from app.api.hooks.schema.request import FileInfo, Header, HookEvent, HookRequest, HTTPRequest, MetaData
 from app.main import app
 from app.util.app_state import get_django_api
 from app.util.settings import ApiConfig, Settings

@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
-from app.api.hooks.schema import HookRequest
+from app.api.hooks.schema.request import HookRequest
 from app.media.ffprobe_schema import FfprobeOutput
 from app.task_builder import TKB
 

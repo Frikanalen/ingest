@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tus/tusd/v2/pkg/hooks/hook-response",
+  "$ref": "#/$defs/HookResponse",
+  "$defs": {
+    "FileInfoChanges": {
+      "properties": {
+        "ID": {
+          "type": "string"
+        },
+        "MetaData": {
+          "$ref": "#/$defs/MetaData"
+        },
+        "Storage": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "ID",
+        "MetaData",
+        "Storage"
+      ]
+    },
+    "HTTPHeader": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "HTTPResponse": {
+      "properties": {
+        "StatusCode": {
+          "type": "integer"
+        },
+        "Body": {
+          "type": "string"
+        },
+        "Header": {
+          "$ref": "#/$defs/HTTPHeader"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "StatusCode",
+        "Body",
+        "Header"
+      ]
+    },
+    "HookResponse": {
+      "properties": {
+        "HTTPResponse": {
+          "$ref": "#/$defs/HTTPResponse"
+        },
+        "RejectUpload": {
+          "type": "boolean"
+        },
+        "RejectTermination": {
+          "type": "boolean"
+        },
+        "ChangeFileInfo": {
+          "$ref": "#/$defs/FileInfoChanges"
+        },
+        "StopUpload": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "HTTPResponse",
+        "RejectUpload",
+        "RejectTermination",
+        "ChangeFileInfo",
+        "StopUpload"
+      ]
+    },
+    "MetaData": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    }
+  }
+}
