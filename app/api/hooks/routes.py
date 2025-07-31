@@ -3,10 +3,11 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends
 from starlette.exceptions import HTTPException
+from werkzeug.utils import secure_filename
 
 from app.api.hooks.metadata import ComplianceError, MetadataExtractor, get_upload_metadata
-from app.api.hooks.pre_create import pre_create
 from app.api.hooks.schema.request import HookRequest
+from app.api.hooks.schema.response import FileInfoChanges, HookResponse
 from app.django_client.service import DjangoApiService
 from app.ingest import Ingester
 from app.util.app_state import get_django_api, get_metadata_extractor
@@ -25,7 +26,21 @@ async def receive_hook(
 ):
     logger.info("Received hook: %s", hook_request.type)
     if hook_request.type == "pre-create":
-        return await pre_create(hook_request)
+        # read and validate request metadata
+        metadata = get_upload_metadata(hook_request)
+
+        # construct updated values for the file info
+        sanitized_filename = secure_filename(metadata.orig_file_name)
+        upload_id = f"{metadata.video_id}"
+        new_path = f"/upload/{upload_id}/{sanitized_filename}"
+
+        new_file = Path(f".{new_path}")
+
+        if new_file.exists():
+            logger.warning("File already exists, deleting!: %s", new_file)
+            new_file.unlink()
+
+        return HookResponse(ChangeFileInfo=FileInfoChanges(ID=upload_id, Storage={"Path": new_path}))
 
     if hook_request.type == "post-finish":
         ingest = Ingester(archive_base_path=settings.archive_dir, django_api=django_api)
