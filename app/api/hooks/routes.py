@@ -36,7 +36,7 @@ async def receive_hook(
         # It's a janky way to turn an absolute path to a relative one, but it works
         upload_file = Path(f".{hook_request.event.upload.storage['Path']}")
         try:
-            metadata = metadata_extractor.assert_compliance(upload_file)
+            metadata = await metadata_extractor.assert_compliance(upload_file)
         except ComplianceError as e:
             logger.error("File failed compliance check: %s", e)
             raise HTTPException(status_code=400, detail=f"File failed compliance check: {e}") from e
