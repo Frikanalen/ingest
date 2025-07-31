@@ -20,6 +20,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Then, use a final image without uv
 FROM python:3.11-alpine3.20
+RUN apk add ffmpeg
+
 # It is important to use the image that matches the builder, as the path to the
 # Python executable must be the same, e.g., using `python:3.11-slim-bookworm`
 # will fail.
@@ -32,4 +34,4 @@ COPY --from=builder --chown=app:app /app .
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
 
-CMD ["python", "main.py", "daemon"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
