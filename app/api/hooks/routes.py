@@ -32,15 +32,13 @@ async def receive_hook(
         # construct updated values for the file info
         sanitized_filename = secure_filename(metadata.orig_file_name)
         upload_id = f"{metadata.video_id}"
-        new_path = f"/upload/{upload_id}/{sanitized_filename}"
-
-        new_file = Path(f".{new_path}")
+        new_file = settings.tusd_dir / f"{upload_id}/{sanitized_filename}"
 
         if new_file.exists():
             logger.warning("File already exists, deleting!: %s", new_file)
             new_file.unlink()
 
-        return HookResponse(ChangeFileInfo=FileInfoChanges(ID=upload_id, Storage={"Path": new_path}))
+        return HookResponse(ChangeFileInfo=FileInfoChanges(ID=upload_id, Storage={"Path": str(new_file)}))
 
     if hook_request.type == "post-finish":
         ingest = Ingester(archive_base_path=settings.archive_dir, django_api=django_api)

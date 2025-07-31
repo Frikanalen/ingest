@@ -12,7 +12,7 @@ router = APIRouter()
 
 @router.get("/tusFiles")
 async def watch_downloads(settings: Annotated[IngestAppSettings, Depends(get_settings)]):
-    return StreamingResponse(watch_directory(settings.debug.watchdir), media_type="text/event-stream")
+    return StreamingResponse(watch_directory(settings.tusd_dir), media_type="text/event-stream")
 
 
 @router.get("/archive")

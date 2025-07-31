@@ -18,10 +18,6 @@ class DjangoApiSettingsTokenAuth(BaseModel):
     token: SecretStr = Field()
 
 
-class DebugConfig(BaseModel):
-    watchdir: DirectoryPath = Path("./upload")
-
-
 def get_discriminator_value(v: Any) -> str:
     if isinstance(v, dict):
         return v.get("fruit", v.get("filling"))
@@ -38,12 +34,11 @@ class IngestAppSettings(BaseSettings):
         default_factory=DjangoApiSettingsPwdAuth,
     )
 
-    debug: DebugConfig = Field(default_factory=DebugConfig, description="Debug configuration settings")
-
     port: int = Field(default=8000, description="Port for the FastAPI server")
     host: str = Field(default="0.0.0.0", description="Host for the FastAPI server")
 
-    archive_dir: DirectoryPath = Path("./archive")
+    tusd_dir: DirectoryPath = Path("./upload", description="Directory where ingest should look for uploads from tusd")
+    archive_dir: DirectoryPath = Path("./archive", description="Directory where ingest should store processed files")
 
 
 DIR = "/tmp"
