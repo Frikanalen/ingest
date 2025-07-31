@@ -6,23 +6,31 @@ from frikanalen_django_api_client import AuthenticatedClient
 
 from app.api.debug.watch_folder.watcher import stop_watch_folder
 from app.django_client.service import DjangoApiService
-from app.get_settings import get_settings
 from app.util.api_get_key import api_get_key
 from app.util.ingest_app_state import IngestAppState
+from app.util.settings import DjangoApiSettingsPwdAuth, DjangoApiSettingsTokenAuth, get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def get_token(api_settings: DjangoApiSettingsTokenAuth | DjangoApiSettingsPwdAuth) -> str | None:
+    if isinstance(api_settings, DjangoApiSettingsPwdAuth):
+        return api_get_key(
+            api_settings.url,
+            api_settings.username,
+            api_settings.password.get_secret_value(),
+        )
+    elif isinstance(api_settings, DjangoApiSettingsTokenAuth):
+        return api_settings.token.get_secret_value()
+    else:
+        raise ValueError("Unsupported API authentication method")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with AsyncExitStack() as stack:
         settings = get_settings()
-
-        token = api_get_key(
-            settings.api.url,
-            settings.api.username,
-            settings.api.password.get_secret_value(),
-        )
+        token = get_token(settings.api)
 
         client = AuthenticatedClient(
             base_url=str(settings.api.url),

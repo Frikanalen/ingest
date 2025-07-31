@@ -7,8 +7,8 @@ from starlette.middleware.cors import CORSMiddleware
 from app.api.debug.watch_folder.routes import router as watch_folder_router
 from app.api.health.routes import router as internal_router
 from app.api.hooks.routes import router as hooks_router
-from app.get_settings import get_settings
 from app.util.lifespan import lifespan
+from app.util.settings import get_settings
 
 app = FastAPI(lifespan=lifespan, debug=True)
 logging.basicConfig(level=logging.INFO)

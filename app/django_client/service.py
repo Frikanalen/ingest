@@ -66,7 +66,7 @@ if __name__ == "__main__":
     import asyncio
 
     async def main():
-        from app.get_settings import get_settings
+        from app.util.settings import get_settings
 
         settings = get_settings()
         token = api_get_key(

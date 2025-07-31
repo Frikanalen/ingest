@@ -8,10 +8,9 @@ from app.api.hooks.metadata import ComplianceError, MetadataExtractor, get_uploa
 from app.api.hooks.pre_create import pre_create
 from app.api.hooks.schema.request import HookRequest
 from app.django_client.service import DjangoApiService
-from app.get_settings import get_settings
 from app.ingest import Ingester
 from app.util.app_state import get_django_api, get_metadata_extractor
-from app.util.settings import Settings
+from app.util.settings import IngestAppSettings, get_settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -20,7 +19,7 @@ router = APIRouter()
 @router.post("/")
 async def receive_hook(
     hook_request: HookRequest,
-    settings: Settings = Depends(get_settings),
+    settings: IngestAppSettings = Depends(get_settings),
     django_api: DjangoApiService = Depends(get_django_api),
     metadata_extractor: MetadataExtractor = Depends(get_metadata_extractor),
 ):

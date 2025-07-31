@@ -3,11 +3,10 @@ from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
-from app.get_settings import get_settings
 from app.api.hooks.schema.request import FileInfo, Header, HookEvent, HookRequest, HTTPRequest, MetaData
 from app.main import app
 from app.util.app_state import get_django_api
-from app.util.settings import ApiConfig, Settings
+from app.util.settings import DjangoApiSettingsPwdAuth, IngestAppSettings, get_settings
 
 pre_create_request_valid = HookRequest(
     Type="pre-create",
@@ -59,8 +58,8 @@ HOOK_PATH = "/tusdHooks/"
 
 
 def get_settings_override():
-    return Settings(
-        api=ApiConfig(url="http://localhost:8000", username="", password=""),
+    return IngestAppSettings(
+        api=DjangoApiSettingsPwdAuth(url="http://localhost:8000", username="", password=""),
         archive_dir=tempfile.gettempdir(),  # fixme: no cleanup here yet
         host="localhost",
         port=55025,
