@@ -8,7 +8,7 @@ from app.util.logging import VideoIdFilter
 from .archive_store import Archive
 from .media.comand_template import ProfileTemplateArguments, TemplatedCommandGenerator
 from .media.ffprobe_schema import FfprobeOutput
-from .task_builder import build_task
+from .runner import Task
 
 DESIRED_FORMATS = (
     FormatEnum.LARGE_THUMB,
@@ -90,7 +90,7 @@ class Ingester:
         command = template.render(template_args)
         self.logger.debug("Generated command: %s", command)
 
-        await build_task(command).execute()
+        await Task(command).execute()
 
         self.logger.info("Creating video file entry for %s", output_file)
         await self.django_api.create_video_file(filename=str(output_file), file_format=file_format, video_id=video_id)

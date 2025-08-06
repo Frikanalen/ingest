@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from app.api.hooks.schema.request import HookRequest
 from app.media.ffprobe_schema import FfprobeOutput
-from app.task_builder import build_task
+from app.runner import Task
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +33,8 @@ class MetadataExtractor:
     """Class to handle metadata extraction and compliance checking."""
 
     async def _run_ffprobe(self, filepath: Path) -> str:
-        stdout, _ = await build_task(
-            f"ffprobe -v quiet -show_format -show_streams -of json {shlex.quote(str(filepath))}"
+        stdout, _ = await Task(
+            f"ffprobe -v quiet -show_format -show_streams -of json {shlex.quote(str(filepath))}",
         ).execute()
         return stdout
 

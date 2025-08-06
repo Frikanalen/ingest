@@ -1,6 +1,6 @@
 import pytest
 
-from app.task_builder import build_task
+from app.runner import Task
 
 
 @pytest.mark.asyncio
@@ -9,6 +9,6 @@ async def test_basic_run(tmp_path):
     test_path.touch()
     assert test_path.exists()
 
-    await build_task(f"rm {test_path}").execute()
+    await Task(f"rm {test_path}").execute()
 
     assert not test_path.exists()
