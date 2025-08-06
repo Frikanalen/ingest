@@ -361,7 +361,7 @@ wheels = [
 [[package]]
 name = "frikanalen-django-api-client"
 version = "1.1.0"
-source = { git = "https://github.com/frikanalen/frikanalen-python-client.git?rev=main#db659592a9db4daba17cd543ece7ee1b0e20ebb7" }
+source = { git = "https://github.com/frikanalen/frikanalen-python-client.git?rev=main#cb2bb27b2712319cc6f47a40d1ad9862c1779bbc" }
 dependencies = [
     { name = "attrs" },
     { name = "httpx" },
