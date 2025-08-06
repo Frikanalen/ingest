@@ -6,7 +6,6 @@ from frikanalen_django_api_client import AuthenticatedClient
 
 from app.api.debug.watch_folder.watcher import stop_watch_folder
 from app.django_client.service import DjangoApiService
-from app.util.api_get_key import api_get_key
 from app.util.ingest_app_state import IngestAppState
 from app.util.settings import DjangoApiSettingsPwdAuth, DjangoApiSettingsTokenAuth, get_settings
 
@@ -15,8 +14,10 @@ logger = logging.getLogger(__name__)
 
 def get_token(api_settings: DjangoApiSettingsTokenAuth | DjangoApiSettingsPwdAuth) -> str | None:
     if isinstance(api_settings, DjangoApiSettingsPwdAuth):
+        from app.util.api_get_key import api_get_key
+
         return api_get_key(
-            api_settings.url,
+            str(api_settings.url),
             api_settings.username,
             api_settings.password.get_secret_value(),
         )

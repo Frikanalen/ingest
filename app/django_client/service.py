@@ -12,7 +12,6 @@ from frikanalen_django_api_client.models import (
 )
 
 from app.media.loudness.loudness_measurement import LoudnessMeasurement
-from app.util.api_get_key import api_get_key
 from app.util.pprint_object_list import pprint_object_list
 
 
@@ -99,6 +98,7 @@ if __name__ == "__main__":
     import asyncio
 
     async def main():
+        from app.util.api_get_key import api_get_key
         from app.util.settings import get_settings
 
         settings = get_settings()
