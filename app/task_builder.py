@@ -1,23 +1,14 @@
-import asyncio
+"""RSX-11M for life"""
+
+from asyncio import create_subprocess_shell, subprocess
 
 from app.runner import Task
 
 
-def TKB(command: str) -> Task:
-    """Task Builder for running subprocesses asynchronously. The name is a reference to RSX-11M+ :)
-
-    This function takes a command string, splits it into arguments, and creates a Task
-    that can be executed asynchronously. It uses asyncio's subprocess capabilities to
-    run the command in a subprocess, capturing both stdout and stderr.
+def build_task(shell_command: str) -> Task:
+    """Creates a Task to run a shell command asynchronously.
 
     Args:
-        command (str): The shell command to run.
-
+        shell_command (str): The shell command to run.
     """
-    return Task(
-        asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-    )
+    return Task(create_subprocess_shell(shell_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE))
