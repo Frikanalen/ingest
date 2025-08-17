@@ -29,6 +29,7 @@ class Ingester:
     ):
         self.logger = getLogger(__name__)
         self.archive = Archive(archive_base_path)
+        self.archive_base_path = archive_base_path
         self.django_api = django_api
 
     async def ingest(self, video_id: str, original_file: Path, metadata: FfprobeOutput):
@@ -53,7 +54,9 @@ class Ingester:
             await self.django_api.set_video_duration(video_id, metadata.format.duration)
 
             await self.django_api.create_video_file(
-                filename=archive_original, file_format=FormatEnum.ORIGINAL, video_id=video_id
+                filename=archive_original.relative_to(self.archive_base_path),
+                file_format=FormatEnum.ORIGINAL,
+                video_id=video_id,
             )
         except Exception as e:
             self.logger.error("django-api error post original ingest: %s", e)
@@ -93,4 +96,6 @@ class Ingester:
         await Task(command).execute()
 
         self.logger.info("Creating video file entry for %s", output_file)
-        await self.django_api.create_video_file(filename=str(output_file), file_format=file_format, video_id=video_id)
+        await self.django_api.create_video_file(
+            filename=str(output_file.relative_to(self.archive_base_path)), file_format=file_format, video_id=video_id
+        )
