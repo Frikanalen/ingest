@@ -1,4 +1,4 @@
-FROM python:3.11-alpine3.20 AS builder
+FROM python:3.12 AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:0.6.9 /uv /uvx /bin/
 RUN apk add git
@@ -19,7 +19,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
 # Then, use a final image without uv
-FROM python:3.11-alpine3.20
+FROM python:3.12
 RUN apk add ffmpeg
 
 # It is important to use the image that matches the builder, as the path to the
