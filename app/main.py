@@ -11,7 +11,7 @@ from app.util.lifespan import lifespan
 from app.util.settings import get_settings
 
 app = FastAPI(lifespan=lifespan, debug=True)
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 origins = [
     "http://localhost:3000",
