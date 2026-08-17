@@ -28,14 +28,21 @@ RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
+# A real account rather than a bare `USER 1000:4203`. Archiving happens over
+# SSH, and asyncssh looks up the local username before it will open a
+# connection, so a uid with no passwd entry fails every upload with "Unknown
+# local username". Having a home directory also gives it somewhere to expand
+# ~ to. 4203 matches the group that owns the media archive on file01, which
+# now only matters for the upload volume shared with tusd.
+RUN groupadd --gid 4203 fkupload \
+    && useradd --uid 1000 --gid 4203 --create-home --shell /usr/sbin/nologin ingest
+
 # Copy the application from the builder
-COPY --from=builder --chown=app:app /app .
+COPY --from=builder --chown=ingest:fkupload /app .
 
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
 
-# todo: check if this makes a difference
-# 4203 is the group id of the media encoder on file01.
-USER 1000:4203
+USER ingest:fkupload
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

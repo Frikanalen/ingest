@@ -1,3 +1,5 @@
+import getpass
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from logging import getLogger
@@ -11,6 +13,32 @@ from app.util.pretty_duration import pretty_duration
 from app.util.settings import SshArchiveSettings
 
 logger = getLogger(__name__)
+
+# Stands in for the account running the process when the system cannot name it.
+FALLBACK_LOCAL_USERNAME = "ingest"
+
+
+def ensure_local_username() -> None:
+    """Make sure the account running this process has a resolvable name.
+
+    asyncssh looks up the local username to expand ssh_config, before it
+    considers any of the options passed to it, even though nothing here uses
+    it: the account we log in to the archive as is configured separately. In a
+    container running as a bare uid there is no passwd entry to find, so that
+    lookup raises and every upload dies with "Unknown local username".
+
+    The image gives the uid a real account, which is the proper fix, but the
+    deployment is free to run as some other uid and the failure would not
+    appear until the first upload. Naming ourselves is cheap insurance.
+    """
+    try:
+        getpass.getuser()
+    except KeyError:
+        logger.warning(
+            "The local account has no name; calling ourselves %s so SSH can proceed",
+            FALLBACK_LOCAL_USERNAME,
+        )
+        os.environ["USER"] = FALLBACK_LOCAL_USERNAME
 
 
 class SshArchiveSession(ArchiveSession):
@@ -70,6 +98,11 @@ class SshArchiveStore(ArchiveStore):
         reason = settings.unusable_reason()
         if reason is not None:
             raise ArchiveError(f"Cannot archive to {settings.host}: {reason}")
+
+        # At startup rather than per-connection, so a container that cannot
+        # name its own user is sorted out before the first upload rather than
+        # during it.
+        ensure_local_username()
 
         self.settings = settings
 
