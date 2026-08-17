@@ -41,6 +41,15 @@ class SshArchiveSettings(BaseModel):
     known_hosts_file: Path | None = Field(default=None, description="known_hosts file used to verify the archive host")
     connect_timeout: int = Field(default=30, description="Seconds to wait for the SSH connection to be established")
 
+    fallback_dir: Path = Field(
+        default=Path("./archive"),
+        description="Local directory to archive into when the SSH credentials are missing, for local development",
+    )
+    required: bool = Field(
+        default=False,
+        description="Refuse to start rather than falling back to fallback_dir. Set this wherever losing files matters.",
+    )
+
     def unusable_reason(self) -> str | None:
         """Why this archive cannot be used, or None if it can.
 
