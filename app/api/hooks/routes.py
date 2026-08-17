@@ -45,10 +45,10 @@ async def receive_hook(
     if hook_request.type == "post-finish":
         ingest = Ingester(archive=archive, django_api=django_api, work_dir=settings.work_dir)
         upload_meta = get_upload_metadata(hook_request)
-        # eg. /upload/12345/original_video.mp4
+        # eg. /upload/12345/original_video.mp4, as tusd sees it
         path_from_tus = Path(hook_request.event.upload.storage["Path"])
-        # eg. ./upload/12345/original_video.mp4
-        upload_file = settings.tusd_dir / path_from_tus.relative_to(Path("/upload"))
+        # eg. ./upload/12345/original_video.mp4, as ingest sees it
+        upload_file = settings.tusd_dir / path_from_tus.relative_to(settings.tusd_upload_dir)
 
         try:
             metadata = await metadata_extractor.assert_compliance(upload_file)
