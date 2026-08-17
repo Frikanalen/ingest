@@ -1,0 +1,22 @@
+{{- if and .Values.uploads.persistence.enabled (not .Values.uploads.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "ingest.fullname" . }}-uploads
+  labels:
+    {{- include "ingest.labels" . | nindent 4 }}
+  annotations:
+    # In-progress uploads live here, and so does anything ingest has not yet
+    # archived. Losing it loses a member's upload, so keep it across a
+    # `helm uninstall`.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    {{- toYaml .Values.uploads.persistence.accessModes | nindent 4 }}
+  {{- with .Values.uploads.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.uploads.persistence.size }}
+{{- end }}

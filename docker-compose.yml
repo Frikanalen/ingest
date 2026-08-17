@@ -20,6 +20,9 @@ services:
       DJANGO_LOAD_FIXTURES: "true"
       DATABASE_URL: postgres://frikanalen:frikanalen@db:5432/frikanalen
       DJANGO_SETTINGS_MODULE: fkweb.settings.production
+      # Required by the Django settings, which read it with no default. Nothing
+      # here uploads, but the API will not start without it.
+      FK_UPLOAD_URL: "http://localhost:1080/upload"
       ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0,host.docker.internal"
       DEBUG: "1"
       SECRET_KEY: "dummy"

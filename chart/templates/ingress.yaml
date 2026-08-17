@@ -1,0 +1,37 @@
+{{- if and .Values.tusd.enabled .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "ingest.fullname" . }}
+  labels:
+    {{- include "ingest.labels" . | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls.certresolver: {{ .Values.ingress.certResolver | quote }}
+    {{- range $key, $value := .Values.ingress.annotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    # Only tusd is exposed. Ingest's own endpoints are the tusd hooks and a
+    # health check, which are reached over the pod's loopback.
+    #
+    # This shares a host with the frontend, which serves /. Traefik prefers the
+    # more specific prefix, the same way /graphics and /api already coexist
+    # there. The path is tusd's own base path and is passed through unstripped,
+    # so tusd sees the URLs it advertises.
+    - host: {{ .Values.ingress.hostname | quote }}
+      http:
+        paths:
+          - path: {{ .Values.tusd.basePath }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "ingest.fullname" . }}
+                port:
+                  number: {{ .Values.tusd.port }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.hostname | quote }}
+{{- end }}
