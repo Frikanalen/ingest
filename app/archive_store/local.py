@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from logging import getLogger
 from pathlib import Path, PurePosixPath
 
-from app.archive_store.base import ArchiveError, ArchiveSession, ArchiveStore, partial_path
+from app.archive_store.base import ArchiveError, ArchiveSession, ArchiveStore, staging_path
 
 logger = getLogger(__name__)
 
@@ -22,14 +22,29 @@ class LocalArchiveSession(ArchiveSession):
 
     async def put(self, source: Path, destination: PurePosixPath) -> None:
         target = self.resolve(destination)
-        partial = self.resolve(partial_path(destination))
+        staged = self.resolve(staging_path(destination))
 
         logger.info("Copying %s to %s", source, target)
+        staged.parent.mkdir(parents=True, exist_ok=True)
         target.parent.mkdir(parents=True, exist_ok=True)
 
         # copy2 is blocking and the files are large, so keep it off the event loop.
-        await asyncio.to_thread(shutil.copy2, source, partial)
-        partial.replace(target)
+        await asyncio.to_thread(shutil.copy2, source, staged)
+        staged.replace(target)
+        self.tidy_spool(staged.parent)
+
+    def tidy_spool(self, directory: Path) -> None:
+        """Remove the staging directories the transfer just emptied.
+
+        Best effort: a directory still holding something belongs to a
+        concurrent job, and leaving it is harmless.
+        """
+        while directory != self.root:
+            try:
+                directory.rmdir()
+            except OSError:
+                return
+            directory = directory.parent
 
 
 class LocalArchiveStore(ArchiveStore):

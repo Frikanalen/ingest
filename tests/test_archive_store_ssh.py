@@ -5,7 +5,7 @@ import pytest
 import pytest_asyncio
 
 from app.archive_store import ArchiveError, FileAlreadyArchived, SshArchiveStore, create_archive_store
-from app.archive_store.base import partial_path
+from app.archive_store.base import SPOOL_DIR, staging_path
 from app.util.settings import SshArchiveSettings
 from tests.utils.ssh_server import run_ssh_server
 
@@ -63,6 +63,7 @@ async def test_put_leaves_no_partial_file_behind(store, archive_root, source_fil
         await archive.put(source_file, DESTINATION)
 
     assert sorted(p.name for p in (archive_root / DESTINATION).parent.iterdir()) == ["example_video.mp4"]
+    assert not list((archive_root / SPOOL_DIR).rglob("*.mp4"))
 
 
 @pytest.mark.asyncio
@@ -105,8 +106,8 @@ async def test_put_refuses_to_overwrite_a_file_that_appeared_mid_job(store, arch
 
 
 @pytest.mark.asyncio
-async def test_a_failed_publish_does_not_look_like_a_finished_file(store, archive_root, source_file):
-    """A leftover transfer is parked under .part, never at the real destination."""
+async def test_a_failed_publish_leaves_nothing_in_the_published_tree(store, archive_root, source_file):
+    """A leftover transfer is parked in the spool, never beside the real file."""
     target = archive_root / DESTINATION
     target.parent.mkdir(parents=True)
     target.write_bytes(b"someone got here first")
@@ -115,7 +116,8 @@ async def test_a_failed_publish_does_not_look_like_a_finished_file(store, archiv
         with pytest.raises(asyncssh.SFTPError):
             await archive.put(source_file, DESTINATION)
 
-    assert (archive_root / partial_path(DESTINATION)).exists()
+    assert (archive_root / staging_path(DESTINATION)).exists()
+    assert sorted(p.name for p in target.parent.iterdir()) == ["example_video.mp4"]
 
 
 @pytest.mark.asyncio

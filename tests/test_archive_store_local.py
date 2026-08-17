@@ -3,6 +3,7 @@ from pathlib import PurePosixPath
 import pytest
 
 from app.archive_store import ArchiveError, FileAlreadyArchived, LocalArchiveStore, create_archive_store
+from app.archive_store.base import SPOOL_DIR
 from app.util.settings import LocalArchiveSettings
 
 DESTINATION = PurePosixPath("12345/original/example_video.mp4")
@@ -36,6 +37,7 @@ async def test_put_leaves_no_partial_file_behind(archive_root, source_file):
         await archive.put(source_file, DESTINATION)
 
     assert sorted(p.name for p in (archive_root / DESTINATION).parent.iterdir()) == ["example_video.mp4"]
+    assert not list((archive_root / SPOOL_DIR).rglob("*.mp4"))
 
 
 @pytest.mark.asyncio
