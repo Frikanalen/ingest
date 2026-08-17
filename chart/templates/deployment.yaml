@@ -1,0 +1,110 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ingest.fullname" . }}
+  labels:
+    {{- include "ingest.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  # Recreate, not RollingUpdate: one pod owns the upload volume, and a second
+  # pod would either fail to attach it or serve half-finished uploads whose
+  # tusd state belongs to its predecessor.
+  strategy:
+    type: {{ .Values.strategy.type }}
+  selector:
+    matchLabels:
+      {{- include "ingest.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- if and .Values.archive.ssh.enabled .Values.archive.ssh.secretChecksum }}
+        # The secret is created outside the chart, so Helm cannot see it change.
+        # Whoever writes the secret sets this, and the pod rolls on rotation.
+        checksum/ssh-secret: {{ .Values.archive.ssh.secretChecksum | quote }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "ingest.selectorLabels" . | nindent 8 }}
+    spec:
+      # The SSH credentials are mounted read-only for the group; fsGroup is what
+      # lets the unprivileged ingest user read them, and what makes the work and
+      # upload volumes writable.
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.Version }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            {{- include "ingest.env" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+          livenessProbe:
+            httpGet:
+              path: /internal/isAlive
+              port: http
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /internal/isAlive
+              port: http
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: uploads
+              mountPath: {{ .Values.uploads.mountPath }}
+            - name: work
+              mountPath: {{ .Values.work.mountPath }}
+            {{- if .Values.archive.ssh.enabled }}
+            - name: archive-ssh
+              mountPath: {{ include "ingest.sshMountPath" . }}
+              readOnly: true
+            {{- end }}
+        {{- if .Values.tusd.enabled }}
+        - name: tusd
+          image: "{{ .Values.tusd.image.repository }}:{{ .Values.tusd.image.tag }}"
+          imagePullPolicy: {{ .Values.tusd.image.pullPolicy }}
+          args:
+            {{- include "ingest.tusdArgs" . | nindent 12 }}
+          ports:
+            - name: tus
+              containerPort: {{ .Values.tusd.port }}
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: tus
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.tusd.resources | nindent 12 }}
+          volumeMounts:
+            - name: uploads
+              mountPath: {{ .Values.uploads.mountPath }}
+        {{- end }}
+      volumes:
+        # Written by tusd, read by ingest. Both mount it at the same path so
+        # the paths tusd reports in its hooks are the ones ingest can open.
+        - name: uploads
+          {{- if .Values.uploads.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.uploads.existingClaim }}
+          {{- else if .Values.uploads.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "ingest.fullname" . }}-uploads
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        # Scratch space for ffmpeg. Derivatives are generated here and uploaded
+        # to the archive, so nothing outlives the job that made it.
+        - name: work
+          emptyDir:
+            {{- toYaml .Values.work.emptyDir | nindent 12 }}
+        {{- if .Values.archive.ssh.enabled }}
+        - name: archive-ssh
+          secret:
+            secretName: {{ .Values.archive.ssh.secretName }}
+            defaultMode: {{ .Values.archive.ssh.defaultMode }}
+        {{- end }}

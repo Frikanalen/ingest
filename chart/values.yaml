@@ -1,0 +1,149 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/frikanalen/ingest
+  pullPolicy: Always
+  tag: "latest"
+
+nameOverride: ""
+fullnameOverride: ""
+
+api:
+  url: https://frikanalen.no
+  # Secret holding the Django API login ingest authenticates with.
+  secretName: ingest-api
+  usernameKey: username
+  passwordKey: password
+
+archive:
+  # Where finished files are deposited. With archive.ssh.enabled this is a path
+  # on the archive host; otherwise it is a path inside the container, which is
+  # only useful for development.
+  dir: /archive/media
+
+  ssh:
+    enabled: true
+    host: file01
+    port: 22
+    username: ingest
+
+    # Created outside the chart, by the ingest_archive_account Ansible role, so the
+    # private key never passes through Git. Keys must match the role's template.
+    secretName: ingest-archive-ssh
+    privateKeyKey: id_ed25519
+    knownHostsKey: known_hosts
+
+    # Hash of the secret's contents, set by whoever writes the secret. Helm
+    # cannot watch a secret it does not own, so this is what rolls the pod when
+    # the key is rotated.
+    secretChecksum: ""
+
+    # 0440: the secret is mounted root:fsGroup, and ingest reads it as a group
+    # member. 0400 would leave it unreadable to an unprivileged container.
+    defaultMode: 0440
+
+    # Refuse to start if the credentials are missing rather than quietly
+    # archiving into the pod's scratch space, where files are lost on restart.
+    required: true
+
+# tusd runs beside ingest in the same pod: it reaches the hook endpoint over
+# loopback and shares the upload volume, so uploads never cross a network to
+# get to ingest.
+tusd:
+  enabled: true
+
+  image:
+    repository: ghcr.io/tus/tusd
+    tag: v2.8.0
+    pullPolicy: IfNotPresent
+
+  port: 1080
+
+  # Must match the path in Django's FK_UPLOAD_URL, which is what the frontend
+  # is handed as a video's uploadUrl.
+  basePath: /upload
+
+  # Behind an ingress, so honour X-Forwarded-* when constructing upload URLs.
+  behindProxy: true
+
+  # The frontend uploads with credentials and a CSRF header.
+  corsAllowCredentials: true
+  corsAllowHeaders: X-CSRFToken
+  # Empty leaves tusd's default, which reflects the request origin.
+  corsAllowOrigin: ""
+
+  extraArgs: []
+
+  resources: {}
+
+uploads:
+  mountPath: /upload
+
+  # Point at a PVC managed elsewhere; otherwise the chart creates its own below.
+  existingClaim: ""
+
+  persistence:
+    # Off means an emptyDir, which is only sensible for a smoke test:
+    # in-progress uploads and anything not yet archived die with the pod.
+    enabled: true
+    size: 200Gi
+    # Empty uses the cluster's default storage class.
+    storageClass: ""
+    # ReadWriteOnce is enough: one pod, and both containers in it share the
+    # mount. Going multi-replica would need RWX and sticky sessions, since a
+    # resumed upload must reach the pod holding its partial file.
+    accessModes:
+      - ReadWriteOnce
+
+work:
+  mountPath: /work
+  # Holds one video's derivatives at a time. Node disk by default; set
+  # sizeLimit to keep a stuck job from filling the node.
+  emptyDir:
+    sizeLimit: 50Gi
+
+service:
+  type: ClusterIP
+  # Ingest's own port: tusd hooks and the health check. Cluster-internal only.
+  port: 8000
+
+ingress:
+  enabled: true
+  className: traefik
+  # tusd is served under tusd.basePath on the main site, alongside the
+  # frontend at / and the API at /api, rather than on its own subdomain.
+  # Django hands this out as a video's uploadUrl, so FK_UPLOAD_URL there must
+  # be "<scheme>://<this host><tusd.basePath>".
+  hostname: frikanalen.no
+  certResolver: letsencrypt
+  annotations: {}
+
+# One pod owns the upload volume, so replacements must not overlap.
+strategy:
+  type: Recreate
+
+# 1000:4203 matches the image, which runs unprivileged. fsGroup makes the work
+# volume writable and the mounted SSH key readable.
+podSecurityContext:
+  runAsUser: 1000
+  runAsGroup: 4203
+  fsGroup: 4203
+
+livenessProbe:
+  initialDelaySeconds: 10
+  periodSeconds: 20
+
+readinessProbe:
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+# Transcoding is CPU-bound and long-running; give it room before setting limits.
+resources: {}
+
+podAnnotations:
+  co.elastic.logs/json.add_error_key: "true"
+  co.elastic.logs/json.keys_under_root: "true"
+  co.elastic.logs/json.overwrite_keys: "true"
+
+# Extra FK_* settings, as a name/value map.
+extraEnv: {}
