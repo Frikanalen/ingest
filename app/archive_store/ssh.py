@@ -6,7 +6,7 @@ from time import monotonic
 
 import asyncssh
 
-from app.archive_store.base import ArchiveError, ArchiveSession, ArchiveStore, partial_path
+from app.archive_store.base import ArchiveError, ArchiveSession, ArchiveStore, staging_path
 from app.util.pretty_duration import pretty_duration
 from app.util.settings import SshArchiveSettings
 
@@ -26,18 +26,20 @@ class SshArchiveSession(ArchiveSession):
 
     async def put(self, source: Path, destination: PurePosixPath) -> None:
         target = self.resolve(destination)
-        partial = self.resolve(partial_path(destination))
+        staged = self.resolve(staging_path(destination))
         size = source.stat().st_size
 
         logger.info("Uploading %s (%d bytes) to %s", source, size, target)
+        await self.sftp.makedirs(staged.parent, exist_ok=True)
         await self.sftp.makedirs(target.parent, exist_ok=True)
 
         started = monotonic()
-        await self.sftp.put(source, partial)
+        await self.sftp.put(source, staged)
 
         # A plain SFTP rename fails rather than overwriting, so a file that
         # appeared under us since assert_absent() is not silently destroyed.
-        await self.sftp.rename(partial, target)
+        await self.sftp.rename(staged, target)
+        await self.tidy_spool(staged.parent)
 
         elapsed = monotonic() - started
         logger.info(
@@ -46,6 +48,19 @@ class SshArchiveSession(ArchiveSession):
             pretty_duration(elapsed),
             size / elapsed / 1e6 if elapsed else 0.0,
         )
+
+    async def tidy_spool(self, directory: PurePosixPath) -> None:
+        """Remove the staging directories the transfer just emptied.
+
+        Best effort: a directory still holding something belongs to a
+        concurrent job, and leaving it is harmless.
+        """
+        while directory != self.root:
+            try:
+                await self.sftp.rmdir(directory)
+            except asyncssh.SFTPError:
+                return
+            directory = directory.parent
 
 
 class SshArchiveStore(ArchiveStore):

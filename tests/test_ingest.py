@@ -100,7 +100,7 @@ async def test_archives_the_original_and_every_derivative(ingested, archive_root
 
 @pytest.mark.asyncio
 async def test_archives_nothing_but_the_finished_files(ingested, archive_root):
-    """ffmpeg scratch, such as the two-pass log, must not reach the archive."""
+    """ffmpeg scratch, the two-pass log and the transfer spool must all stay out."""
     archived = sorted(str(p.relative_to(archive_root)) for p in archive_root.rglob("*") if p.is_file())
 
     assert archived == [
@@ -108,6 +108,12 @@ async def test_archives_nothing_but_the_finished_files(ingested, archive_root):
         f"{VIDEO_ID}/original/example_video.mp4",
         f"{VIDEO_ID}/webm_med/example_video.webm",
     ]
+
+
+@pytest.mark.asyncio
+async def test_leaves_no_spool_behind(ingested, archive_root):
+    """The staging tree is swept as transfers finish, not left to accumulate."""
+    assert sorted(str(p.relative_to(archive_root)) for p in archive_root.iterdir()) == [VIDEO_ID]
 
 
 @pytest.mark.asyncio

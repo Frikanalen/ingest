@@ -11,9 +11,22 @@ class FileAlreadyArchived(ArchiveError):
     """Something already occupies the destination in the archive."""
 
 
-def partial_path(destination: PurePosixPath) -> PurePosixPath:
-    """The name a file is transferred under before it is published at `destination`."""
-    return destination.with_name(destination.name + ".part")
+SPOOL_DIR = PurePosixPath(".spool")
+
+
+def staging_path(destination: PurePosixPath) -> PurePosixPath:
+    """Where a file is transferred before it is published at `destination`.
+
+    Staging happens outside the published tree, so an interrupted transfer
+    cannot leave a partial file where readers see it — the archive is exported
+    read-only to the playout hosts, and a half-written video appearing there is
+    worse than one that never appears.
+
+    It stays inside the archive root because publishing is a rename, and rename
+    cannot cross a filesystem boundary. Somewhere tidier but separately mounted
+    would fail with EXDEV.
+    """
+    return SPOOL_DIR / destination
 
 
 class ArchiveSession(ABC):
