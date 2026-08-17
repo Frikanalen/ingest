@@ -1,3 +1,5 @@
+import getpass
+import pwd
 from pathlib import PurePosixPath
 
 import asyncssh
@@ -194,3 +196,44 @@ def test_usable_ssh_settings_select_the_ssh_store(ssh_server, archive_root):
     )
 
     assert isinstance(store, SshArchiveStore)
+
+
+@pytest.fixture
+def nameless_local_account(monkeypatch):
+    """A container running as a bare uid: nothing can name the local account.
+
+    This is what the ingest image did before it created a real account, and
+    what any deployment overriding runAsUser can still do.
+    """
+    for variable in ("LOGNAME", "USER", "LNAME", "USERNAME"):
+        monkeypatch.delenv(variable, raising=False)
+
+    def no_such_uid(uid):
+        raise KeyError(f"getpwuid(): uid not found: {uid}")
+
+    monkeypatch.setattr(pwd, "getpwuid", no_such_uid)
+
+    with pytest.raises(KeyError):
+        getpass.getuser()
+
+
+@pytest.mark.asyncio
+async def test_uploads_when_the_local_account_has_no_name(
+    nameless_local_account, ssh_server, archive_root, source_file
+):
+    """asyncssh wants a local username even though we authenticate as another."""
+    store = SshArchiveStore(
+        SshArchiveSettings(
+            host=ssh_server.host,
+            port=ssh_server.port,
+            username=ssh_server.username,
+            dir=PurePosixPath(archive_root),
+            private_key_file=ssh_server.client_key_file,
+            known_hosts_file=ssh_server.known_hosts_file,
+        )
+    )
+
+    async with store.open() as archive:
+        await archive.put(source_file, DESTINATION)
+
+    assert (archive_root / DESTINATION).read_bytes() == b"video payload"
