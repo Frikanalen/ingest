@@ -1,12 +1,14 @@
 import tempfile
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
 from app.api.hooks.schema.request import FileInfo, Header, HookEvent, HookRequest, HTTPRequest, MetaData
+from app.archive_store import LocalArchiveStore
 from app.main import app
-from app.util.app_state import get_django_api
-from app.util.settings import DjangoApiSettingsPwdAuth, IngestAppSettings, get_settings
+from app.util.app_state import get_archive_store, get_django_api
+from app.util.settings import DjangoApiSettingsPwdAuth, IngestAppSettings, LocalArchiveSettings, get_settings
 
 pre_create_request_valid = HookRequest(
     Type="pre-create",
@@ -61,7 +63,7 @@ def get_settings_override():
     return IngestAppSettings(
         api=DjangoApiSettingsPwdAuth(url="http://localhost:8000", username="", password=""),
         tusd_dir=tempfile.gettempdir(),
-        archive_dir=tempfile.gettempdir(),  # fixme: no cleanup here yet
+        archive=LocalArchiveSettings(dir=tempfile.gettempdir()),  # fixme: no cleanup here yet
         host="localhost",
         port=55025,
     )
@@ -69,6 +71,7 @@ def get_settings_override():
 
 app.dependency_overrides[get_settings] = get_settings_override
 app.dependency_overrides[get_django_api] = lambda: AsyncMock()
+app.dependency_overrides[get_archive_store] = lambda: LocalArchiveStore(Path(tempfile.gettempdir()))
 
 
 def test_pre_create_fails_if_metadata_bad():

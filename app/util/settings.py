@@ -1,9 +1,7 @@
-import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
 
-from pydantic import BaseModel, DirectoryPath, Field, HttpUrl, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,10 +16,12 @@ class DjangoApiSettingsTokenAuth(BaseModel):
     token: SecretStr = Field()
 
 
-def get_discriminator_value(v: Any) -> str:
-    if isinstance(v, dict):
-        return v.get("fruit", v.get("filling"))
-    return getattr(v, "fruit", getattr(v, "filling", None))
+class LocalArchiveSettings(BaseModel):
+    """An archive on a filesystem ingest can write to directly."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dir: Path = Field(default=Path("./archive"), description="Directory where ingest should store archived files")
 
 
 class IngestAppSettings(BaseSettings):
@@ -37,13 +37,18 @@ class IngestAppSettings(BaseSettings):
     port: int = Field(default=8000, description="Port for the FastAPI server")
     host: str = Field(default="0.0.0.0", description="Host for the FastAPI server")
 
-    tusd_dir: DirectoryPath = Path("./upload", description="Directory where ingest should look for uploads from tusd")
-    archive_dir: DirectoryPath = Path("./archive", description="Directory where ingest should store processed files")
+    tusd_dir: Path = Field(
+        default=Path("./upload"), description="Directory where ingest should look for uploads from tusd"
+    )
 
+    archive: LocalArchiveSettings = Field(
+        default_factory=LocalArchiveSettings, description="Where ingest should deposit finished files"
+    )
 
-DIR = "/tmp"
-TO_DIR = "/tank/media/"
-SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+    work_dir: Path | None = Field(
+        default=None,
+        description="Local scratch space for transcoding. Defaults to the system temporary directory.",
+    )
 
 
 @lru_cache

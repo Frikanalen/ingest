@@ -1,11 +1,13 @@
 from datetime import datetime
 from logging import Logger, getLogger
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from app.django_client.service import DjangoApiService, FormatEnum
+from app.util.file_name_utils import derived_file_location, original_file_location
 from app.util.logging import VideoIdFilter
 
-from .archive_store import Archive
+from .archive_store import ArchiveSession, ArchiveStore
 from .media.comand_template import ProfileTemplateArguments, TemplatedCommandGenerator
 from .media.ffprobe_schema import FfprobeOutput
 from .runner import Task
@@ -17,20 +19,29 @@ DESIRED_FORMATS = (
 
 
 class Ingester:
-    video_id: str
+    """Archives an upload and the derivatives generated from it.
+
+    Transcoding always reads the uploaded file where tusd left it and writes to
+    local scratch space; only finished files are handed to the archive. That
+    keeps ffmpeg off the archive entirely, so the archive can live on another
+    host.
+    """
+
     django_api: DjangoApiService
-    archive: Archive
+    archive: ArchiveStore
+    work_dir: Path | None
     logger: Logger
 
     def __init__(
         self,
-        archive_base_path: Path,
+        archive: ArchiveStore,
         django_api: DjangoApiService,
+        work_dir: Path | None = None,
     ):
         self.logger = getLogger(__name__)
-        self.archive = Archive(archive_base_path)
-        self.archive_base_path = archive_base_path
+        self.archive = archive
         self.django_api = django_api
+        self.work_dir = work_dir
 
     async def ingest(self, video_id: str, original_file: Path, metadata: FfprobeOutput):
         self.logger.addFilter(VideoIdFilter(video_id))
@@ -42,11 +53,31 @@ class Ingester:
             self.logger.error("Failed to set video uploaded time: %s", e)
             raise
 
+        async with self.archive.open() as archive:
+            await self._archive_original(archive, video_id, original_file, metadata)
+
+            with TemporaryDirectory(dir=self.work_dir, prefix=f"ingest-{video_id}-") as scratch:
+                for file_format in DESIRED_FORMATS:
+                    await self._process_format(archive, file_format, metadata, original_file, video_id, Path(scratch))
+
+        await self.django_api.set_video_proper_import(video_id, True)
+
+        # Only now is the upload redundant. Leaving it in place on failure keeps
+        # the file around for a retry; a re-upload of the same video clears it.
+        self.logger.info("Removing uploaded file %s", original_file)
+        original_file.unlink()
+
+    async def _archive_original(
+        self, archive: ArchiveSession, video_id: str, original_file: Path, metadata: FfprobeOutput
+    ):
+        destination = original_file_location(video_id, Path(original_file.name))
+
         try:
-            self.logger.info("Moving original file to archive")
-            archive_original = self.archive.move_original_to_archive(video_id, original_file)
+            self.logger.info("Storing original file at %s", destination)
+            await archive.assert_absent(destination)
+            await archive.put(original_file, destination)
         except Exception as e:
-            self.logger.error("Failed to move original file to archive: %s", e)
+            self.logger.error("Failed to store original file in archive: %s", e)
             raise
 
         try:
@@ -54,7 +85,7 @@ class Ingester:
             await self.django_api.set_video_duration(video_id, metadata.format.duration)
 
             await self.django_api.create_video_file(
-                filename=archive_original.relative_to(self.archive_base_path),
+                filename=str(destination),
                 file_format=FormatEnum.ORIGINAL,
                 video_id=video_id,
             )
@@ -62,30 +93,24 @@ class Ingester:
             self.logger.error("django-api error post original ingest: %s", e)
             raise
 
-        for file_format in DESIRED_FORMATS:
-            await self._process_format(file_format, metadata, archive_original, video_id)
-
-        await self.django_api.set_video_proper_import(video_id, True)
-
     async def _process_format(
-        self, file_format: FormatEnum, metadata: FfprobeOutput, archive_original: Path, video_id: str
+        self,
+        archive: ArchiveSession,
+        file_format: FormatEnum,
+        metadata: FfprobeOutput,
+        source_file: Path,
+        video_id: str,
+        scratch: Path,
     ):
-        self.logger.info("Processing: %s", archive_original)
-        output_directory = archive_original.parent.parent / file_format
-
-        self.logger.info("Creating directory: %s", output_directory)
-        output_directory.mkdir(exist_ok=True)
+        self.logger.info("Processing %s as %s", source_file, file_format)
 
         self.logger.info("Building command for format: %s", file_format)
         template = TemplatedCommandGenerator(file_format)
 
-        output_file_name = f"{archive_original.stem}.{template.metadata.output_file_extension}"
-        output_file = output_directory / output_file_name
-
-        self.logger.info("Storing %s to %s", file_format, output_file)
+        output_file = scratch / f"{source_file.stem}.{template.metadata.output_file_extension}"
 
         template_args = ProfileTemplateArguments(
-            input_file=archive_original,
+            input_file=source_file,
             output_file=output_file,
             seek_s=(float(metadata.format.duration) * 0.25 or 30),
         )
@@ -95,7 +120,9 @@ class Ingester:
 
         await Task(command).execute()
 
-        self.logger.info("Creating video file entry for %s", output_file)
-        await self.django_api.create_video_file(
-            filename=str(output_file.relative_to(self.archive_base_path)), file_format=file_format, video_id=video_id
-        )
+        destination = derived_file_location(video_id, str(file_format), output_file)
+        self.logger.info("Storing %s to %s", file_format, destination)
+        await archive.put(output_file, destination)
+
+        self.logger.info("Creating video file entry for %s", destination)
+        await self.django_api.create_video_file(filename=str(destination), file_format=file_format, video_id=video_id)

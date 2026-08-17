@@ -8,9 +8,10 @@ from werkzeug.utils import secure_filename
 from app.api.hooks.metadata import ComplianceError, MetadataExtractor, get_upload_metadata
 from app.api.hooks.schema.request import HookRequest
 from app.api.hooks.schema.response import FileInfoChanges, HookResponse
+from app.archive_store import ArchiveStore
 from app.django_client.service import DjangoApiService
 from app.ingest import Ingester
-from app.util.app_state import get_django_api, get_metadata_extractor
+from app.util.app_state import get_archive_store, get_django_api, get_metadata_extractor
 from app.util.settings import IngestAppSettings, get_settings
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,7 @@ async def receive_hook(
     hook_request: HookRequest,
     settings: IngestAppSettings = Depends(get_settings),
     django_api: DjangoApiService = Depends(get_django_api),
+    archive: ArchiveStore = Depends(get_archive_store),
     metadata_extractor: MetadataExtractor = Depends(get_metadata_extractor),
 ):
     logger.info("Received hook: %s", hook_request.type)
@@ -41,7 +43,7 @@ async def receive_hook(
         return HookResponse(ChangeFileInfo=FileInfoChanges(ID=upload_id, Storage={"Path": str(new_file)}))
 
     if hook_request.type == "post-finish":
-        ingest = Ingester(archive_base_path=settings.archive_dir, django_api=django_api)
+        ingest = Ingester(archive=archive, django_api=django_api, work_dir=settings.work_dir)
         upload_meta = get_upload_metadata(hook_request)
         # eg. /upload/12345/original_video.mp4
         path_from_tus = Path(hook_request.event.upload.storage["Path"])
