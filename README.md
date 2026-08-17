@@ -18,6 +18,40 @@ uv sync
 
 ## Development
 
+### Running the server locally
+
+Start the local Django API used by ingest:
+
+```bash
+docker compose up -d
+```
+
+Generate the API client and create the directories ingest watches:
+
+```bash
+./scripts/generate-client.sh
+mkdir -p upload archive
+```
+
+Create a `.env` file with settings for the local Django API. Port `8081` avoids clashing with the API exposed by Docker Compose on port `8000`:
+
+```dotenv
+FK_API_URL=http://localhost:8000
+FK_API_USERNAME=test@superuser.lol
+FK_API_PASSWORD=superuser
+FK_TUSD_DIR=./upload
+FK_ARCHIVE_DIR=./archive
+FK_PORT=8081
+```
+
+Start ingest with:
+
+```bash
+uv run python -m app.main
+```
+
+The health endpoint is available at <http://localhost:8081/internal/isAlive>.
+
 ### Refreshing the API schema and regenerating the client
 
 The repository keeps an OpenAPI snapshot in `schema.yaml`. Two scripts manage schema updates and client generation:
