@@ -16,9 +16,7 @@ Install dependencies using uv:
 uv sync
 ```
 
-## Development
-
-### Running the server locally
+## Running the server locally
 
 Start the local Django API used by ingest:
 
@@ -26,10 +24,9 @@ Start the local Django API used by ingest:
 docker compose up -d
 ```
 
-Generate the API client and create the directories ingest watches:
+Generate the Django API client as described in [Code generation](#code-generation), then create the directories ingest watches:
 
 ```bash
-./scripts/generate-client.sh
 mkdir -p upload archive
 ```
 
@@ -52,7 +49,9 @@ uv run python -m app.main
 
 The health endpoint is available at <http://localhost:8081/internal/isAlive>.
 
-### Refreshing the API schema and regenerating the client
+## Code generation
+
+### Django API client
 
 The repository keeps an OpenAPI snapshot in `schema.yaml`. Two scripts manage schema updates and client generation:
 
@@ -74,16 +73,16 @@ This runs `openapi-python-client` to generate the Python client code from `schem
 
 For local development, run both scripts in sequence. CI runs `scripts/generate-client.sh` before building the Docker image, so the generated client is included despite being ignored by Git.
 
-### Running tests
-
-```shell
-uv run python -m pytest
-```
-
-## Code generation
+### tusd hook types
 
 The tusd hook request schema is also generated into Pydantic types:
 
 ```shell
 scripts/generate-hook-types.sh
+```
+
+## Testing
+
+```shell
+uv run python -m pytest
 ```
