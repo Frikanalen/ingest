@@ -10,10 +10,10 @@ fullnameOverride: ""
 
 api:
   url: https://frikanalen.no
-  # Secret holding the Django API login ingest authenticates with.
+  # Secret holding the Django API token ingest authenticates with. DRF tokens
+  # do not expire, so this needs rotating only if it leaks.
   secretName: ingest-api
-  usernameKey: username
-  passwordKey: password
+  tokenKey: token
 
 archive:
   # Where finished files are deposited. With archive.ssh.enabled this is a path

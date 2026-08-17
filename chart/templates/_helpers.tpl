@@ -99,16 +99,13 @@ the remaining archive settings are inert.
   value: {{ .Values.service.port | quote }}
 - name: FK_API_URL
   value: {{ .Values.api.url | quote }}
-- name: FK_API_USERNAME
+# A token, not a login: with a username and password ingest would exchange
+# them for one at startup, and could not boot unless the API were already up.
+- name: FK_API_TOKEN
   valueFrom:
     secretKeyRef:
       name: {{ .Values.api.secretName }}
-      key: {{ .Values.api.usernameKey }}
-- name: FK_API_PASSWORD
-  valueFrom:
-    secretKeyRef:
-      name: {{ .Values.api.secretName }}
-      key: {{ .Values.api.passwordKey }}
+      key: {{ .Values.api.tokenKey }}
 - name: FK_TUSD_DIR
   value: {{ .Values.uploads.mountPath | quote }}
 # Both containers mount the upload volume at the same path, so the paths tusd
