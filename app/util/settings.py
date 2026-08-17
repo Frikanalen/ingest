@@ -85,6 +85,13 @@ class IngestAppSettings(BaseSettings):
         default=Path("./upload"), description="Directory where ingest should look for uploads from tusd"
     )
 
+    # tusd reports absolute paths as it sees them, which is only the same as
+    # tusd_dir when both processes mount the upload volume alike. Keep this in
+    # step with tusd's -upload-dir.
+    tusd_upload_dir: PurePosixPath = Field(
+        default=PurePosixPath("/upload"), description="Upload directory as tusd reports it, matching its -upload-dir"
+    )
+
     # Setting FK_ARCHIVE_HOST is what selects the SSH archive; without it the
     # archive is a local directory and FK_ARCHIVE_DIR keeps its old meaning.
     archive: LocalArchiveSettings | SshArchiveSettings = Field(
