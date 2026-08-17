@@ -8,7 +8,41 @@ It exposes these application endpoints:
 - `GET /internal/isAlive` is the health check.
 - `GET /watchFolder/tusFiles` and `GET /watchFolder/archive` stream directory listings as server-sent events for debugging. Filesystem changes do not start ingest jobs.
 
-For a completed upload, ingest checks the media with FFprobe and moves the source file from `FK_TUSD_DIR` to `FK_ARCHIVE_DIR/<video-id>/original/<filename>`. FFmpeg outputs are stored alongside it by format, currently as `FK_ARCHIVE_DIR/<video-id>/large_thumb/<stem>.jpg` and `FK_ARCHIVE_DIR/<video-id>/webm_med/<stem>.webm`. Ingest records the original and generated files, duration, upload time, and completion status in the Django API.
+For a completed upload, ingest checks the media with FFprobe and copies the source file from `FK_TUSD_DIR` to `<archive>/<video-id>/original/<filename>`. FFmpeg outputs are stored alongside it by format, currently as `<archive>/<video-id>/large_thumb/<stem>.jpg` and `<archive>/<video-id>/webm_med/<stem>.webm`. Ingest records the original and generated files, duration, upload time, and completion status in the Django API. The uploaded file is removed from `FK_TUSD_DIR` once the whole job has succeeded, so a failed ingest leaves it in place.
+
+FFmpeg always reads the uploaded file where tusd left it and writes to local scratch space; only finished files are handed to the archive. That is what lets the archive live on another host.
+
+## Archive
+
+The archive is either a local directory or a directory on another host reached over SSH. Setting `FK_ARCHIVE_HOST` selects the latter, and `FK_ARCHIVE_DIR` then refers to a path on that host.
+
+| Setting | Meaning |
+| --- | --- |
+| `FK_ARCHIVE_DIR` | Where finished files go. A local path, or a path on `FK_ARCHIVE_HOST`. |
+| `FK_ARCHIVE_HOST` | Archive host. Unset means archive locally. |
+| `FK_ARCHIVE_PORT` | SSH port, default `22`. |
+| `FK_ARCHIVE_USERNAME` | SSH user, default `ingest`. |
+| `FK_ARCHIVE_PRIVATE_KEY_FILE` | SSH private key to authenticate with. |
+| `FK_ARCHIVE_KNOWN_HOSTS_FILE` | `known_hosts` file used to verify the archive host. |
+| `FK_ARCHIVE_FALLBACK_DIR` | Local directory used when the SSH credentials are missing, default `./archive`. |
+| `FK_ARCHIVE_REQUIRED` | Fail startup instead of falling back. Set this in deployments. |
+| `FK_WORK_DIR` | Local scratch space for transcoding. Defaults to the system temporary directory. |
+
+Files are transferred under a `.part` name and renamed into place once complete, so an interrupted transfer cannot leave a truncated file that later looks like a finished one.
+
+Both SSH credentials must be given explicitly — ingest will not reach for the running user's `~/.ssh`, and it never disables host key verification. If either is missing, ingest logs a warning and archives to `FK_ARCHIVE_FALLBACK_DIR` instead, so you can run it locally without setting up SSH at all. **Set `FK_ARCHIVE_REQUIRED=true` anywhere that actually archives over SSH**: otherwise a secret that fails to mount leaves ingest quietly writing to scratch space, where files are lost on restart.
+
+## Deployment
+
+`chart/` holds the Helm chart. It deploys tusd alongside ingest in the same pod, so tusd reaches the hook endpoint over the pod's loopback and the two share the upload volume rather than passing files across a network. Only tusd is exposed, through an ingress on the upload hostname; ingest's own endpoints stay cluster-internal.
+
+Because one pod owns the upload volume, the chart runs a single replica with the `Recreate` strategy. Going multi-replica would need `ReadWriteMany` storage and session affinity, since a resumed upload has to reach the pod holding its partial file.
+
+tusd is served at `/upload` on the main site — `https://frikanalen.no/upload`, `https://staging.frikanalen.no/upload` — sharing the host with the frontend at `/` and the API at `/api`, so no upload subdomain is needed per environment. The ingress path is tusd's own `basePath` and is passed through unstripped, so tusd sees the URLs it advertises.
+
+`FK_UPLOAD_URL` in the Django settings must point at that same URL, since it is handed to the frontend as a video's `uploadUrl`.
+
+The SSH credentials come from a Kubernetes secret created outside the chart, by the `ingest_archive_account` role in the [infra](https://github.com/Frikanalen/infra) repository. The private key is generated on first run and stored only in that secret, so it never passes through Git or the vault. That role's README covers the `authorized_keys` restrictions on the archive host and rotation.
 
 ## Requirements
 
@@ -48,6 +82,8 @@ FK_TUSD_DIR=./upload
 FK_ARCHIVE_DIR=./archive
 FK_PORT=8081
 ```
+
+This archives into `./archive` locally; no SSH setup is needed for development.
 
 Start ingest with:
 
