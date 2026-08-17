@@ -4,6 +4,7 @@ from fastapi import Depends
 from starlette.requests import Request
 
 from app.api.hooks.metadata import MetadataExtractor
+from app.archive_store import ArchiveStore
 from app.django_client.service import DjangoApiService
 from app.util.ingest_app_state import IngestAppState
 
@@ -14,6 +15,10 @@ def get_app_state(request: Request) -> IngestAppState:
 
 def get_django_api(state=Depends(get_app_state)) -> DjangoApiService:
     return state.django_api
+
+
+def get_archive_store(state=Depends(get_app_state)) -> ArchiveStore:
+    return state.archive
 
 
 def get_metadata_extractor() -> MetadataExtractor:

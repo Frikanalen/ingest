@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from frikanalen_django_api_client import AuthenticatedClient
 
 from app.api.debug.watch_folder.watcher import stop_watch_folder
+from app.archive_store import create_archive_store
 from app.django_client.service import DjangoApiService
 from app.util.ingest_app_state import IngestAppState
 from app.util.settings import DjangoApiSettingsPwdAuth, DjangoApiSettingsTokenAuth, get_settings
@@ -44,7 +45,12 @@ async def lifespan(app: FastAPI):
         django_api = DjangoApiService(client)
         await stack.enter_async_context(client)
 
-        app.state.app_state = IngestAppState(django_api=django_api)  # type: ignore[attr-defined]
+        # Built here rather than per-request so a broken archive config fails
+        # startup instead of the first upload.
+        archive = create_archive_store(settings.archive)
+        logger.info("Archiving to %s", archive)
+
+        app.state.app_state = IngestAppState(django_api=django_api, archive=archive)  # type: ignore[attr-defined]
 
         # fixme: should only happen in debug mode
         from app.api.debug.watch_folder.watcher import start_watchfolder
