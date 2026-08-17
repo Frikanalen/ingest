@@ -60,6 +60,7 @@ HOOK_PATH = "/tusdHooks/"
 def get_settings_override():
     return IngestAppSettings(
         api=DjangoApiSettingsPwdAuth(url="http://localhost:8000", username="", password=""),
+        tusd_dir=tempfile.gettempdir(),
         archive_dir=tempfile.gettempdir(),  # fixme: no cleanup here yet
         host="localhost",
         port=55025,

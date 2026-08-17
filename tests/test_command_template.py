@@ -1,7 +1,6 @@
 from pathlib import Path
 
-from frikanalen_django_api_client.models import FormatEnum
-
+from app.django_client.service import FormatEnum
 from app.media.comand_template import ProfileTemplateArguments, TemplatedCommandGenerator
 
 
