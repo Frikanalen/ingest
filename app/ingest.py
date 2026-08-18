@@ -20,7 +20,6 @@ DESIRED_FORMATS = (
     FormatEnum.LARGE_THUMB,
     FormatEnum.MED_THUMB,
     FormatEnum.SMALL_THUMB,
-    FormatEnum.WEBM_MED,
     FormatEnum.DASH,
 )
 
@@ -33,10 +32,6 @@ FORMAT_WEIGHTS: dict[FormatEnum, int] = {
     FormatEnum.LARGE_THUMB: 1,
     FormatEnum.MED_THUMB: 1,
     FormatEnum.SMALL_THUMB: 1,
-    FormatEnum.WEBM_MED: 15,
-    # Three VP9 renditions, but one decode, one pass and one process that
-    # keeps every core busy -- measurably cheaper than the two-pass single
-    # rendition above rather than three times the price.
     FormatEnum.DASH: 4,
 }
 

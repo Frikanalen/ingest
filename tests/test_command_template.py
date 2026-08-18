@@ -55,24 +55,6 @@ def test_h264_med_reports_progress_on_stdout():
     assert template.metadata.passes == 1
 
 
-def test_webm_med_is_a_two_pass_template_that_reports_progress_on_each_pass():
-    template = TemplatedCommandGenerator(FormatEnum.WEBM_MED)
-    command = template.render(template_args())
-
-    assert template.metadata.passes == 2
-    assert command.count("-progress pipe:1") == 2
-
-
-def test_webm_med_keeps_its_pass_log_out_of_the_archived_directory():
-    """Whatever is left in output_dir gets archived, so the log cannot live there."""
-    command = TemplatedCommandGenerator(FormatEnum.WEBM_MED).render(
-        template_args(output_dir=Path("/work/webm_med"), scratch_dir=Path("/work"))
-    )
-
-    assert '-passlogfile "/work/webm_med_pass"' in command
-    assert "/work/webm_med/" not in command.split("-passlogfile")[1].split()[0]
-
-
 def test_dash_names_its_output_rather_than_following_the_source():
     """The manifest names its media, so those names must not carry a source stem
     that would need percent-encoding to survive as a URL."""
