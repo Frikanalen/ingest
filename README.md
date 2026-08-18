@@ -8,7 +8,7 @@ It exposes these application endpoints:
 - `GET /internal/isAlive` is the health check.
 - `GET /watchFolder/tusFiles` and `GET /watchFolder/archive` stream directory listings as server-sent events for debugging. Filesystem changes do not start ingest jobs.
 
-For a completed upload, ingest checks the media with FFprobe and copies the source file from `FK_TUSD_DIR` to `<archive>/<video-id>/original/<filename>`. FFmpeg outputs are stored alongside it by format, currently as `<archive>/<video-id>/large_thumb/<stem>.jpg`, `<archive>/<video-id>/webm_med/<stem>.webm` and `<archive>/<video-id>/dash/`. Ingest records the original and generated files, duration, upload time, and completion status in the Django API. The uploaded file is removed from `FK_TUSD_DIR` once the whole job has succeeded, so a failed ingest leaves it in place.
+For a completed upload, ingest checks the media with FFprobe and copies the source file from `FK_TUSD_DIR` to `<archive>/<video-id>/original/<filename>`. FFmpeg outputs are stored alongside it by format, currently as `<archive>/<video-id>/large_thumb/<stem>.jpg`, `<archive>/<video-id>/med_thumb/<stem>.jpg`, `<archive>/<video-id>/small_thumb/<stem>.jpg`, `<archive>/<video-id>/webm_med/<stem>.webm` and `<archive>/<video-id>/dash/`. Ingest records the original and generated files, duration, upload time, and completion status in the Django API. The uploaded file is removed from `FK_TUSD_DIR` once the whole job has succeeded, so a failed ingest leaves it in place.
 
 FFmpeg always reads the uploaded file where tusd left it and writes to local scratch space; only finished files are handed to the archive. That is what lets the archive live on another host.
 
@@ -17,6 +17,10 @@ FFmpeg always reads the uploaded file where tusd left it and writes to local scr
 Each format in `templates/` is a command with a YAML header, and each gets a scratch directory of its own. Whatever the command leaves in that directory is archived; anything that must not be archived, like a two-pass log, goes in `scratch_dir` instead. The header names the format's primary output — the one file registered with the Django API, and the last one published — either as an extension applied to the source file's stem (`output_file_extension`) or as a fixed name (`output_file_name`).
 
 Publishing order matters because the archive is exported read-only to the playout hosts: the primary output goes last, so a manifest is never readable before the media it references has arrived.
+
+### Thumbnails
+
+`large_thumb` (720px wide), `med_thumb` (320px) and `small_thumb` (120px) are single frames pulled a quarter of the way into the video, each a single-pass FFmpeg invocation. Three sizes exist so a consumer — a detail page, a grid of cards, a compact list row — can pick the one closest to what it actually renders, rather than every context fetching the 720px original and scaling it down in the browser.
 
 ### DASH
 

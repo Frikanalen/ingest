@@ -96,6 +96,8 @@ async def ingested(archive, django_api, work_dir, uploaded_file, metadata):
 async def test_archives_the_original_and_every_derivative(ingested, archive_root):
     assert (archive_root / VIDEO_ID / "original" / "example_video.mp4").is_file()
     assert (archive_root / VIDEO_ID / "large_thumb" / "example_video.jpg").is_file()
+    assert (archive_root / VIDEO_ID / "med_thumb" / "example_video.jpg").is_file()
+    assert (archive_root / VIDEO_ID / "small_thumb" / "example_video.jpg").is_file()
     assert (archive_root / VIDEO_ID / "webm_med" / "example_video.webm").is_file()
     assert (archive_root / VIDEO_ID / "dash" / "manifest.mpd").is_file()
 
@@ -123,6 +125,8 @@ async def test_archives_nothing_but_the_finished_files(ingested, archive_root):
             f"{VIDEO_ID}/dash/manifest.mpd",
             *dash_media,
             f"{VIDEO_ID}/large_thumb/example_video.jpg",
+            f"{VIDEO_ID}/med_thumb/example_video.jpg",
+            f"{VIDEO_ID}/small_thumb/example_video.jpg",
             f"{VIDEO_ID}/original/example_video.mp4",
             f"{VIDEO_ID}/webm_med/example_video.webm",
         ]
@@ -155,6 +159,8 @@ async def test_registers_archive_relative_paths_with_django(ingested, django_api
     assert registered == {
         FormatEnum.ORIGINAL: f"{VIDEO_ID}/original/example_video.mp4",
         FormatEnum.LARGE_THUMB: f"{VIDEO_ID}/large_thumb/example_video.jpg",
+        FormatEnum.MED_THUMB: f"{VIDEO_ID}/med_thumb/example_video.jpg",
+        FormatEnum.SMALL_THUMB: f"{VIDEO_ID}/small_thumb/example_video.jpg",
         FormatEnum.WEBM_MED: f"{VIDEO_ID}/webm_med/example_video.webm",
         # Only the manifest: the media it names is reached through it, never
         # on its own.
