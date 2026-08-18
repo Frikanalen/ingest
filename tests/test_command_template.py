@@ -31,6 +31,20 @@ def test_large_thumb_is_a_single_pass_by_default():
     assert TemplatedCommandGenerator(FormatEnum.LARGE_THUMB).metadata.passes == 1
 
 
+def test_med_thumb_is_narrower_than_large_thumb():
+    template = TemplatedCommandGenerator(FormatEnum.MED_THUMB)
+    command = template.render(template_args(output_file=Path("./out.jpg")))
+    expected_command = 'ffmpeg -nostats -i "hello" -y -threads 8 -vf scale=320:-1 -aspect 16:9 -vframes 1 -ss 0.2 "out.jpg"'
+    assert command == expected_command, f"Expected: {expected_command}, but got: {command}"
+
+
+def test_small_thumb_is_narrower_than_med_thumb():
+    template = TemplatedCommandGenerator(FormatEnum.SMALL_THUMB)
+    command = template.render(template_args(output_file=Path("./out.jpg")))
+    expected_command = 'ffmpeg -nostats -i "hello" -y -threads 8 -vf scale=120:-1 -aspect 16:9 -vframes 1 -ss 0.2 "out.jpg"'
+    assert command == expected_command, f"Expected: {expected_command}, but got: {command}"
+
+
 def test_h264_med_reports_progress_on_stdout():
     # Not a FormatEnum member -- this template exists but nothing wires it
     # up to a DESIRED_FORMATS entry yet.
