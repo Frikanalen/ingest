@@ -50,6 +50,13 @@ extend-select = [
     "TID",   # flake8-tidy-imports: disallow relative imports
     "RUF",   # Ruff-specific rules (e.g. `RUF100` for `__all__` sorted)
 ]
+[tool.ruff.lint.isort]
+# The generated client is a dependency that happens to be generated into the
+# repo root, where ruff would otherwise take it for one of our own packages
+# and sort it with them. Declaring it keeps every module agreeing on where
+# its import belongs.
+known-third-party = ["frikanalen_django_api_client"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 log_cli = true

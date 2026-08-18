@@ -54,6 +54,20 @@ paths:
                       detail: You do not have permission to perform this action.
                       attr: null
           description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
+                      attr: null
+          description: ''
         '405':
           content:
             application/json:
@@ -111,7 +125,12 @@ paths:
                       attr: null
           description: ''
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/asrun/:
     get:
       operationId: asrun_list
@@ -180,6 +199,20 @@ paths:
                     errors:
                     - code: permission_denied
                       detail: You do not have permission to perform this action.
+                      attr: null
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
                       attr: null
           description: ''
         '405':
@@ -297,6 +330,20 @@ paths:
                     errors:
                     - code: permission_denied
                       detail: You do not have permission to perform this action.
+                      attr: null
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
                       attr: null
           description: ''
         '405':
@@ -969,6 +1016,20 @@ paths:
                       detail: You do not have permission to perform this action.
                       attr: null
           description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
+                      attr: null
+          description: ''
         '405':
           content:
             application/json:
@@ -1084,6 +1145,20 @@ paths:
                     errors:
                     - code: permission_denied
                       detail: You do not have permission to perform this action.
+                      attr: null
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
                       attr: null
           description: ''
         '405':
@@ -1706,113 +1781,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/CsrfRetrieveErrorResponse400'
           description: ''
-        '405':
+        '404':
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse405'
+                $ref: '#/components/schemas/ErrorResponse404'
               examples:
-                MethodNotAllowed:
+                NotFound:
                   value:
                     type: client_error
                     errors:
-                    - code: method_not_allowed
-                      detail: Method "get" not allowed.
-                      attr: null
-          description: ''
-        '406':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse406'
-              examples:
-                NotAcceptable:
-                  value:
-                    type: client_error
-                    errors:
-                    - code: not_acceptable
-                      detail: Could not satisfy the request Accept header.
-                      attr: null
-          description: ''
-        '415':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse415'
-              examples:
-                UnsupportedMediaType:
-                  value:
-                    type: client_error
-                    errors:
-                    - code: unsupported_media_type
-                      detail: Unsupported media type "application/json" in request.
-                      attr: null
-          description: ''
-        '500':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse500'
-              examples:
-                APIException:
-                  value:
-                    type: server_error
-                    errors:
-                    - code: error
-                      detail: A server error occurred.
-                      attr: null
-          description: ''
-        '200':
-          description: No response body
-  /api/jukebox_csv:
-    get:
-      operationId: jukebox_csv_retrieve
-      tags:
-      - jukebox_csv
-      security:
-      - tokenAuth: []
-      - cookieAuth: []
-      - {}
-      responses:
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/JukeboxCsvRetrieveErrorResponse400'
-          description: ''
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse401'
-              examples:
-                AuthenticationFailed:
-                  value:
-                    type: client_error
-                    errors:
-                    - code: authentication_failed
-                      detail: Incorrect authentication credentials.
-                      attr: null
-                NotAuthenticated:
-                  value:
-                    type: client_error
-                    errors:
-                    - code: not_authenticated
-                      detail: Authentication credentials were not provided.
-                      attr: null
-          description: ''
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse403'
-              examples:
-                PermissionDenied:
-                  value:
-                    type: client_error
-                    errors:
-                    - code: permission_denied
-                      detail: You do not have permission to perform this action.
+                    - code: not_found
+                      detail: Not found.
                       attr: null
           description: ''
         '405':
@@ -1872,7 +1852,11 @@ paths:
                       attr: null
           description: ''
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Csrf'
+          description: ''
   /api/news/bulletins/:
     get:
       operationId: news_bulletins_list
@@ -1928,6 +1912,20 @@ paths:
                     errors:
                     - code: permission_denied
                       detail: You do not have permission to perform this action.
+                      attr: null
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
                       attr: null
           description: ''
         '405':
@@ -2047,6 +2045,20 @@ paths:
                     errors:
                     - code: permission_denied
                       detail: You do not have permission to perform this action.
+                      attr: null
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
                       attr: null
           description: ''
         '405':
@@ -2692,6 +2704,20 @@ paths:
                       detail: Authentication credentials were not provided.
                       attr: null
           description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
+                      attr: null
+          description: ''
         '405':
           content:
             application/json:
@@ -2823,6 +2849,20 @@ paths:
                       detail: You do not have permission to perform this action.
                       attr: null
           description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
+                      attr: null
+          description: ''
         '405':
           content:
             application/json:
@@ -2938,6 +2978,20 @@ paths:
                     errors:
                     - code: permission_denied
                       detail: You do not have permission to perform this action.
+                      attr: null
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
                       attr: null
           description: ''
         '405':
@@ -3637,6 +3691,20 @@ paths:
                       detail: You do not have permission to perform this action.
                       attr: null
           description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
+                      attr: null
+          description: ''
         '405':
           content:
             application/json:
@@ -3765,6 +3833,20 @@ paths:
                     errors:
                     - code: permission_denied
                       detail: You do not have permission to perform this action.
+                      attr: null
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
                       attr: null
           description: ''
         '405':
@@ -4459,6 +4541,20 @@ paths:
                       detail: Authentication credentials were not provided.
                       attr: null
           description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
+                      attr: null
+          description: ''
         '405':
           content:
             application/json:
@@ -4738,6 +4834,53 @@ paths:
                       detail: Authentication credentials were not provided.
                       attr: null
           description: ''
+        '404':
+          content:
+            application/vnd.oai.openapi:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
+                      attr: null
+            application/yaml:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
+                      attr: null
+            application/vnd.oai.openapi+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
+                      attr: null
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
+                      attr: null
+          description: ''
         '405':
           content:
             application/vnd.oai.openapi:
@@ -4982,6 +5125,20 @@ paths:
                       detail: Authentication credentials were not provided.
                       attr: null
           description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
+                      attr: null
+          description: ''
         '405':
           content:
             application/json:
@@ -5083,6 +5240,20 @@ paths:
                     errors:
                     - code: not_authenticated
                       detail: Authentication credentials were not provided.
+                      attr: null
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
                       attr: null
           description: ''
         '405':
@@ -5188,6 +5359,20 @@ paths:
                       detail: Authentication credentials were not provided.
                       attr: null
           description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
+                      attr: null
+          description: ''
         '405':
           content:
             application/json:
@@ -5284,6 +5469,20 @@ paths:
                     errors:
                     - code: not_authenticated
                       detail: Authentication credentials were not provided.
+                      attr: null
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
                       attr: null
           description: ''
         '405':
@@ -5386,6 +5585,20 @@ paths:
                     errors:
                     - code: not_authenticated
                       detail: Authentication credentials were not provided.
+                      attr: null
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
                       attr: null
           description: ''
         '405':
@@ -5500,6 +5713,20 @@ paths:
                       detail: You do not have permission to perform this action.
                       attr: null
           description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
+                      attr: null
+          description: ''
         '405':
           content:
             application/json:
@@ -5557,7 +5784,11 @@ paths:
                       attr: null
           description: ''
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Logout'
+          description: ''
   /api/user/register:
     post:
       operationId: user_register_create
@@ -5599,6 +5830,20 @@ paths:
                     errors:
                     - code: not_authenticated
                       detail: Authentication credentials were not provided.
+                      attr: null
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
                       attr: null
           description: ''
         '405':
@@ -5789,6 +6034,20 @@ paths:
                       detail: You do not have permission to perform this action.
                       attr: null
           description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
+                      attr: null
+          description: ''
         '405':
           content:
             application/json:
@@ -5905,6 +6164,20 @@ paths:
                     errors:
                     - code: permission_denied
                       detail: You do not have permission to perform this action.
+                      attr: null
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
                       attr: null
           description: ''
         '405':
@@ -6754,6 +7027,20 @@ paths:
                       detail: You do not have permission to perform this action.
                       attr: null
           description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
+                      attr: null
+          description: ''
         '405':
           content:
             application/json:
@@ -6913,6 +7200,20 @@ paths:
                     errors:
                     - code: permission_denied
                       detail: You do not have permission to perform this action.
+                      attr: null
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
                       attr: null
           description: ''
         '405':
@@ -7517,6 +7818,285 @@ paths:
           description: ''
         '204':
           description: No response body
+  /api/videos/{id}/ingest:
+    get:
+      operationId: videos_ingest_retrieve
+      description: How far ingest has got with the video's uploaded file. Videos that
+        were ingested before this endpoint existed report `done`; videos nothing has
+        uploaded to report `pending`.
+      summary: Read a video's ingest state
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - videos
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideosIngestRetrieveErrorResponse400'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse401'
+              examples:
+                AuthenticationFailed:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: authentication_failed
+                      detail: Incorrect authentication credentials.
+                      attr: null
+                NotAuthenticated:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_authenticated
+                      detail: Authentication credentials were not provided.
+                      attr: null
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse403'
+              examples:
+                PermissionDenied:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: permission_denied
+                      detail: You do not have permission to perform this action.
+                      attr: null
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
+                      attr: null
+          description: ''
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse405'
+              examples:
+                MethodNotAllowed:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: method_not_allowed
+                      detail: Method "get" not allowed.
+                      attr: null
+          description: ''
+        '406':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse406'
+              examples:
+                NotAcceptable:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_acceptable
+                      detail: Could not satisfy the request Accept header.
+                      attr: null
+          description: ''
+        '415':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse415'
+              examples:
+                UnsupportedMediaType:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: unsupported_media_type
+                      detail: Unsupported media type "application/json" in request.
+                      attr: null
+          description: ''
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse500'
+              examples:
+                APIException:
+                  value:
+                    type: server_error
+                    errors:
+                    - code: error
+                      detail: A server error occurred.
+                      attr: null
+          description: ''
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestJob'
+          description: ''
+    put:
+      operationId: videos_ingest_report
+      description: Replaces the video's ingest state with the one given. Reserved
+        for the ingest service; the whole state is sent every time, so a retried report
+        is indistinguishable from the first.
+      summary: Report a video's ingest state
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - videos
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestJobRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideosIngestReportErrorResponse400'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse401'
+              examples:
+                AuthenticationFailed:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: authentication_failed
+                      detail: Incorrect authentication credentials.
+                      attr: null
+                NotAuthenticated:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_authenticated
+                      detail: Authentication credentials were not provided.
+                      attr: null
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse403'
+              examples:
+                PermissionDenied:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: permission_denied
+                      detail: You do not have permission to perform this action.
+                      attr: null
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
+                      attr: null
+          description: ''
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse405'
+              examples:
+                MethodNotAllowed:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: method_not_allowed
+                      detail: Method "get" not allowed.
+                      attr: null
+          description: ''
+        '406':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse406'
+              examples:
+                NotAcceptable:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_acceptable
+                      detail: Could not satisfy the request Accept header.
+                      attr: null
+          description: ''
+        '415':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse415'
+              examples:
+                UnsupportedMediaType:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: unsupported_media_type
+                      detail: Unsupported media type "application/json" in request.
+                      attr: null
+          description: ''
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse500'
+              examples:
+                APIException:
+                  value:
+                    type: server_error
+                    errors:
+                    - code: error
+                      detail: A server error occurred.
+                      attr: null
+          description: ''
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestJob'
+          description: ''
   /api/videos/{id}/upload_token:
     get:
       operationId: videos_upload_token_retrieve
@@ -7651,6 +8231,132 @@ paths:
               schema:
                 $ref: '#/components/schemas/VideoUploadToken'
           description: ''
+  /api/videos/{id}/upload_token/verify:
+    post:
+      operationId: videos_upload_token_verify
+      description: Confirms that `uploadToken` authorizes an upload for this video.
+        An invalid token deliberately produces the same response as an unknown video.
+      summary: Verify an upload token
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - videos
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadTokenVerificationRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideosUploadTokenVerifyErrorResponse400'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse401'
+              examples:
+                AuthenticationFailed:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: authentication_failed
+                      detail: Incorrect authentication credentials.
+                      attr: null
+                NotAuthenticated:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_authenticated
+                      detail: Authentication credentials were not provided.
+                      attr: null
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse403'
+              examples:
+                PermissionDenied:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: permission_denied
+                      detail: You do not have permission to perform this action.
+                      attr: null
+          description: ''
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse405'
+              examples:
+                MethodNotAllowed:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: method_not_allowed
+                      detail: Method "get" not allowed.
+                      attr: null
+          description: ''
+        '406':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse406'
+              examples:
+                NotAcceptable:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_acceptable
+                      detail: Could not satisfy the request Accept header.
+                      attr: null
+          description: ''
+        '415':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse415'
+              examples:
+                UnsupportedMediaType:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: unsupported_media_type
+                      detail: Unsupported media type "application/json" in request.
+                      attr: null
+          description: ''
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse500'
+              examples:
+                APIException:
+                  value:
+                    type: server_error
+                    errors:
+                    - code: error
+                      detail: A server error occurred.
+                      attr: null
+          description: ''
+        '204':
+          description: The upload token is valid.
+        '404':
+          description: The video does not exist or the upload token is invalid.
 components:
   parameters:
     X-CSRFToken:
@@ -8973,7 +9679,7 @@ components:
           type: string
           maxLength: 255
         videocount:
-          type: string
+          type: integer
           readOnly: true
       required:
       - id
@@ -9001,6 +9707,13 @@ components:
       - client_error
       type: string
       description: '* `client_error` - Client Error'
+    Csrf:
+      type: object
+      properties:
+        csrfToken:
+          type: string
+      required:
+      - csrfToken
     CsrfRetrieveErrorResponse400:
       oneOf:
       - $ref: '#/components/schemas/ParseErrorResponse'
@@ -9259,13 +9972,90 @@ components:
       required:
       - errors
       - type
-    JukeboxCsvRetrieveErrorResponse400:
-      oneOf:
-      - $ref: '#/components/schemas/ParseErrorResponse'
-      discriminator:
-        propertyName: type
-        mapping:
-          client_error: '#/components/schemas/ParseErrorResponse'
+    IngestJob:
+      type: object
+      description: |-
+        What ingest reports about an upload, and what its uploader is shown.
+
+        `status_text` is write-only deliberately: it carries ffmpeg's
+        complaints and the archive paths behind them, which belong in the
+        admin and the logs rather than in a response to an organization's
+        members. What they get instead is `error_code`, which the frontend
+        turns into words -- ingest has no business choosing the Norwegian.
+      properties:
+        video:
+          type: integer
+          readOnly: true
+        state:
+          $ref: '#/components/schemas/IngestStateEnum'
+        percentageDone:
+          type: integer
+          maximum: 100
+          minimum: 0
+          nullable: true
+          description: Progress through the current state, not through the pipeline
+            as a whole. Null where the current state has no progress to report.
+        errorCode:
+          type: string
+          description: Machine-readable reason the ingest failed; empty otherwise.
+            The wording shown to the uploader is the frontend's to choose, not ingest's.
+          maxLength: 64
+        updatedTime:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+      required:
+      - state
+      - updatedTime
+      - video
+    IngestJobRequest:
+      type: object
+      description: |-
+        What ingest reports about an upload, and what its uploader is shown.
+
+        `status_text` is write-only deliberately: it carries ffmpeg's
+        complaints and the archive paths behind them, which belong in the
+        admin and the logs rather than in a response to an organization's
+        members. What they get instead is `error_code`, which the frontend
+        turns into words -- ingest has no business choosing the Norwegian.
+      properties:
+        state:
+          $ref: '#/components/schemas/IngestStateEnum'
+        percentageDone:
+          type: integer
+          maximum: 100
+          minimum: 0
+          nullable: true
+          description: Progress through the current state, not through the pipeline
+            as a whole. Null where the current state has no progress to report.
+        statusText:
+          type: string
+          writeOnly: true
+          maxLength: 1000
+        errorCode:
+          type: string
+          description: Machine-readable reason the ingest failed; empty otherwise.
+            The wording shown to the uploader is the frontend's to choose, not ingest's.
+          maxLength: 64
+      required:
+      - state
+    IngestStateEnum:
+      enum:
+      - pending
+      - probing
+      - archiving
+      - transcoding
+      - done
+      - failed
+      type: string
+      description: |-
+        * `pending` - Waiting to be picked up
+        * `probing` - Inspecting the uploaded file
+        * `archiving` - Storing the original
+        * `transcoding` - Generating derived files
+        * `done` - Finished
+        * `failed` - Failed
     Login:
       type: object
       properties:
@@ -9290,6 +10080,16 @@ components:
       required:
       - email
       - password
+    Logout:
+      type: object
+      description: 'Representation for the logout response: a short human-readable
+        message.'
+      properties:
+        detail:
+          type: string
+          readOnly: true
+      required:
+      - detail
     NewUser:
       type: object
       properties:
@@ -11763,6 +12563,16 @@ components:
           maxLength: 255
       required:
       - name
+    UploadTokenVerificationRequest:
+      type: object
+      description: The upload capability presented by ingest for a specific video.
+      properties:
+        uploadToken:
+          type: string
+          minLength: 1
+          maxLength: 32
+      required:
+      - uploadToken
     User:
       type: object
       properties:
@@ -11775,7 +12585,8 @@ components:
           readOnly: true
           title: Email address
         isStaff:
-          type: string
+          type: boolean
+          description: Is the user a member of staff?
           readOnly: true
         dateJoined:
           type: string
@@ -11933,13 +12744,56 @@ components:
       required:
       - errors
       - type
+    UserLogoutCreateError:
+      oneOf:
+      - $ref: '#/components/schemas/UserLogoutCreateNonFieldErrorsErrorComponent'
+      discriminator:
+        propertyName: attr
+        mapping:
+          non_field_errors: '#/components/schemas/UserLogoutCreateNonFieldErrorsErrorComponent'
     UserLogoutCreateErrorResponse400:
       oneOf:
+      - $ref: '#/components/schemas/UserLogoutCreateValidationError'
       - $ref: '#/components/schemas/ParseErrorResponse'
       discriminator:
         propertyName: type
         mapping:
+          validation_error: '#/components/schemas/UserLogoutCreateValidationError'
           client_error: '#/components/schemas/ParseErrorResponse'
+    UserLogoutCreateNonFieldErrorsErrorComponent:
+      type: object
+      properties:
+        attr:
+          enum:
+          - non_field_errors
+          type: string
+          description: '* `non_field_errors` - non_field_errors'
+        code:
+          enum:
+          - invalid
+          - 'null'
+          type: string
+          description: |-
+            * `invalid` - invalid
+            * `null` - null
+        detail:
+          type: string
+      required:
+      - attr
+      - code
+      - detail
+    UserLogoutCreateValidationError:
+      type: object
+      properties:
+        type:
+          $ref: '#/components/schemas/ValidationErrorEnum'
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserLogoutCreateError'
+      required:
+      - errors
+      - type
     UserPartialUpdateDateOfBirthErrorComponent:
       type: object
       properties:
@@ -13964,6 +14818,177 @@ components:
         propertyName: type
         mapping:
           client_error: '#/components/schemas/ParseErrorResponse'
+    VideosIngestReportError:
+      oneOf:
+      - $ref: '#/components/schemas/VideosIngestReportNonFieldErrorsErrorComponent'
+      - $ref: '#/components/schemas/VideosIngestReportStateErrorComponent'
+      - $ref: '#/components/schemas/VideosIngestReportPercentageDoneErrorComponent'
+      - $ref: '#/components/schemas/VideosIngestReportStatusTextErrorComponent'
+      - $ref: '#/components/schemas/VideosIngestReportErrorCodeErrorComponent'
+      discriminator:
+        propertyName: attr
+        mapping:
+          non_field_errors: '#/components/schemas/VideosIngestReportNonFieldErrorsErrorComponent'
+          state: '#/components/schemas/VideosIngestReportStateErrorComponent'
+          percentage_done: '#/components/schemas/VideosIngestReportPercentageDoneErrorComponent'
+          status_text: '#/components/schemas/VideosIngestReportStatusTextErrorComponent'
+          error_code: '#/components/schemas/VideosIngestReportErrorCodeErrorComponent'
+    VideosIngestReportErrorCodeErrorComponent:
+      type: object
+      properties:
+        attr:
+          enum:
+          - error_code
+          type: string
+          description: '* `error_code` - error_code'
+        code:
+          enum:
+          - invalid
+          - max_length
+          - 'null'
+          - null_characters_not_allowed
+          - surrogate_characters_not_allowed
+          type: string
+          description: |-
+            * `invalid` - invalid
+            * `max_length` - max_length
+            * `null` - null
+            * `null_characters_not_allowed` - null_characters_not_allowed
+            * `surrogate_characters_not_allowed` - surrogate_characters_not_allowed
+        detail:
+          type: string
+      required:
+      - attr
+      - code
+      - detail
+    VideosIngestReportErrorResponse400:
+      oneOf:
+      - $ref: '#/components/schemas/VideosIngestReportValidationError'
+      - $ref: '#/components/schemas/ParseErrorResponse'
+      discriminator:
+        propertyName: type
+        mapping:
+          validation_error: '#/components/schemas/VideosIngestReportValidationError'
+          client_error: '#/components/schemas/ParseErrorResponse'
+    VideosIngestReportNonFieldErrorsErrorComponent:
+      type: object
+      properties:
+        attr:
+          enum:
+          - non_field_errors
+          type: string
+          description: '* `non_field_errors` - non_field_errors'
+        code:
+          enum:
+          - invalid
+          - 'null'
+          type: string
+          description: |-
+            * `invalid` - invalid
+            * `null` - null
+        detail:
+          type: string
+      required:
+      - attr
+      - code
+      - detail
+    VideosIngestReportPercentageDoneErrorComponent:
+      type: object
+      properties:
+        attr:
+          enum:
+          - percentage_done
+          type: string
+          description: '* `percentage_done` - percentage_done'
+        code:
+          enum:
+          - invalid
+          - max_string_length
+          - max_value
+          - min_value
+          type: string
+          description: |-
+            * `invalid` - invalid
+            * `max_string_length` - max_string_length
+            * `max_value` - max_value
+            * `min_value` - min_value
+        detail:
+          type: string
+      required:
+      - attr
+      - code
+      - detail
+    VideosIngestReportStateErrorComponent:
+      type: object
+      properties:
+        attr:
+          enum:
+          - state
+          type: string
+          description: '* `state` - state'
+        code:
+          enum:
+          - invalid_choice
+          - 'null'
+          - required
+          type: string
+          description: |-
+            * `invalid_choice` - invalid_choice
+            * `null` - null
+            * `required` - required
+        detail:
+          type: string
+      required:
+      - attr
+      - code
+      - detail
+    VideosIngestReportStatusTextErrorComponent:
+      type: object
+      properties:
+        attr:
+          enum:
+          - status_text
+          type: string
+          description: '* `status_text` - status_text'
+        code:
+          enum:
+          - invalid
+          - max_length
+          - 'null'
+          - null_characters_not_allowed
+          - surrogate_characters_not_allowed
+          type: string
+          description: |-
+            * `invalid` - invalid
+            * `max_length` - max_length
+            * `null` - null
+            * `null_characters_not_allowed` - null_characters_not_allowed
+            * `surrogate_characters_not_allowed` - surrogate_characters_not_allowed
+        detail:
+          type: string
+      required:
+      - attr
+      - code
+      - detail
+    VideosIngestReportValidationError:
+      type: object
+      properties:
+        type:
+          $ref: '#/components/schemas/ValidationErrorEnum'
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/VideosIngestReportError'
+      required:
+      - errors
+      - type
+    VideosIngestRetrieveErrorResponse400:
+      oneOf:
+      - $ref: '#/components/schemas/ParseErrorResponse'
+      discriminator:
+        propertyName: type
+        mapping:
+          client_error: '#/components/schemas/ParseErrorResponse'
     VideosListCategories_name_icontainsErrorComponent:
       type: object
       properties:
@@ -15225,6 +16250,90 @@ components:
         propertyName: type
         mapping:
           client_error: '#/components/schemas/ParseErrorResponse'
+    VideosUploadTokenVerifyError:
+      oneOf:
+      - $ref: '#/components/schemas/VideosUploadTokenVerifyNonFieldErrorsErrorComponent'
+      - $ref: '#/components/schemas/VideosUploadTokenVerifyUploadTokenErrorComponent'
+      discriminator:
+        propertyName: attr
+        mapping:
+          non_field_errors: '#/components/schemas/VideosUploadTokenVerifyNonFieldErrorsErrorComponent'
+          upload_token: '#/components/schemas/VideosUploadTokenVerifyUploadTokenErrorComponent'
+    VideosUploadTokenVerifyErrorResponse400:
+      oneOf:
+      - $ref: '#/components/schemas/VideosUploadTokenVerifyValidationError'
+      - $ref: '#/components/schemas/ParseErrorResponse'
+      discriminator:
+        propertyName: type
+        mapping:
+          validation_error: '#/components/schemas/VideosUploadTokenVerifyValidationError'
+          client_error: '#/components/schemas/ParseErrorResponse'
+    VideosUploadTokenVerifyNonFieldErrorsErrorComponent:
+      type: object
+      properties:
+        attr:
+          enum:
+          - non_field_errors
+          type: string
+          description: '* `non_field_errors` - non_field_errors'
+        code:
+          enum:
+          - invalid
+          - 'null'
+          type: string
+          description: |-
+            * `invalid` - invalid
+            * `null` - null
+        detail:
+          type: string
+      required:
+      - attr
+      - code
+      - detail
+    VideosUploadTokenVerifyUploadTokenErrorComponent:
+      type: object
+      properties:
+        attr:
+          enum:
+          - upload_token
+          type: string
+          description: '* `upload_token` - upload_token'
+        code:
+          enum:
+          - blank
+          - invalid
+          - max_length
+          - 'null'
+          - null_characters_not_allowed
+          - required
+          - surrogate_characters_not_allowed
+          type: string
+          description: |-
+            * `blank` - blank
+            * `invalid` - invalid
+            * `max_length` - max_length
+            * `null` - null
+            * `null_characters_not_allowed` - null_characters_not_allowed
+            * `required` - required
+            * `surrogate_characters_not_allowed` - surrogate_characters_not_allowed
+        detail:
+          type: string
+      required:
+      - attr
+      - code
+      - detail
+    VideosUploadTokenVerifyValidationError:
+      type: object
+      properties:
+        type:
+          $ref: '#/components/schemas/ValidationErrorEnum'
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/VideosUploadTokenVerifyError'
+      required:
+      - errors
+      - type
   securitySchemes:
     cookieAuth:
       type: apiKey
