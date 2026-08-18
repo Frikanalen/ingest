@@ -10,7 +10,8 @@ from frikanalen_django_api_client.models import (
     PatchedVideoRequest,
     VideoFile,
     VideoFileRequest,
-    VideofilesListFormatFsname,
+    VideofilesListVariant,
+    VideoFileVariantEnum,
 )
 
 from app.media.loudness.loudness_measurement import LoudnessMeasurement
@@ -32,20 +33,6 @@ class FormatEnum(str, Enum):
 
     def __str__(self) -> str:
         return str(self.value)
-
-
-class IntFormatEnum(int, Enum):
-    LARGE_THUMB = 1
-    BROADCAST = 2
-    VC1 = 3
-    MED_THUMB = 4
-    SMALL_THUMB = 5
-    ORIGINAL = 6
-    THEORA = 7
-    SRT = 8
-    CLOUDFLARE_ID = 9
-    WEBM_MED = 10
-    DASH = 11
 
 
 class DjangoApiService:
@@ -103,7 +90,7 @@ class DjangoApiService:
         return (
             await videofiles_list.asyncio(
                 client=self.client,
-                format_fsname=VideofilesListFormatFsname.ORIGINAL,
+                variant=VideofilesListVariant.ORIGINAL,
                 integrated_lufs_isnull=True,
                 limit=limit,
                 ordering="-video",
@@ -120,7 +107,7 @@ class DjangoApiService:
 
     async def create_video_file(self, filename: str, video_id: str, file_format: FormatEnum):
         req = VideoFileRequest(
-            filename=str(filename), video=int(video_id), format_=IntFormatEnum[file_format.name].value
+            filename=str(filename), video=int(video_id), variant=VideoFileVariantEnum[file_format.name]
         )
         return await videofiles_create.asyncio(client=self.client, body=req)
 
