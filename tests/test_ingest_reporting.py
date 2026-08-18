@@ -118,8 +118,11 @@ async def test_transcoding_progress_tracks_ffmpegs_own_position(archive, django_
 
     assert percentages[0] == 0
     # The thumbnail is done as soon as it starts; it must not read as though
-    # it were as costly as the video encode that follows it.
-    assert percentages[1] < 10
+    # it were as costly as the video encode that follows it. DASH is the only
+    # encode left now that webm_med is gone, so its own weight now makes up
+    # most of the total -- one thumbnail's share of that total is bigger than
+    # it used to be, but still well short of an equal-weighted quarter.
+    assert percentages[1] < 20
     assert percentages[-1] == 100
     assert percentages == sorted(percentages), "progress must never appear to move backwards"
 

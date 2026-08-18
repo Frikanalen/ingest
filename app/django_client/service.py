@@ -29,7 +29,6 @@ class FormatEnum(str, Enum):
     SRT = "srt"
     THEORA = "theora"
     VC1 = "vc1"
-    WEBM_MED = "webm_med"
 
     def __str__(self) -> str:
         return str(self.value)
