@@ -3,6 +3,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends
+from frikanalen_django_api_client.models import IngestStateEnum
 from starlette.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
@@ -12,6 +13,7 @@ from app.api.hooks.schema.response import FileInfoChanges, HookResponse
 from app.archive_store import ArchiveStore
 from app.django_client.service import DjangoApiService
 from app.ingest import Ingester
+from app.ingest_reporting import IngestErrorCode, IngestReporter
 from app.util.app_state import get_archive_store, get_django_api, get_metadata_extractor
 from app.util.settings import IngestAppSettings, get_settings
 
@@ -51,24 +53,36 @@ async def receive_hook(
     if hook_request.type == "post-finish":
         ingest = Ingester(archive=archive, django_api=django_api, work_dir=settings.work_dir)
         upload_meta = get_upload_metadata(hook_request)
+        # One reporter for the whole run, handed to the Ingester below so that
+        # the probe and the pipeline read as a single sequence of states.
+        reporter = IngestReporter(django_api, upload_meta.video_id)
         # eg. /upload/12345/original_video.mp4, as tusd sees it
         path_from_tus = Path(hook_request.event.upload.storage["Path"])
         # eg. ./upload/12345/original_video.mp4, as ingest sees it
         upload_file = settings.tusd_dir / path_from_tus.relative_to(settings.tusd_upload_dir)
 
+        await reporter.state(IngestStateEnum.PROBING)
+
         try:
             metadata = await metadata_extractor.assert_compliance(upload_file)
         except ComplianceError as e:
             logger.error("File failed compliance check: %s", e)
+            await reporter.failed(IngestErrorCode.NOT_COMPLIANT, str(e))
             raise HTTPException(status_code=400, detail=f"File failed compliance check: {e}") from e
         except Exception as e:
             logger.error("Failed to probe file: %s", e)
+            await reporter.failed(IngestErrorCode.UNREADABLE, str(e))
             raise HTTPException(status_code=400, detail="We could not make sense of this file, sorry") from e
 
         try:
-            await ingest.ingest(upload_meta.video_id, upload_file, metadata)
+            await ingest.ingest(upload_meta.video_id, upload_file, metadata, reporter)
         except Exception as e:
+            # tusd has nowhere to put this: the browser considered the upload
+            # finished several minutes ago. The report is the only thing that
+            # reaches the person who sent the file, which is why swallowing the
+            # exception here is now defensible and was not before.
             logger.error("Failed to ingest file: %s", e)
+            await reporter.failed_unless_already(IngestErrorCode.INTERNAL_ERROR, str(e))
             return {}
 
     return {}

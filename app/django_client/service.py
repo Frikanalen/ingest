@@ -3,8 +3,10 @@ from enum import Enum
 
 from frikanalen_django_api_client import AuthenticatedClient
 from frikanalen_django_api_client.api.videofiles import videofiles_create, videofiles_list, videofiles_partial_update
-from frikanalen_django_api_client.api.videos import videos_list, videos_partial_update
+from frikanalen_django_api_client.api.videos import videos_ingest_report, videos_list, videos_partial_update
 from frikanalen_django_api_client.models import (
+    IngestJobRequest,
+    IngestStateEnum,
     PatchedVideoRequest,
     VideoFile,
     VideoFileRequest,
@@ -69,6 +71,30 @@ class DjangoApiService:
     async def set_video_proper_import(self, video_id: str, proper_import: bool):
         return await videos_partial_update.asyncio(
             video_id, client=self.client, body=PatchedVideoRequest(proper_import=proper_import)
+        )
+
+    async def report_ingest_state(
+        self,
+        video_id: str,
+        state: IngestStateEnum,
+        percentage_done: int | None = None,
+        status_text: str = "",
+        error_code: str = "",
+    ):
+        """Replace what django-api knows about this video's ingest.
+
+        The whole state goes every time, so a retried report says the same
+        thing as the first one did.
+        """
+        return await videos_ingest_report.asyncio(
+            video_id,
+            client=self.client,
+            body=IngestJobRequest(
+                state=state,
+                percentage_done=percentage_done,
+                status_text=status_text,
+                error_code=error_code,
+            ),
         )
 
     async def get_original_files_without_loudness(self, limit=5) -> list[VideoFile]:
