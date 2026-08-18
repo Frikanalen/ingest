@@ -21,6 +21,16 @@ DESIRED_FORMATS = (
     FormatEnum.WEBM_MED,
 )
 
+# How much of the overall transcoding percentage each format is worth,
+# roughly proportional to how long it actually takes to produce: pulling one
+# thumbnail frame is over almost before it starts, next to a full two-pass
+# video encode. Counting formats equally made the bar sit at a misleadingly
+# large 50% for the entire duration of the real work.
+FORMAT_WEIGHTS: dict[FormatEnum, int] = {
+    FormatEnum.LARGE_THUMB: 1,
+    FormatEnum.WEBM_MED: 15,
+}
+
 
 class Ingester:
     """Archives an upload and the derivatives generated from it.
@@ -69,15 +79,16 @@ class Ingester:
             await self._archive_original(archive, video_id, original_file, metadata, reporter)
 
             with TemporaryDirectory(dir=self.work_dir, prefix=f"ingest-{video_id}-") as scratch:
-                total_formats = len(DESIRED_FORMATS)
-                for done, file_format in enumerate(DESIRED_FORMATS):
+                total_weight = sum(FORMAT_WEIGHTS[f] for f in DESIRED_FORMATS)
+                completed_weight = 0
+                for file_format in DESIRED_FORMATS:
                     # Progress through the transcoding state, counted in
-                    # finished formats to start with; _process_format
-                    # refines this further using ffmpeg's own -progress
-                    # output while that format is running.
+                    # weighted finished formats to start with;
+                    # _process_format refines this further using ffmpeg's
+                    # own -progress output while that format is running.
                     await reporter.state(
                         IngestStateEnum.TRANSCODING,
-                        percentage_done=round(100 * done / total_formats),
+                        percentage_done=round(100 * completed_weight / total_weight),
                     )
                     await self._process_format(
                         archive,
@@ -87,9 +98,10 @@ class Ingester:
                         video_id,
                         Path(scratch),
                         reporter,
-                        done,
-                        total_formats,
+                        completed_weight,
+                        total_weight,
                     )
+                    completed_weight += FORMAT_WEIGHTS[file_format]
 
         await self.django_api.set_video_proper_import(video_id, True)
         await reporter.state(IngestStateEnum.DONE, percentage_done=100)
@@ -142,8 +154,8 @@ class Ingester:
         video_id: str,
         scratch: Path,
         reporter: IngestReporter,
-        done: int,
-        total_formats: int,
+        completed_weight: int,
+        total_weight: int,
     ):
         self.logger.info("Processing %s as %s", source_file, file_format)
 
@@ -167,7 +179,9 @@ class Ingester:
                 command,
                 duration_s=duration_s,
                 passes=template.metadata.passes,
-                on_progress=self._transcode_progress_reporter(reporter, done, total_formats),
+                on_progress=self._transcode_progress_reporter(
+                    reporter, completed_weight, FORMAT_WEIGHTS[file_format], total_weight
+                ),
             ).execute()
         except Exception as e:
             self.logger.error("Failed to produce %s: %s", file_format, e)
@@ -187,7 +201,7 @@ class Ingester:
         await self.django_api.create_video_file(filename=str(destination), file_format=file_format, video_id=video_id)
 
     def _transcode_progress_reporter(
-        self, reporter: IngestReporter, done: int, total_formats: int
+        self, reporter: IngestReporter, completed_weight: int, format_weight: int, total_weight: int
     ) -> Callable[[float], Awaitable[None]]:
         """Turns one format's ffmpeg progress into an overall percentage.
 
@@ -199,7 +213,7 @@ class Ingester:
 
         async def report(fraction: float) -> None:
             nonlocal last_reported
-            percentage = round(100 * (done + fraction) / total_formats)
+            percentage = round(100 * (completed_weight + format_weight * fraction) / total_weight)
             if percentage != last_reported:
                 last_reported = percentage
                 await reporter.state(IngestStateEnum.TRANSCODING, percentage_done=percentage)

@@ -117,6 +117,9 @@ async def test_transcoding_progress_tracks_ffmpegs_own_position(archive, django_
     ]
 
     assert percentages[0] == 0
+    # The thumbnail is done as soon as it starts; it must not read as though
+    # it were as costly as the video encode that follows it.
+    assert percentages[1] < 10
     assert percentages[-1] == 100
     assert percentages == sorted(percentages), "progress must never appear to move backwards"
 
