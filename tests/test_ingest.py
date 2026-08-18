@@ -5,6 +5,7 @@ where tusd left it and writes to local scratch, and only finished files travel
 to the archive.
 """
 
+import re
 import shutil
 from pathlib import PurePosixPath
 from unittest.mock import AsyncMock
@@ -96,6 +97,18 @@ async def test_archives_the_original_and_every_derivative(ingested, archive_root
     assert (archive_root / VIDEO_ID / "original" / "example_video.mp4").is_file()
     assert (archive_root / VIDEO_ID / "large_thumb" / "example_video.jpg").is_file()
     assert (archive_root / VIDEO_ID / "webm_med" / "example_video.webm").is_file()
+    assert (archive_root / VIDEO_ID / "dash" / "manifest.mpd").is_file()
+
+
+@pytest.mark.asyncio
+async def test_archives_every_file_the_dash_manifest_references(ingested, archive_root):
+    """A format is a directory of files now, not one file, and the manifest is
+    only playable if the media it names travelled with it."""
+    dash = archive_root / VIDEO_ID / "dash"
+    referenced = set(re.findall(r"<BaseURL>([^<]+)</BaseURL>", (dash / "manifest.mpd").read_text()))
+
+    assert referenced, "manifest references no media at all"
+    assert all((dash / name).is_file() for name in referenced)
 
 
 @pytest.mark.asyncio
@@ -103,11 +116,17 @@ async def test_archives_nothing_but_the_finished_files(ingested, archive_root):
     """ffmpeg scratch, the two-pass log and the transfer spool must all stay out."""
     archived = sorted(str(p.relative_to(archive_root)) for p in archive_root.rglob("*") if p.is_file())
 
-    assert archived == [
-        f"{VIDEO_ID}/large_thumb/example_video.jpg",
-        f"{VIDEO_ID}/original/example_video.mp4",
-        f"{VIDEO_ID}/webm_med/example_video.webm",
-    ]
+    dash_media = sorted(f"{VIDEO_ID}/dash/manifest-stream{n}.mp4" for n in range(3))
+
+    assert archived == sorted(
+        [
+            f"{VIDEO_ID}/dash/manifest.mpd",
+            *dash_media,
+            f"{VIDEO_ID}/large_thumb/example_video.jpg",
+            f"{VIDEO_ID}/original/example_video.mp4",
+            f"{VIDEO_ID}/webm_med/example_video.webm",
+        ]
+    )
 
 
 @pytest.mark.asyncio
@@ -137,6 +156,9 @@ async def test_registers_archive_relative_paths_with_django(ingested, django_api
         FormatEnum.ORIGINAL: f"{VIDEO_ID}/original/example_video.mp4",
         FormatEnum.LARGE_THUMB: f"{VIDEO_ID}/large_thumb/example_video.jpg",
         FormatEnum.WEBM_MED: f"{VIDEO_ID}/webm_med/example_video.webm",
+        # Only the manifest: the media it names is reached through it, never
+        # on its own.
+        FormatEnum.DASH: f"{VIDEO_ID}/dash/manifest.mpd",
     }
 
 

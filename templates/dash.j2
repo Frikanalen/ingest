@@ -1,0 +1,15 @@
+---
+output_file_name: manifest.mpd
+---
+ffmpeg -i "{{ input_file }}" -y
+    -nostats -progress pipe:1
+    -filter_complex "[0:v]pad=ceil(max(iw\,ih*16/9)/2)*2:ceil(max(ih\,iw*9/16)/2)*2:(ow-iw)/2:(oh-ih)/2,setsar=1,split=3[hi][mid][low];[hi]scale=-2:min(1080\,ih)[v0];[mid]scale=-2:min(720\,ih)[v1];[low]scale=-2:min(360\,ih)[v2]"
+    -map "[v0]" -c:v:0 libvpx-vp9 -crf:v:0 31 -b:v:0 3000k
+    -map "[v1]" -c:v:1 libvpx-vp9 -crf:v:1 32 -b:v:1 1500k
+    -map "[v2]" -c:v:2 libvpx-vp9 -crf:v:2 36 -b:v:2 500k
+    {% if has_audio %}-map 0:a:0 -c:a libopus -b:a 128k{% endif %}
+    -cpu-used 3 -row-mt 1 -tile-columns 2 -pix_fmt yuv420p
+    -force_key_frames "expr:gte(t,n_forced*2)"
+    -f dash -dash_segment_type mp4 -single_file 1 -seg_duration 6
+    -adaptation_sets "id=0,streams=v{% if has_audio %} id=1,streams=a{% endif %}"
+    "{{ output_file }}"

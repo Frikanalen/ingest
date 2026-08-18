@@ -20,6 +20,7 @@ from app.util.pprint_object_list import pprint_object_list
 class FormatEnum(str, Enum):
     BROADCAST = "broadcast"
     CLOUDFLARE_ID = "cloudflare_id"
+    DASH = "dash"
     LARGE_THUMB = "large_thumb"
     MED_THUMB = "med_thumb"
     ORIGINAL = "original"
@@ -44,6 +45,7 @@ class IntFormatEnum(int, Enum):
     SRT = 8
     CLOUDFLARE_ID = 9
     WEBM_MED = 10
+    DASH = 11
 
 
 class DjangoApiService:
