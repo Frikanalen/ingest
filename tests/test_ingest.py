@@ -7,6 +7,7 @@ to the archive.
 
 import re
 import shutil
+import subprocess
 from pathlib import PurePosixPath
 from unittest.mock import AsyncMock
 
@@ -17,6 +18,7 @@ from app.api.hooks.metadata import MetadataExtractor
 from app.archive_store import FileAlreadyArchived, SshArchiveStore
 from app.django_client.service import FormatEnum
 from app.ingest import Ingester
+from app.media.loudness.measure import measure_loudness
 from app.util.settings import SshArchiveSettings
 from tests.utils.ssh_server import run_ssh_server
 
@@ -90,6 +92,71 @@ async def metadata(uploaded_file):
 @pytest_asyncio.fixture
 async def ingested(archive, django_api, work_dir, uploaded_file, metadata):
     await Ingester(archive=archive, django_api=django_api, work_dir=work_dir).ingest(VIDEO_ID, uploaded_file, metadata)
+
+
+@pytest.fixture
+def uploaded_file_with_tone(upload_dir, color_bars_video_with_tone):
+    destination = upload_dir / "with_audio.mp4"
+    shutil.copy(color_bars_video_with_tone, destination)
+    return destination
+
+
+@pytest_asyncio.fixture
+async def ingested_with_tone(archive, django_api, work_dir, uploaded_file_with_tone):
+    metadata = await MetadataExtractor().do_probe(uploaded_file_with_tone)
+    await Ingester(archive=archive, django_api=django_api, work_dir=work_dir).ingest(
+        VIDEO_ID, uploaded_file_with_tone, metadata
+    )
+
+
+def _created_file(django_api, file_format: FormatEnum):
+    for call in django_api.create_video_file.await_args_list:
+        if call.kwargs["file_format"] == file_format:
+            return call.kwargs
+    raise AssertionError(f"no videofile was created for {file_format}")
+
+
+@pytest.mark.asyncio
+async def test_records_the_originals_loudness_against_the_original(ingested_with_tone, django_api):
+    """The stored figure is what playout levels to -23 LUFS from, so it has to
+    describe the file as uploaded -- not the DASH output, which ingest has
+    already normalized to a different target."""
+    loudness = _created_file(django_api, FormatEnum.ORIGINAL)["loudness"]
+
+    assert loudness is not None
+    assert loudness.truepeak_lufs is not None
+    # The fixture's tone is deliberately quiet, so a figure anywhere near
+    # the -16 LUFS the DASH output is normalized to would mean we had
+    # measured the wrong file.
+    assert loudness.integrated_lufs == pytest.approx(-39.8, abs=1.0)
+
+
+@pytest.mark.asyncio
+async def test_records_no_loudness_for_a_file_with_no_audio(ingested, django_api):
+    assert _created_file(django_api, FormatEnum.ORIGINAL)["loudness"] is None
+
+
+@pytest.mark.asyncio
+async def test_normalizes_the_dash_audio_to_the_web_target(ingested_with_tone, archive_root):
+    """The whole point of measuring: the browser gets audio at a level that
+    sits alongside everything else in the tab."""
+    dash = archive_root / VIDEO_ID / "dash"
+    audio = [f for f in dash.iterdir() if f.suffix == ".mp4" and _has_audio(f)]
+    assert audio, f"no audio representation in {list(dash.iterdir())}"
+
+    measured = await measure_loudness(audio[0])
+
+    assert measured is not None
+    assert measured.integrated_lufs == pytest.approx(-16, abs=1.5)
+
+
+def _has_audio(path) -> bool:
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv", str(path)],
+        capture_output=True,
+        text=True,
+    )
+    return bool(probe.stdout.strip())
 
 
 @pytest.mark.asyncio

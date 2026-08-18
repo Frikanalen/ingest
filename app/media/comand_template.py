@@ -5,6 +5,7 @@ import yaml
 from jinja2 import Template
 from pydantic import BaseModel, model_validator
 
+from app.media.loudness.loudness_measurement import LoudnessMeasurement
 from tests.get_git_root import get_git_root
 
 
@@ -46,6 +47,11 @@ class ProfileTemplateArguments(TypedDict):
     #: otherwise declare an empty audio output has to leave it out entirely:
     #: an adaptation set with no representation in it is not valid DASH.
     has_audio: bool
+    #: The source's measured loudness, where we have one. None means the
+    #: analysis pass found nothing to work from, and a template that would
+    #: normalize has to pass the audio through at its original level
+    #: instead -- a wrong gain is worse than no gain.
+    loudness: LoudnessMeasurement | None
 
 
 def _read_template_file(format_name: str) -> str:
