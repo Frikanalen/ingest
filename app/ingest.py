@@ -14,6 +14,8 @@ from app.util.logging import VideoIdFilter
 from .archive_store import ArchiveSession, ArchiveStore
 from .media.comand_template import ProfileTemplateArguments, TemplatedCommandGenerator
 from .media.ffprobe_schema import FfprobeOutput
+from .media.loudness.loudness_measurement import LoudnessMeasurement
+from .media.loudness.measure import measure_loudness
 from .runner import Task
 
 DESIRED_FORMATS = (
@@ -79,8 +81,11 @@ class Ingester:
             await reporter.failed(IngestErrorCode.INTERNAL_ERROR, str(e))
             raise
 
+        has_audio = any(stream.codec_type == "audio" for stream in metadata.streams or [])
+        loudness = await self._measure_loudness(original_file, has_audio, reporter)
+
         async with self.archive.open() as archive:
-            await self._archive_original(archive, video_id, original_file, metadata, reporter)
+            await self._archive_original(archive, video_id, original_file, metadata, reporter, loudness)
 
             with TemporaryDirectory(dir=self.work_dir, prefix=f"ingest-{video_id}-") as scratch:
                 total_weight = sum(FORMAT_WEIGHTS[f] for f in DESIRED_FORMATS)
@@ -104,6 +109,8 @@ class Ingester:
                         reporter,
                         completed_weight,
                         total_weight,
+                        has_audio,
+                        loudness,
                     )
                     completed_weight += FORMAT_WEIGHTS[file_format]
 
@@ -115,6 +122,37 @@ class Ingester:
         self.logger.info("Removing uploaded file %s", original_file)
         original_file.unlink()
 
+    async def _measure_loudness(
+        self, original_file: Path, has_audio: bool, reporter: IngestReporter
+    ) -> LoudnessMeasurement | None:
+        """Measure the upload before anything has been done to it.
+
+        This has to happen on the original: it is the figure playout levels
+        from to reach its own -23 LUFS target, so it has to describe the
+        file as uploaded rather than any derivative we have already
+        normalized to something else.
+
+        The pass is analysis only and reports no progress of its own -- it
+        decodes audio and discards it, which next to the VP9 ladder is not
+        long enough to be worth a percentage.
+        """
+        if not has_audio:
+            return None
+
+        await reporter.state(IngestStateEnum.PROBING)
+        loudness = await measure_loudness(original_file)
+
+        if loudness is None:
+            self.logger.warning("No usable loudness measurement for %s", original_file)
+        else:
+            self.logger.info(
+                "Measured %s at %.1f LUFS, true peak %s dBTP",
+                original_file,
+                loudness.integrated_lufs,
+                loudness.truepeak_lufs,
+            )
+        return loudness
+
     async def _archive_original(
         self,
         archive: ArchiveSession,
@@ -122,6 +160,7 @@ class Ingester:
         original_file: Path,
         metadata: FfprobeOutput,
         reporter: IngestReporter,
+        loudness: LoudnessMeasurement | None = None,
     ):
         destination = original_file_location(video_id, Path(original_file.name))
         await reporter.state(IngestStateEnum.ARCHIVING)
@@ -143,6 +182,7 @@ class Ingester:
                 filename=str(destination),
                 file_format=FormatEnum.ORIGINAL,
                 video_id=video_id,
+                loudness=loudness,
             )
         except Exception as e:
             self.logger.error("django-api error post original ingest: %s", e)
@@ -160,6 +200,8 @@ class Ingester:
         reporter: IngestReporter,
         completed_weight: int,
         total_weight: int,
+        has_audio: bool,
+        loudness: LoudnessMeasurement | None,
     ):
         self.logger.info("Processing %s as %s", source_file, file_format)
 
@@ -181,7 +223,8 @@ class Ingester:
             output_dir=output_dir,
             scratch_dir=scratch,
             seek_s=(duration_s * 0.25 or 30),
-            has_audio=any(stream.codec_type == "audio" for stream in metadata.streams or []),
+            has_audio=has_audio,
+            loudness=loudness,
         )
 
         command = template.render(template_args)

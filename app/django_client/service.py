@@ -2,17 +2,16 @@ from datetime import datetime
 from enum import Enum
 
 from frikanalen_django_api_client import AuthenticatedClient
-from frikanalen_django_api_client.api.videofiles import videofiles_create, videofiles_list, videofiles_partial_update
+from frikanalen_django_api_client.api.videofiles import videofiles_create, videofiles_list
 from frikanalen_django_api_client.api.videos import videos_ingest_report, videos_list, videos_partial_update
 from frikanalen_django_api_client.models import (
     IngestJobRequest,
     IngestStateEnum,
     PatchedVideoRequest,
-    VideoFile,
     VideoFileRequest,
-    VideofilesListVariant,
     VideoFileVariantEnum,
 )
+from frikanalen_django_api_client.types import UNSET
 
 from app.media.loudness.loudness_measurement import LoudnessMeasurement
 from app.util.pprint_object_list import pprint_object_list
@@ -85,28 +84,29 @@ class DjangoApiService:
             ),
         )
 
-    async def get_original_files_without_loudness(self, limit=5) -> list[VideoFile]:
-        return (
-            await videofiles_list.asyncio(
-                client=self.client,
-                variant=VideofilesListVariant.ORIGINAL,
-                integrated_lufs_isnull=True,
-                limit=limit,
-                ordering="-video",
-            )
-        ).results or []
-
-    async def set_video_loudness(self, video_id: str, loudness: LoudnessMeasurement):
-        return await videofiles_partial_update.asyncio(
-            video_id, client=self.client, body=PatchedVideoRequest.from_dict(loudness)
-        )
-
     async def get_files_for_video(self, video_id: str):
         return await videofiles_list.asyncio(client=self.client, video_id=int(video_id))
 
-    async def create_video_file(self, filename: str, video_id: str, file_format: FormatEnum):
+    async def create_video_file(
+        self,
+        filename: str,
+        video_id: str,
+        file_format: FormatEnum,
+        loudness: LoudnessMeasurement | None = None,
+    ):
+        """Register a file against a video, with its loudness if we have it.
+
+        The loudness columns live on the videofile rather than the video,
+        so they describe the file that was actually measured: the figures
+        playout levels from belong to the original, not to a derivative
+        that has already been normalized to something else.
+        """
         req = VideoFileRequest(
-            filename=str(filename), video=int(video_id), variant=VideoFileVariantEnum[file_format.name]
+            filename=str(filename),
+            video=int(video_id),
+            variant=VideoFileVariantEnum[file_format.name],
+            integrated_lufs=loudness.integrated_lufs if loudness else UNSET,
+            truepeak_lufs=loudness.truepeak_lufs if loudness else UNSET,
         )
         return await videofiles_create.asyncio(client=self.client, body=req)
 

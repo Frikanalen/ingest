@@ -7,7 +7,7 @@ ffmpeg -i "{{ input_file }}" -y
     -map "[v0]" -c:v:0 libvpx-vp9 -crf:v:0 31 -b:v:0 3000k
     -map "[v1]" -c:v:1 libvpx-vp9 -crf:v:1 32 -b:v:1 1500k
     -map "[v2]" -c:v:2 libvpx-vp9 -crf:v:2 36 -b:v:2 500k
-    {% if has_audio %}-map 0:a:0 -c:a libopus -b:a 128k{% endif %}
+    {% if has_audio %}-map 0:a:0{% if loudness and loudness.truepeak_lufs is not none %} -af "loudnorm=I=-16:TP=-1:LRA=11:measured_I={{ loudness.integrated_lufs }}:measured_TP={{ loudness.truepeak_lufs }}:measured_LRA={{ loudness.loudness_range }}:measured_thresh={{ loudness.threshold_lufs }}:offset={{ loudness.target_offset }}:linear=true" -ar 48000{% endif %} -c:a libopus -b:a 128k{% endif %}
     -cpu-used 4 -row-mt 1 -tile-columns 2 -pix_fmt yuv420p
     -force_key_frames "expr:gte(t,n_forced*6)"
     -f dash -dash_segment_type mp4 -single_file 1 -seg_duration 6

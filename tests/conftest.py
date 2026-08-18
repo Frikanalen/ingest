@@ -148,6 +148,30 @@ def start_fastapi_server() -> Generator[MockHookServerFixture, None, None]:
 
 
 @pytest.fixture(scope="session")
+def color_bars_video_with_tone() -> Generator[Path, None, None]:
+    """As color_bars_video, but with an audio track quiet enough that
+    normalizing it to the web target is a visible change in the numbers.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+        video_path = tmp.name
+
+    try:
+        cmd = shlex.split(
+            "ffmpeg -f lavfi -i smptebars=size=1280x720:rate=25 "
+            "-f lavfi -i sine=frequency=440,volume=-18dB "
+            "-t 1 -y -nostats -hide_banner -loglevel error "
+            "-c:v libx264 -pix_fmt yuv420p -c:a aac -shortest"
+        )
+
+        subprocess.run([*cmd, video_path], check=True)
+
+        yield Path(video_path)
+    finally:
+        if os.path.exists(video_path):
+            os.remove(video_path)
+
+
+@pytest.fixture(scope="session")
 def color_bars_video() -> Generator[Path, None, None]:
     """
     Generate a 1-second color bars video using ffmpeg, once for the whole test session.

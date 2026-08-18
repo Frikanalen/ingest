@@ -5,6 +5,15 @@ import pytest
 
 from app.django_client.service import FormatEnum
 from app.media.comand_template import ProfileMetadata, ProfileTemplateArguments, TemplatedCommandGenerator
+from app.media.loudness.loudness_measurement import LoudnessMeasurement
+
+MEASURED = LoudnessMeasurement(
+    integrated_lufs=-27.85,
+    truepeak_lufs=-9.61,
+    loudness_range=5.2,
+    threshold_lufs=-38.2,
+    target_offset=0.15,
+)
 
 
 def template_args(**overrides) -> ProfileTemplateArguments:
@@ -16,6 +25,7 @@ def template_args(**overrides) -> ProfileTemplateArguments:
             "scratch_dir": Path("./scratch"),
             "seek_s": 0.2,
             "has_audio": True,
+            "loudness": None,
             **overrides,
         }
     )
@@ -114,6 +124,53 @@ def test_dash_forces_keyframes_no_more_often_than_it_starts_segments():
 
     assert seg_duration and keyframe_interval, command
     assert int(keyframe_interval.group(1)) == int(seg_duration.group(1))
+
+
+def test_dash_normalizes_a_measured_source_to_the_web_target():
+    """-16 LUFS is what the rest of a browser tab sounds like. Playout works
+    to -23 from the figure stored against the original instead, which is why
+    the measurement describes the upload rather than this output."""
+    command = TemplatedCommandGenerator(FormatEnum.DASH).render(template_args(loudness=MEASURED))
+
+    assert "loudnorm=I=-16:TP=-1" in command
+    for measured in ("measured_I=-27.85", "measured_TP=-9.61", "measured_LRA=5.2", "measured_thresh=-38.2"):
+        assert measured in command, command
+
+
+def test_dash_normalizes_in_one_linear_pass_rather_than_riding_the_gain():
+    """Without the measurements loudnorm works dynamically, which pumps
+    quiet passages up and audibly breathes on speech."""
+    command = TemplatedCommandGenerator(FormatEnum.DASH).render(template_args(loudness=MEASURED))
+
+    assert "linear=true" in command
+    assert "offset=0.15" in command
+
+
+def test_dash_resamples_after_normalizing():
+    """loudnorm outputs 192kHz, which libopus does not accept -- without a
+    resampler the encode fails outright rather than sounding wrong."""
+    command = TemplatedCommandGenerator(FormatEnum.DASH).render(template_args(loudness=MEASURED))
+
+    assert command.index("loudnorm") < command.index("-ar 48000") < command.index("libopus")
+
+
+def test_dash_leaves_the_level_alone_when_nothing_was_measured():
+    """A wrong gain is worse than no gain."""
+    command = TemplatedCommandGenerator(FormatEnum.DASH).render(template_args(loudness=None))
+
+    assert "loudnorm" not in command
+    assert "-map 0:a:0 -c:a libopus" in command
+
+
+def test_dash_does_not_normalize_a_source_with_no_measurable_peak():
+    """loudnorm has no syntax for an unknown true peak, and rendering the
+    null into the filter would produce a command ffmpeg cannot parse."""
+    command = TemplatedCommandGenerator(FormatEnum.DASH).render(
+        template_args(loudness=MEASURED.model_copy(update={"truepeak_lufs": None}))
+    )
+
+    assert "loudnorm" not in command
+    assert "None" not in command
 
 
 def test_dash_leaves_out_the_audio_adaptation_set_when_there_is_no_audio():
