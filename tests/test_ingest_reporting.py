@@ -104,10 +104,13 @@ async def test_a_successful_ingest_walks_from_archiving_to_done(
 
 
 @pytest.mark.asyncio
-async def test_transcoding_progress_tracks_ffmpegs_own_position(archive, django_api, work_dir, uploaded_file, metadata):
-    """Progress is no longer just a jump between finished formats: ffmpeg's
-    -progress output moves it within a format too, so it climbs smoothly
-    from 0 to 100 rather than only ever reading 0 or 50."""
+async def test_transcoding_progress_tracks_dashs_own_position(archive, django_api, work_dir, uploaded_file, metadata):
+    """Thumbnails carry no percentage of their own: they finish before ffmpeg
+    would have anything to report, and measured against a 60s 1080p source
+    the DASH ladder outweighs the other three formats combined by roughly
+    100x. So there is no ladder of format weights to keep in step with
+    reality any more -- entering TRANSCODING reports nothing until DASH's
+    own -progress stream starts advancing it, straight to 100 at the end."""
     await Ingester(archive=archive, django_api=django_api, work_dir=work_dir).ingest(VIDEO_ID, uploaded_file, metadata)
 
     percentages = [
@@ -116,15 +119,10 @@ async def test_transcoding_progress_tracks_ffmpegs_own_position(archive, django_
         if call.args[1] == IngestStateEnum.TRANSCODING
     ]
 
-    assert percentages[0] == 0
-    # The thumbnail is done as soon as it starts; it must not read as though
-    # it were as costly as the video encode that follows it. DASH is the only
-    # encode left now that webm_med is gone, so its own weight now makes up
-    # most of the total -- one thumbnail's share of that total is bigger than
-    # it used to be, but still well short of an equal-weighted quarter.
-    assert percentages[1] < 20
+    assert percentages[0] is None, "nothing to report until DASH has started"
     assert percentages[-1] == 100
-    assert percentages == sorted(percentages), "progress must never appear to move backwards"
+    known = [p for p in percentages if p is not None]
+    assert known == sorted(known), "progress must never appear to move backwards"
 
 
 @pytest.mark.asyncio
