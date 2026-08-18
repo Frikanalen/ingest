@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -100,6 +101,19 @@ def test_dash_keyframes_are_pinned_to_wall_clock_not_frame_count():
 
     assert "-force_key_frames" in command
     assert "-g " not in command
+
+
+def test_dash_forces_keyframes_no_more_often_than_it_starts_segments():
+    """Renditions can only be switched at a segment boundary, so a keyframe
+    inside a segment buys nothing but seek granularity -- and keyframes are
+    both the most expensive frames to encode and the worst to compress."""
+    command = TemplatedCommandGenerator(FormatEnum.DASH).render(template_args())
+
+    seg_duration = re.search(r"-seg_duration (\d+)", command)
+    keyframe_interval = re.search(r"expr:gte\(t,n_forced\*(\d+)\)", command)
+
+    assert seg_duration and keyframe_interval, command
+    assert int(keyframe_interval.group(1)) == int(seg_duration.group(1))
 
 
 def test_dash_leaves_out_the_audio_adaptation_set_when_there_is_no_audio():
