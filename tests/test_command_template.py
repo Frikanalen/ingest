@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -23,8 +24,18 @@ def template_args(**overrides) -> ProfileTemplateArguments:
 def test_large_thumb_command_looks_as_expected():
     template = TemplatedCommandGenerator(FormatEnum.LARGE_THUMB)
     command = template.render(template_args(output_file=Path("./it would be weird for this to be a file huh")))
-    expected_command = 'ffmpeg -nostats -i "hello" -y -threads 8 -vf scale=720:-1 -aspect 16:9 -vframes 1 -ss 0.2 "it would be weird for this to be a file huh"'
+    expected_command = 'ffmpeg -nostats -ss 0.2 -i "hello" -y -vf scale=720:-1 -aspect 16:9 -frames:v 1 "it would be weird for this to be a file huh"'
     assert command == expected_command, f"Expected: {expected_command}, but got: {command}"
+
+
+def test_thumbnails_seek_before_they_decode():
+    """`-ss` after `-i` is an output option: ffmpeg decodes and discards every
+    frame up to the seek point, so three thumbnails a quarter of the way in
+    cost most of a decode pass. Before `-i` it is an input seek instead."""
+    for thumb in (FormatEnum.LARGE_THUMB, FormatEnum.MED_THUMB, FormatEnum.SMALL_THUMB):
+        command = TemplatedCommandGenerator(thumb).render(template_args())
+
+        assert command.index("-ss ") < command.index("-i "), command
 
 
 def test_large_thumb_is_a_single_pass_by_default():
@@ -34,14 +45,14 @@ def test_large_thumb_is_a_single_pass_by_default():
 def test_med_thumb_is_narrower_than_large_thumb():
     template = TemplatedCommandGenerator(FormatEnum.MED_THUMB)
     command = template.render(template_args(output_file=Path("./out.jpg")))
-    expected_command = 'ffmpeg -nostats -i "hello" -y -threads 8 -vf scale=320:-1 -aspect 16:9 -vframes 1 -ss 0.2 "out.jpg"'
+    expected_command = 'ffmpeg -nostats -ss 0.2 -i "hello" -y -vf scale=320:-1 -aspect 16:9 -frames:v 1 "out.jpg"'
     assert command == expected_command, f"Expected: {expected_command}, but got: {command}"
 
 
 def test_small_thumb_is_narrower_than_med_thumb():
     template = TemplatedCommandGenerator(FormatEnum.SMALL_THUMB)
     command = template.render(template_args(output_file=Path("./out.jpg")))
-    expected_command = 'ffmpeg -nostats -i "hello" -y -threads 8 -vf scale=120:-1 -aspect 16:9 -vframes 1 -ss 0.2 "out.jpg"'
+    expected_command = 'ffmpeg -nostats -ss 0.2 -i "hello" -y -vf scale=120:-1 -aspect 16:9 -frames:v 1 "out.jpg"'
     assert command == expected_command, f"Expected: {expected_command}, but got: {command}"
 
 
@@ -90,6 +101,19 @@ def test_dash_keyframes_are_pinned_to_wall_clock_not_frame_count():
 
     assert "-force_key_frames" in command
     assert "-g " not in command
+
+
+def test_dash_forces_keyframes_no_more_often_than_it_starts_segments():
+    """Renditions can only be switched at a segment boundary, so a keyframe
+    inside a segment buys nothing but seek granularity -- and keyframes are
+    both the most expensive frames to encode and the worst to compress."""
+    command = TemplatedCommandGenerator(FormatEnum.DASH).render(template_args())
+
+    seg_duration = re.search(r"-seg_duration (\d+)", command)
+    keyframe_interval = re.search(r"expr:gte\(t,n_forced\*(\d+)\)", command)
+
+    assert seg_duration and keyframe_interval, command
+    assert int(keyframe_interval.group(1)) == int(seg_duration.group(1))
 
 
 def test_dash_leaves_out_the_audio_adaptation_set_when_there_is_no_audio():

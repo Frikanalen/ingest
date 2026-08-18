@@ -74,7 +74,12 @@ tusd:
 
   extraArgs: []
 
-  resources: {}
+  # Small, but not nothing: tusd only shuffles bytes to disk, and starving it
+  # stalls uploads that ingest has not even been told about yet.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
 
 uploads:
   mountPath: /upload
@@ -137,8 +142,39 @@ readinessProbe:
   initialDelaySeconds: 5
   periodSeconds: 10
 
-# Transcoding is CPU-bound and long-running; give it room before setting limits.
-resources: {}
+# A pod with neither requests nor limits is BestEffort: it is evicted first
+# under node pressure, gets the floor of CPU shares whenever anything else on
+# the node wants time, and is invisible to the scheduler, which will happily
+# pack more work alongside it. None of that suits an hour-long transcode.
+#
+# So: requests but no CPU limit. The request is a floor, not a cap -- without
+# limits.cpu the pod still bursts into whatever the node has idle, which is
+# what you want from a job that is CPU-bound and not latency-sensitive.
+#
+# Deliberately no limits.cpu. Kubernetes enforces it as CFS quota rather than
+# a cpuset, while ffmpeg sizes its thread pools from the node's CPU count --
+# it reads sched_getaffinity, which quota does not affect. A 1080p ladder
+# opens ~100 threads on a 10-core machine and scales with core count from
+# there, so a quota would be burned in a fraction of each scheduling period
+# and the cgroup throttled for the rest of it. If you ever do set limits.cpu,
+# set an explicit -threads in templates/dash.j2 to match it.
+resources:
+  requests:
+    # Modest on purpose: enough to leave BestEffort and be accounted for by
+    # the scheduler, low enough to still place on a small node. Raise it
+    # toward the core count a ladder can actually use if the nodes are bigger.
+    cpu: "2"
+    # One 1080p VP9 ladder measures around 900 MB of encoder buffers, plus the
+    # Python process. Roughly resolution-dependent, not duration-dependent:
+    # a two-hour upload costs about the same as a two-minute one.
+    memory: "1Gi"
+  limits:
+    # A backstop against a runaway, not a working limit. Nothing bounds how
+    # many ingests run at once -- tusd fires post-finish per completed upload
+    # and each is handled inline -- so this has to cover the concurrency you
+    # expect to see, at ~1Gi apiece, or the second simultaneous upload is
+    # OOMKilled rather than merely slow.
+    memory: "4Gi"
 
 podAnnotations:
   co.elastic.logs/json.add_error_key: "true"
