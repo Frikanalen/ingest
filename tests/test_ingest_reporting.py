@@ -104,7 +104,10 @@ async def test_a_successful_ingest_walks_from_archiving_to_done(
 
 
 @pytest.mark.asyncio
-async def test_transcoding_progress_counts_finished_formats(archive, django_api, work_dir, uploaded_file, metadata):
+async def test_transcoding_progress_tracks_ffmpegs_own_position(archive, django_api, work_dir, uploaded_file, metadata):
+    """Progress is no longer just a jump between finished formats: ffmpeg's
+    -progress output moves it within a format too, so it climbs smoothly
+    from 0 to 100 rather than only ever reading 0 or 50."""
     await Ingester(archive=archive, django_api=django_api, work_dir=work_dir).ingest(VIDEO_ID, uploaded_file, metadata)
 
     percentages = [
@@ -113,7 +116,9 @@ async def test_transcoding_progress_counts_finished_formats(archive, django_api,
         if call.args[1] == IngestStateEnum.TRANSCODING
     ]
 
-    assert percentages == [0, 50]
+    assert percentages[0] == 0
+    assert percentages[-1] == 100
+    assert percentages == sorted(percentages), "progress must never appear to move backwards"
 
 
 @pytest.mark.asyncio

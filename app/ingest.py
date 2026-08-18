@@ -1,3 +1,4 @@
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from logging import Logger, getLogger
 from pathlib import Path
@@ -68,16 +69,26 @@ class Ingester:
             await self._archive_original(archive, video_id, original_file, metadata, reporter)
 
             with TemporaryDirectory(dir=self.work_dir, prefix=f"ingest-{video_id}-") as scratch:
+                total_formats = len(DESIRED_FORMATS)
                 for done, file_format in enumerate(DESIRED_FORMATS):
                     # Progress through the transcoding state, counted in
-                    # finished formats. Within one format we have nothing
-                    # better to offer until ffmpeg is asked for -progress.
+                    # finished formats to start with; _process_format
+                    # refines this further using ffmpeg's own -progress
+                    # output while that format is running.
                     await reporter.state(
                         IngestStateEnum.TRANSCODING,
-                        percentage_done=round(100 * done / len(DESIRED_FORMATS)),
+                        percentage_done=round(100 * done / total_formats),
                     )
                     await self._process_format(
-                        archive, file_format, metadata, original_file, video_id, Path(scratch), reporter
+                        archive,
+                        file_format,
+                        metadata,
+                        original_file,
+                        video_id,
+                        Path(scratch),
+                        reporter,
+                        done,
+                        total_formats,
                     )
 
         await self.django_api.set_video_proper_import(video_id, True)
@@ -131,6 +142,8 @@ class Ingester:
         video_id: str,
         scratch: Path,
         reporter: IngestReporter,
+        done: int,
+        total_formats: int,
     ):
         self.logger.info("Processing %s as %s", source_file, file_format)
 
@@ -138,18 +151,24 @@ class Ingester:
         template = TemplatedCommandGenerator(file_format)
 
         output_file = scratch / f"{source_file.stem}.{template.metadata.output_file_extension}"
+        duration_s = float(metadata.format.duration)
 
         template_args = ProfileTemplateArguments(
             input_file=source_file,
             output_file=output_file,
-            seek_s=(float(metadata.format.duration) * 0.25 or 30),
+            seek_s=(duration_s * 0.25 or 30),
         )
 
         command = template.render(template_args)
         self.logger.debug("Generated command: %s", command)
 
         try:
-            await Task(command).execute()
+            await Task(
+                command,
+                duration_s=duration_s,
+                passes=template.metadata.passes,
+                on_progress=self._transcode_progress_reporter(reporter, done, total_formats),
+            ).execute()
         except Exception as e:
             self.logger.error("Failed to produce %s: %s", file_format, e)
             await reporter.failed(IngestErrorCode.TRANSCODE_FAILED, str(e))
@@ -166,3 +185,23 @@ class Ingester:
 
         self.logger.info("Creating video file entry for %s", destination)
         await self.django_api.create_video_file(filename=str(destination), file_format=file_format, video_id=video_id)
+
+    def _transcode_progress_reporter(
+        self, reporter: IngestReporter, done: int, total_formats: int
+    ) -> Callable[[float], Awaitable[None]]:
+        """Turns one format's ffmpeg progress into an overall percentage.
+
+        Reports are throttled to one per whole percentage point: ffmpeg's
+        -progress stream updates far more often than that, and each report
+        is a call to django-api.
+        """
+        last_reported = -1
+
+        async def report(fraction: float) -> None:
+            nonlocal last_reported
+            percentage = round(100 * (done + fraction) / total_formats)
+            if percentage != last_reported:
+                last_reported = percentage
+                await reporter.state(IngestStateEnum.TRANSCODING, percentage_done=percentage)
+
+        return report

@@ -1,11 +1,14 @@
 ---
 output_file_extension: webm
+passes: 2
 ---
 ffmpeg -i "{{ input_file }}"
+    -nostats -progress pipe:1
     -passlogfile "{{ output_file }}"
     -c:v libvpx-vp9 -crf 30 -b:v 10M
     -pass 1 -an -f null /dev/null &&
 ffmpeg -i "{{ input_file }}"
+    -nostats -progress pipe:1
     -passlogfile "{{ output_file }}"
     -c:v libvpx-vp9 -crf 30 -b:v 10M
     -pass 2 -cpu-used 3 -row-mt 1 -tile-rows 2 -threads 8

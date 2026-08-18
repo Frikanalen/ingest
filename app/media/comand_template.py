@@ -10,6 +10,10 @@ from tests.get_git_root import get_git_root
 
 class ProfileMetadata(BaseModel):
     output_file_extension: str
+    #: How many ffmpeg invocations this template chains (two-pass encoding
+    #: templates emit two `-progress` streams back to back). Used to turn
+    #: ffmpeg's per-pass progress into progress across the whole command.
+    passes: int = 1
 
 
 class ProfileTemplateArguments(TypedDict):
