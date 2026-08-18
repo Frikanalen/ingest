@@ -50,6 +50,12 @@ class DjangoApiService:
     def __init__(self, client: AuthenticatedClient):
         self.client = client
 
+    async def verify_upload_token(self, video_id: str, upload_token: str) -> None:
+        response = await self.client.get_async_httpx_client().post(
+            f"/api/videos/{video_id}/upload_token/verify", json={"uploadToken": upload_token}
+        )
+        response.raise_for_status()
+
     async def set_video_duration(self, video_id: str, duration: str):
         return await videos_partial_update.asyncio(
             video_id, client=self.client, body=PatchedVideoRequest(duration=duration)

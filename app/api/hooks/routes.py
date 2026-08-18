@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, Depends
 from starlette.exceptions import HTTPException
 from werkzeug.utils import secure_filename
@@ -30,6 +31,11 @@ async def receive_hook(
     if hook_request.type == "pre-create":
         # read and validate request metadata
         metadata = get_upload_metadata(hook_request)
+        try:
+            await django_api.verify_upload_token(metadata.video_id, metadata.upload_token)
+        except httpx.HTTPStatusError as e:
+            logger.warning("Upload token verification failed for video %s", metadata.video_id)
+            raise HTTPException(status_code=e.response.status_code, detail="Invalid upload token") from e
 
         # construct updated values for the file info
         sanitized_filename = secure_filename(metadata.orig_file_name)
