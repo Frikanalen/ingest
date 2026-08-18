@@ -2,6 +2,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock
 
+import httpx
 from fastapi.testclient import TestClient
 
 from app.api.hooks.schema.request import FileInfo, Header, HookEvent, HookRequest, HTTPRequest, MetaData
@@ -55,6 +56,7 @@ pre_create_request_valid = HookRequest(
 
 
 client = TestClient(app)
+django_api = AsyncMock()
 
 HOOK_PATH = "/tusdHooks/"
 
@@ -70,7 +72,7 @@ def get_settings_override():
 
 
 app.dependency_overrides[get_settings] = get_settings_override
-app.dependency_overrides[get_django_api] = lambda: AsyncMock()
+app.dependency_overrides[get_django_api] = lambda: django_api
 app.dependency_overrides[get_archive_store] = lambda: LocalArchiveStore(Path(tempfile.gettempdir()))
 
 
@@ -84,10 +86,26 @@ def test_pre_create_fails_if_metadata_bad():
 
 
 def test_pre_create_succeeds_if_metadata_parses():
+    django_api.reset_mock()
     mock_hook_payload = pre_create_request_valid.model_dump(by_alias=True)
 
     response = client.post(HOOK_PATH, json=mock_hook_payload)
     assert response.status_code == 200
+    django_api.verify_upload_token.assert_awaited_once_with("1234", "asdfasdf")
+
+
+def test_pre_create_forwards_upload_token_rejection():
+    django_api.verify_upload_token.side_effect = httpx.HTTPStatusError(
+        "Not Found",
+        request=httpx.Request("POST", "http://django.test/api/videos/1234/upload_token/verify"),
+        response=httpx.Response(404),
+    )
+
+    response = client.post(HOOK_PATH, json=pre_create_request_valid.model_dump(by_alias=True))
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Invalid upload token"}
+    django_api.verify_upload_token.side_effect = None
 
 
 def test_post_create_fails_if_metadata_bad():
