@@ -19,6 +19,7 @@ from .runner import Task
 DESIRED_FORMATS = (
     FormatEnum.LARGE_THUMB,
     FormatEnum.WEBM_MED,
+    FormatEnum.DASH,
 )
 
 # How much of the overall transcoding percentage each format is worth,
@@ -29,6 +30,10 @@ DESIRED_FORMATS = (
 FORMAT_WEIGHTS: dict[FormatEnum, int] = {
     FormatEnum.LARGE_THUMB: 1,
     FormatEnum.WEBM_MED: 15,
+    # Three VP9 renditions, but one decode, one pass and one process that
+    # keeps every core busy -- measurably cheaper than the two-pass single
+    # rendition above rather than three times the price.
+    FormatEnum.DASH: 4,
 }
 
 
@@ -162,13 +167,22 @@ class Ingester:
         self.logger.info("Building command for format: %s", file_format)
         template = TemplatedCommandGenerator(file_format)
 
-        output_file = scratch / f"{source_file.stem}.{template.metadata.output_file_extension}"
+        # Each format gets a directory of its own, and whatever the command
+        # leaves in it is what gets archived. A format can therefore produce a
+        # set of files -- DASH writes a manifest and the media it names --
+        # without ingest having to know the shape of any of them.
+        output_dir = scratch / str(file_format)
+        output_dir.mkdir()
+        output_file = output_dir / template.metadata.output_name_for(source_file)
         duration_s = float(metadata.format.duration)
 
         template_args = ProfileTemplateArguments(
             input_file=source_file,
             output_file=output_file,
+            output_dir=output_dir,
+            scratch_dir=scratch,
             seek_s=(duration_s * 0.25 or 30),
+            has_audio=any(stream.codec_type == "audio" for stream in metadata.streams or []),
         )
 
         command = template.render(template_args)
@@ -191,7 +205,7 @@ class Ingester:
         destination = derived_file_location(video_id, str(file_format), output_file)
         self.logger.info("Storing %s to %s", file_format, destination)
         try:
-            await archive.put(output_file, destination)
+            await self._publish(archive, output_dir, output_file, video_id, file_format)
         except Exception as e:
             self.logger.error("Failed to archive %s: %s", file_format, e)
             await reporter.failed(IngestErrorCode.ARCHIVE_FAILED, str(e))
@@ -199,6 +213,31 @@ class Ingester:
 
         self.logger.info("Creating video file entry for %s", destination)
         await self.django_api.create_video_file(filename=str(destination), file_format=file_format, video_id=video_id)
+
+    async def _publish(
+        self,
+        archive: ArchiveSession,
+        output_dir: Path,
+        primary: Path,
+        video_id: str,
+        file_format: FormatEnum,
+    ) -> None:
+        """Copy everything one format produced into the archive, primary last.
+
+        The archive is exported read-only to the playout hosts, so a manifest
+        arriving before the media it references would be briefly readable and
+        broken. Publishing it last means the format either is not there yet or
+        is there in full.
+        """
+        outputs = sorted(output_dir.iterdir(), key=lambda output: output == primary)
+
+        if nested := [output for output in outputs if not output.is_file()]:
+            # derived_file_location flattens to a basename, so a template that
+            # nested its output would silently archive to the wrong paths.
+            raise NotImplementedError(f"{file_format} produced directories, which cannot be archived: {nested}")
+
+        for output in outputs:
+            await archive.put(output, derived_file_location(video_id, str(file_format), output))
 
     def _transcode_progress_reporter(
         self, reporter: IngestReporter, completed_weight: int, format_weight: int, total_weight: int

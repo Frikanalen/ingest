@@ -8,9 +8,25 @@ It exposes these application endpoints:
 - `GET /internal/isAlive` is the health check.
 - `GET /watchFolder/tusFiles` and `GET /watchFolder/archive` stream directory listings as server-sent events for debugging. Filesystem changes do not start ingest jobs.
 
-For a completed upload, ingest checks the media with FFprobe and copies the source file from `FK_TUSD_DIR` to `<archive>/<video-id>/original/<filename>`. FFmpeg outputs are stored alongside it by format, currently as `<archive>/<video-id>/large_thumb/<stem>.jpg` and `<archive>/<video-id>/webm_med/<stem>.webm`. Ingest records the original and generated files, duration, upload time, and completion status in the Django API. The uploaded file is removed from `FK_TUSD_DIR` once the whole job has succeeded, so a failed ingest leaves it in place.
+For a completed upload, ingest checks the media with FFprobe and copies the source file from `FK_TUSD_DIR` to `<archive>/<video-id>/original/<filename>`. FFmpeg outputs are stored alongside it by format, currently as `<archive>/<video-id>/large_thumb/<stem>.jpg`, `<archive>/<video-id>/webm_med/<stem>.webm` and `<archive>/<video-id>/dash/`. Ingest records the original and generated files, duration, upload time, and completion status in the Django API. The uploaded file is removed from `FK_TUSD_DIR` once the whole job has succeeded, so a failed ingest leaves it in place.
 
 FFmpeg always reads the uploaded file where tusd left it and writes to local scratch space; only finished files are handed to the archive. That is what lets the archive live on another host.
+
+## Formats
+
+Each format in `templates/` is a command with a YAML header, and each gets a scratch directory of its own. Whatever the command leaves in that directory is archived; anything that must not be archived, like a two-pass log, goes in `scratch_dir` instead. The header names the format's primary output — the one file registered with the Django API, and the last one published — either as an extension applied to the source file's stem (`output_file_extension`) or as a fixed name (`output_file_name`).
+
+Publishing order matters because the archive is exported read-only to the playout hosts: the primary output goes last, so a manifest is never readable before the media it references has arrived.
+
+### DASH
+
+`dash` is an adaptive VP9/Opus ladder — 1080p, 720p and 360p, none of them upscaled past the source — played back over MSE by a browser-side player. It is one FFmpeg invocation: the source is decoded once, padded to 16:9, and split into the three renditions, which costs less wall time and less CPU than the single two-pass `webm_med` encode beside it.
+
+Segments live inside one file per representation, addressed by byte range from the manifest (`-single_file 1`), rather than as a file each. A one-hour video is five files instead of several thousand, which is what makes DASH viable over an archive reached by SFTP. The cost is a manifest that grows with duration, by roughly 120 KB per hour; it compresses well, and if it ever becomes a problem the fix is rewriting the manifest into on-demand `SegmentBase` form.
+
+Keyframes are pinned to wall-clock time rather than a GOP length in frames, so renditions stay aligned for switching whatever frame rate is uploaded. A source with no audio track gets no audio adaptation set, since an adaptation set with no representation in it is not valid DASH.
+
+Serving it needs HTTP range requests, CORS, and `application/dash+xml` on the `.mpd`; none of that is ingest's side of the job.
 
 ## Archive
 
