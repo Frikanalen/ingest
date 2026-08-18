@@ -25,18 +25,6 @@ DESIRED_FORMATS = (
     FormatEnum.DASH,
 )
 
-# How much of the overall transcoding percentage each format is worth,
-# roughly proportional to how long it actually takes to produce: pulling one
-# thumbnail frame is over almost before it starts, next to a full two-pass
-# video encode. Counting formats equally made the bar sit at a misleadingly
-# large 50% for the entire duration of the real work.
-FORMAT_WEIGHTS: dict[FormatEnum, int] = {
-    FormatEnum.LARGE_THUMB: 1,
-    FormatEnum.MED_THUMB: 1,
-    FormatEnum.SMALL_THUMB: 1,
-    FormatEnum.DASH: 4,
-}
-
 
 class Ingester:
     """Archives an upload and the derivatives generated from it.
@@ -88,17 +76,12 @@ class Ingester:
             await self._archive_original(archive, video_id, original_file, metadata, reporter, loudness)
 
             with TemporaryDirectory(dir=self.work_dir, prefix=f"ingest-{video_id}-") as scratch:
-                total_weight = sum(FORMAT_WEIGHTS[f] for f in DESIRED_FORMATS)
-                completed_weight = 0
+                # No percentage yet: thumbnails are over before ffmpeg would
+                # have anything to report, and DASH -- the only other format,
+                # and the only one worth timing -- reports its own via
+                # _transcode_progress_reporter once it starts.
+                await reporter.state(IngestStateEnum.TRANSCODING)
                 for file_format in DESIRED_FORMATS:
-                    # Progress through the transcoding state, counted in
-                    # weighted finished formats to start with;
-                    # _process_format refines this further using ffmpeg's
-                    # own -progress output while that format is running.
-                    await reporter.state(
-                        IngestStateEnum.TRANSCODING,
-                        percentage_done=round(100 * completed_weight / total_weight),
-                    )
                     await self._process_format(
                         archive,
                         file_format,
@@ -107,12 +90,9 @@ class Ingester:
                         video_id,
                         Path(scratch),
                         reporter,
-                        completed_weight,
-                        total_weight,
                         has_audio,
                         loudness,
                     )
-                    completed_weight += FORMAT_WEIGHTS[file_format]
 
         await self.django_api.set_video_proper_import(video_id, True)
         await reporter.state(IngestStateEnum.DONE, percentage_done=100)
@@ -198,8 +178,6 @@ class Ingester:
         video_id: str,
         scratch: Path,
         reporter: IngestReporter,
-        completed_weight: int,
-        total_weight: int,
         has_audio: bool,
         loudness: LoudnessMeasurement | None,
     ):
@@ -235,9 +213,7 @@ class Ingester:
                 command,
                 duration_s=duration_s,
                 passes=template.metadata.passes,
-                on_progress=self._transcode_progress_reporter(
-                    reporter, completed_weight, FORMAT_WEIGHTS[file_format], total_weight
-                ),
+                on_progress=self._transcode_progress_reporter(reporter),
             ).execute()
         except Exception as e:
             self.logger.error("Failed to produce %s: %s", file_format, e)
@@ -281,10 +257,14 @@ class Ingester:
         for output in outputs:
             await archive.put(output, derived_file_location(video_id, str(file_format), output))
 
-    def _transcode_progress_reporter(
-        self, reporter: IngestReporter, completed_weight: int, format_weight: int, total_weight: int
-    ) -> Callable[[float], Awaitable[None]]:
-        """Turns one format's ffmpeg progress into an overall percentage.
+    def _transcode_progress_reporter(self, reporter: IngestReporter) -> Callable[[float], Awaitable[None]]:
+        """Turns ffmpeg's own -progress stream into a percentage.
+
+        Only the DASH template emits -progress; thumbnails are over before
+        ffmpeg would have anything to report. So in practice this is the DASH
+        encode's own completion fraction, and nothing else moves the bar --
+        which matches reality, since a 60s 1080p source measures the DASH
+        ladder at roughly 100x the cost of the other three formats combined.
 
         Reports are throttled to one per whole percentage point: ffmpeg's
         -progress stream updates far more often than that, and each report
@@ -294,7 +274,7 @@ class Ingester:
 
         async def report(fraction: float) -> None:
             nonlocal last_reported
-            percentage = round(100 * (completed_weight + format_weight * fraction) / total_weight)
+            percentage = round(100 * fraction)
             if percentage != last_reported:
                 last_reported = percentage
                 await reporter.state(IngestStateEnum.TRANSCODING, percentage_done=percentage)
