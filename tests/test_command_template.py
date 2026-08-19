@@ -1,4 +1,3 @@
-import re
 from pathlib import Path
 
 import pytest
@@ -26,6 +25,8 @@ def template_args(**overrides) -> ProfileTemplateArguments:
             "seek_s": 0.2,
             "has_audio": True,
             "loudness": None,
+            "gop_frames": 150,
+            "segment_duration_s": "6.000000",
             **overrides,
         }
     )
@@ -104,26 +105,33 @@ def test_dash_encodes_three_renditions_and_never_upscales():
         assert f"scale=-2:min({rung}" in command
 
 
-def test_dash_keyframes_are_pinned_to_wall_clock_not_frame_count():
-    """A GOP length in frames silently misaligns renditions the moment
-    something other than 25fps is uploaded."""
+def test_dash_sets_the_keyframe_interval_explicitly():
+    """-force_key_frames does not stop libvpx placing keyframes of its own, and
+    the muxer starts a segment at whichever keyframe it finds first. Pinning
+    -g and -keyint_min together is what makes the segments come out even."""
+    command = TemplatedCommandGenerator(FormatEnum.DASH).render(template_args(gop_frames=360))
+
+    assert "-g 360 -keyint_min 360" in command
+    assert "-force_key_frames" not in command
+
+
+def test_dash_asks_for_the_segment_length_it_will_actually_produce():
+    """ffmpeg copies -seg_duration into the manifest as the segment length
+    players do their seek arithmetic with. Asking for a round 6s while the
+    keyframes land every 6.006s is what makes a seek miss."""
+    command = TemplatedCommandGenerator(FormatEnum.DASH).render(
+        template_args(gop_frames=360, segment_duration_s="6.006000")
+    )
+
+    assert "-seg_duration 6.006000" in command
+
+
+def test_dash_encodes_at_a_constant_frame_rate():
+    """A GOP is a number of frames, so it is only a fixed length of time if the
+    frames arrive at a fixed rate."""
     command = TemplatedCommandGenerator(FormatEnum.DASH).render(template_args())
 
-    assert "-force_key_frames" in command
-    assert "-g " not in command
-
-
-def test_dash_forces_keyframes_no_more_often_than_it_starts_segments():
-    """Renditions can only be switched at a segment boundary, so a keyframe
-    inside a segment buys nothing but seek granularity -- and keyframes are
-    both the most expensive frames to encode and the worst to compress."""
-    command = TemplatedCommandGenerator(FormatEnum.DASH).render(template_args())
-
-    seg_duration = re.search(r"-seg_duration (\d+)", command)
-    keyframe_interval = re.search(r"expr:gte\(t,n_forced\*(\d+)\)", command)
-
-    assert seg_duration and keyframe_interval, command
-    assert int(keyframe_interval.group(1)) == int(seg_duration.group(1))
+    assert "-fps_mode cfr" in command
 
 
 def test_dash_normalizes_a_measured_source_to_the_web_target():

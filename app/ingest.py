@@ -16,6 +16,7 @@ from .media.comand_template import ProfileTemplateArguments, TemplatedCommandGen
 from .media.ffprobe_schema import FfprobeOutput
 from .media.loudness.loudness_measurement import LoudnessMeasurement
 from .media.loudness.measure import measure_loudness
+from .media.segmentation import segmentation_for
 from .runner import Task
 
 DESIRED_FORMATS = (
@@ -195,6 +196,8 @@ class Ingester:
         output_file = output_dir / template.metadata.output_name_for(source_file)
         duration_s = float(metadata.format.duration)
 
+        segmentation = segmentation_for(metadata)
+
         template_args = ProfileTemplateArguments(
             input_file=source_file,
             output_file=output_file,
@@ -203,6 +206,8 @@ class Ingester:
             seek_s=(duration_s * 0.25 or 30),
             has_audio=has_audio,
             loudness=loudness,
+            gop_frames=segmentation.gop_frames,
+            segment_duration_s=segmentation.segment_duration_arg,
         )
 
         command = template.render(template_args)
