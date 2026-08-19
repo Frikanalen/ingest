@@ -47,6 +47,13 @@ class ProfileTemplateArguments(TypedDict):
     #: otherwise declare an empty audio output has to leave it out entirely:
     #: an adaptation set with no representation in it is not valid DASH.
     has_audio: bool
+    #: Keyframe interval, in frames. Set explicitly because libvpx places
+    #: keyframes of its own otherwise, and a segmented format can only cut
+    #: where a keyframe is -- see app.media.segmentation.
+    gop_frames: int
+    #: Segment length in seconds, as ffmpeg spells it. Must be what
+    #: gop_frames actually comes to, since ffmpeg copies it into the manifest.
+    segment_duration_s: str
     #: The source's measured loudness, where we have one. None means the
     #: analysis pass found nothing to work from, and a template that would
     #: normalize has to pass the audio through at its original level
