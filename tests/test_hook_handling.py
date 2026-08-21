@@ -94,6 +94,83 @@ def test_pre_create_succeeds_if_metadata_parses():
     django_api.verify_upload_token.assert_awaited_once_with("1234", "asdfasdf")
 
 
+def test_pre_create_gives_each_programme_image_a_unique_spool_path():
+    django_api.reset_mock()
+    request = pre_create_request_valid.model_copy(deep=True)
+    request.event.upload.meta_data = MetaData(
+        **{
+            "videoID": "1234",
+            "origFileName": "Key art.png",
+            "uploadToken": "asdfasdf",
+            "uploadKind": "program_image",
+            "imageRole": "key_art_titled",
+        }
+    )
+
+    first = client.post(HOOK_PATH, json=request.model_dump(by_alias=True))
+    second = client.post(HOOK_PATH, json=request.model_dump(by_alias=True))
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_change = first.json()["ChangeFileInfo"]
+    second_change = second.json()["ChangeFileInfo"]
+    assert first_change["ID"].startswith("image")
+    assert first_change["ID"] != second_change["ID"]
+    assert first_change["Storage"]["Path"].startswith(f"1234/image_uploads/{first_change['ID']}/")
+    assert first_change["Storage"]["Path"].endswith("/Key_art.png")
+
+
+def test_pre_create_rejects_an_oversized_programme_image():
+    request = pre_create_request_valid.model_copy(deep=True)
+    request.event.upload.size = 10 * 1024 * 1024 + 1
+    request.event.upload.meta_data = MetaData(
+        **{
+            "videoID": "1234",
+            "origFileName": "huge.png",
+            "uploadToken": "asdfasdf",
+            "uploadKind": "program_image",
+            "imageRole": "show_still",
+        }
+    )
+
+    response = client.post(HOOK_PATH, json=request.model_dump(by_alias=True))
+
+    assert response.status_code == 413
+
+
+def test_pre_create_rejects_a_programme_image_without_a_role():
+    request = pre_create_request_valid.model_copy(deep=True)
+    request.event.upload.meta_data = MetaData(
+        **{
+            "videoID": "1234",
+            "origFileName": "unclassified.png",
+            "uploadToken": "asdfasdf",
+            "uploadKind": "program_image",
+        }
+    )
+
+    response = client.post(HOOK_PATH, json=request.model_dump(by_alias=True))
+
+    assert response.status_code == 422
+
+
+def test_pre_create_rejects_a_non_numeric_video_id():
+    request = pre_create_request_valid.model_copy(deep=True)
+    request.event.upload.meta_data = MetaData(
+        **{
+            "videoID": "../archive",
+            "origFileName": "key-art.png",
+            "uploadToken": "asdfasdf",
+            "uploadKind": "program_image",
+            "imageRole": "key_art_titled",
+        }
+    )
+
+    response = client.post(HOOK_PATH, json=request.model_dump(by_alias=True))
+
+    assert response.status_code == 422
+
+
 def test_pre_create_forwards_upload_token_rejection():
     django_api.verify_upload_token.side_effect = httpx.HTTPStatusError(
         "Not Found",

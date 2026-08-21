@@ -110,6 +110,30 @@ class DjangoApiService:
         )
         return await videofiles_create.asyncio(client=self.client, body=req)
 
+    async def create_program_image(
+        self,
+        *,
+        video_id: str,
+        role: str,
+        filename: str,
+        media_type: str,
+        width: int,
+        height: int,
+    ) -> None:
+        """Register an image only after the archive has published it."""
+
+        response = await self.client.get_async_httpx_client().post(
+            f"/api/videos/{int(video_id)}/images",
+            json={
+                "role": role,
+                "filename": filename,
+                "mediaType": media_type,
+                "width": width,
+                "height": height,
+            },
+        )
+        response.raise_for_status()
+
     async def get_videos(self, limit=10):
         return (await videos_list.asyncio(client=self.client, limit=limit, ordering="-uploaded_time")).results or []
 

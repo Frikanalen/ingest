@@ -19,3 +19,14 @@ def derived_file_location(video_id: str, file_format: str, derived_file_name: Pa
     assert video_id.isdigit(), "video_id must be a number"
 
     return PurePosixPath(video_id) / file_format / derived_file_name.name
+
+
+def program_image_location(video_id: str, image_id: str, extension: str) -> PurePosixPath:
+    """Archive location for a validated editorial image."""
+
+    assert video_id.isdigit(), "video_id must be a number"
+    if not image_id.isalnum():
+        raise ValueError("image_id must be alphanumeric")
+    if extension not in {".jpg", ".png", ".webp"}:
+        raise ValueError(f"unsupported programme-image extension: {extension}")
+    return PurePosixPath(video_id) / "images" / f"{image_id}{extension}"

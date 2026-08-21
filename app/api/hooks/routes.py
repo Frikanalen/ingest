@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from uuid import uuid4
 
 import httpx
 from fastapi import APIRouter, Depends
@@ -7,18 +8,86 @@ from frikanalen_django_api_client.models import IngestStateEnum
 from starlette.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
-from app.api.hooks.metadata import ComplianceError, MetadataExtractor, get_upload_metadata
+from app.api.hooks.metadata import (
+    ComplianceError,
+    MetadataExtractor,
+    UploadKind,
+    UploadMetaData,
+    get_upload_metadata,
+)
 from app.api.hooks.schema.request import HookRequest
 from app.api.hooks.schema.response import FileInfoChanges, HookResponse
 from app.archive_store import ArchiveStore
 from app.django_client.service import DjangoApiService
 from app.ingest import Ingester
 from app.ingest_reporting import IngestErrorCode, IngestReporter
+from app.program_image import MAX_IMAGE_BYTES, ImageComplianceError, ProgramImageIngester
 from app.util.app_state import get_archive_store, get_django_api, get_metadata_extractor
 from app.util.settings import IngestAppSettings, get_settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+IMAGE_UPLOAD_ID_PREFIX = "image"
+
+
+async def prepare_upload(
+    hook_request: HookRequest,
+    settings: IngestAppSettings,
+    django_api: DjangoApiService,
+) -> HookResponse:
+    metadata = get_upload_metadata(hook_request)
+    try:
+        await django_api.verify_upload_token(metadata.video_id, metadata.upload_token)
+    except httpx.HTTPStatusError as error:
+        logger.warning("Upload token verification failed for video %s", metadata.video_id)
+        raise HTTPException(status_code=error.response.status_code, detail="Invalid upload token") from error
+
+    sanitized_filename = secure_filename(metadata.orig_file_name)
+    if not sanitized_filename:
+        raise HTTPException(status_code=422, detail="Invalid upload filename")
+    if metadata.upload_kind == UploadKind.PROGRAM_IMAGE:
+        upload_size = hook_request.event.upload.size
+        if upload_size is not None and upload_size > MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=413, detail="Image files may not exceed 10 MB")
+        upload_id = f"{IMAGE_UPLOAD_ID_PREFIX}{uuid4().hex}"
+        new_file = Path(metadata.video_id, "image_uploads", upload_id, sanitized_filename)
+    else:
+        upload_id = metadata.video_id
+        new_file = Path(upload_id, sanitized_filename)
+
+    if metadata.upload_kind == UploadKind.VIDEO and (settings.tusd_dir / new_file).exists():
+        logger.warning("File already exists, deleting!: %s", settings.tusd_dir / new_file)
+        (settings.tusd_dir / new_file).unlink()
+
+    return HookResponse(ChangeFileInfo=FileInfoChanges(ID=upload_id, Storage={"Path": str(new_file)}))
+
+
+async def ingest_program_image(
+    hook_request: HookRequest,
+    upload_meta: UploadMetaData,
+    upload_file: Path,
+    archive: ArchiveStore,
+    django_api: DjangoApiService,
+) -> None:
+    assert upload_meta.image_role is not None
+    upload_id = hook_request.event.upload.id or ""
+    image_id = upload_id.removeprefix(IMAGE_UPLOAD_ID_PREFIX)
+    if not upload_id.startswith(IMAGE_UPLOAD_ID_PREFIX) or not image_id.isalnum():
+        raise HTTPException(status_code=422, detail="Invalid programme-image upload id")
+    try:
+        await ProgramImageIngester(archive=archive, django_api=django_api).ingest(
+            video_id=upload_meta.video_id,
+            image_id=image_id,
+            role=upload_meta.image_role.value,
+            uploaded_file=upload_file,
+        )
+    except ImageComplianceError as error:
+        logger.warning("Programme image failed validation: %s", error)
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except Exception as error:
+        logger.exception("Failed to archive programme image")
+        raise HTTPException(status_code=500, detail="Could not archive image") from error
 
 
 @router.post("/")
@@ -31,35 +100,23 @@ async def receive_hook(
 ):
     logger.info("Received hook: %s", hook_request.type)
     if hook_request.type == "pre-create":
-        # read and validate request metadata
-        metadata = get_upload_metadata(hook_request)
-        try:
-            await django_api.verify_upload_token(metadata.video_id, metadata.upload_token)
-        except httpx.HTTPStatusError as e:
-            logger.warning("Upload token verification failed for video %s", metadata.video_id)
-            raise HTTPException(status_code=e.response.status_code, detail="Invalid upload token") from e
-
-        # construct updated values for the file info
-        sanitized_filename = secure_filename(metadata.orig_file_name)
-        upload_id = f"{metadata.video_id}"
-        new_file = Path(f"{upload_id}/{sanitized_filename}")
-
-        if (settings.tusd_dir / new_file).exists():
-            logger.warning("File already exists, deleting!: %s", (settings.tusd_dir / new_file))
-            (settings.tusd_dir / new_file).unlink()
-
-        return HookResponse(ChangeFileInfo=FileInfoChanges(ID=upload_id, Storage={"Path": str(new_file)}))
+        return await prepare_upload(hook_request, settings, django_api)
 
     if hook_request.type == "post-finish":
-        ingest = Ingester(archive=archive, django_api=django_api, work_dir=settings.work_dir)
         upload_meta = get_upload_metadata(hook_request)
-        # One reporter for the whole run, handed to the Ingester below so that
-        # the probe and the pipeline read as a single sequence of states.
-        reporter = IngestReporter(django_api, upload_meta.video_id)
         # eg. /upload/12345/original_video.mp4, as tusd sees it
         path_from_tus = Path(hook_request.event.upload.storage["Path"])
         # eg. ./upload/12345/original_video.mp4, as ingest sees it
         upload_file = settings.tusd_dir / path_from_tus.relative_to(settings.tusd_upload_dir)
+
+        if upload_meta.upload_kind == UploadKind.PROGRAM_IMAGE:
+            await ingest_program_image(hook_request, upload_meta, upload_file, archive, django_api)
+            return {}
+
+        ingest = Ingester(archive=archive, django_api=django_api, work_dir=settings.work_dir)
+        # One reporter for the whole run, handed to the Ingester below so that
+        # the probe and the pipeline read as a single sequence of states.
+        reporter = IngestReporter(django_api, upload_meta.video_id)
 
         await reporter.state(IngestStateEnum.PROBING)
 

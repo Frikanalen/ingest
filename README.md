@@ -12,6 +12,16 @@ For a completed upload, ingest checks the media with FFprobe and copies the sour
 
 FFmpeg always reads the uploaded file where tusd left it and writes to local scratch space; only finished files are handed to the archive. That is what lets the archive live on another host.
 
+### Programme images
+
+Programme images use the same tusd spool and upload token as video files. Their
+upload metadata sets `uploadKind=program_image` and includes an `imageRole`.
+After upload, ingest verifies that the file is a single-frame JPEG, PNG or WebP
+of at most 10 MB, reads its real format and dimensions, and publishes it as
+`<video-id>/images/<upload-id>.<extension>`. It registers that archive-relative
+path with Django only after the archive rename succeeds. A failed registration
+leaves the tusd copy available for a retry; registration is idempotent.
+
 ## Formats
 
 Each format in `templates/` is a command with a YAML header, and each gets a scratch directory of its own. Whatever the command leaves in that directory is archived; anything that must not be archived, like a two-pass log, goes in `scratch_dir` instead. The header names the format's primary output — the one file registered with the Django API, and the last one published — either as an extension applied to the source file's stem (`output_file_extension`) or as a fixed name (`output_file_name`).
@@ -48,7 +58,9 @@ The archive is either a local directory or a directory on another host reached o
 | `FK_ARCHIVE_REQUIRED` | Fail startup instead of falling back. Set this in deployments. |
 | `FK_WORK_DIR` | Local scratch space for transcoding. Defaults to the system temporary directory. |
 
-Files are transferred under a `.part` name and renamed into place once complete, so an interrupted transfer cannot leave a truncated file that later looks like a finished one.
+Files are transferred below the archive's `.spool/` directory and renamed into
+place once complete, so an interrupted transfer cannot leave a truncated file
+that later looks like a finished one.
 
 Both SSH credentials must be given explicitly — ingest will not reach for the running user's `~/.ssh`, and it never disables host key verification. If either is missing, ingest logs a warning and archives to `FK_ARCHIVE_FALLBACK_DIR` instead, so you can run it locally without setting up SSH at all. **Set `FK_ARCHIVE_REQUIRED=true` anywhere that actually archives over SSH**: otherwise a secret that fails to mount leaves ingest quietly writing to scratch space, where files are lost on restart.
 
