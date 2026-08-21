@@ -1,9 +1,10 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from PIL import Image
 
 from app.archive_store import LocalArchiveStore
+from app.django_client.service import DjangoApiService
 from app.program_image import ImageComplianceError, ProgramImageIngester, inspect_program_image
 
 
@@ -28,6 +29,35 @@ def test_inspection_rejects_a_non_image(tmp_path):
 
     with pytest.raises(ImageComplianceError, match="readable image"):
         inspect_program_image(uploaded)
+
+
+@pytest.mark.asyncio
+async def test_django_registration_uses_the_videos_nested_image_collection():
+    client = MagicMock()
+    http = AsyncMock()
+    http.post.return_value = MagicMock()
+    client.get_async_httpx_client.return_value = http
+    service = DjangoApiService(client)
+
+    await service.create_program_image(
+        video_id="1234",
+        role="key_art_titled",
+        filename="1234/images/abc123.png",
+        media_type="image/png",
+        width=1200,
+        height=675,
+    )
+
+    http.post.assert_awaited_once_with(
+        "/api/videos/1234/images",
+        json={
+            "role": "key_art_titled",
+            "filename": "1234/images/abc123.png",
+            "mediaType": "image/png",
+            "width": 1200,
+            "height": 675,
+        },
+    )
 
 
 @pytest.mark.asyncio

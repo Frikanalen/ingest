@@ -123,9 +123,8 @@ class DjangoApiService:
         """Register an image only after the archive has published it."""
 
         response = await self.client.get_async_httpx_client().post(
-            "/api/program-images",
+            f"/api/videos/{int(video_id)}/images",
             json={
-                "video": int(video_id),
                 "role": role,
                 "filename": filename,
                 "mediaType": media_type,
