@@ -289,5 +289,7 @@ bin/
 /upload/
 /archive/
 
+.DS_Store
+
 # Generated API client
 frikanalen_django_api_client/
