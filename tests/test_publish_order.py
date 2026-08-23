@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-from app.archive_store import ArchiveSession
+from app.archive_store import ArchiveEntry, ArchiveSession
 from app.django_client.service import FormatEnum
 from app.ingest import Ingester
 
@@ -18,6 +18,13 @@ VIDEO_ID = "12345"
 
 
 class RecordingSession(ArchiveSession):
+    """An archive that only remembers the order things were published in.
+
+    The read side is stubbed rather than implemented: publishing never reads,
+    and a double that pretended to would only invite a test to depend on
+    something the real code path does not do.
+    """
+
     def __init__(self):
         self.puts: list[PurePosixPath] = []
 
@@ -26,6 +33,15 @@ class RecordingSession(ArchiveSession):
 
     async def put(self, source: Path, destination: PurePosixPath) -> None:
         self.puts.append(destination)
+
+    async def list_dir(self, destination: PurePosixPath) -> list[ArchiveEntry]:
+        raise NotImplementedError
+
+    async def get(self, source: PurePosixPath, destination: Path) -> None:
+        raise NotImplementedError
+
+    async def move(self, source: PurePosixPath, destination: PurePosixPath) -> None:
+        raise NotImplementedError
 
 
 @pytest.fixture

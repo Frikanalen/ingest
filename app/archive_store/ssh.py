@@ -1,5 +1,6 @@
 import getpass
 import os
+import stat
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from logging import getLogger
@@ -8,7 +9,14 @@ from time import monotonic
 
 import asyncssh
 
-from app.archive_store.base import ArchiveError, ArchiveSession, ArchiveStore, staging_path
+from app.archive_store.base import (
+    ArchiveEntry,
+    ArchiveError,
+    ArchiveSession,
+    ArchiveStore,
+    FileAlreadyArchived,
+    staging_path,
+)
 from app.util.pretty_duration import pretty_duration
 from app.util.settings import SshArchiveSettings
 
@@ -66,7 +74,10 @@ class SshArchiveSession(ArchiveSession):
 
         # A plain SFTP rename fails rather than overwriting, so a file that
         # appeared under us since assert_absent() is not silently destroyed.
-        await self.sftp.rename(staged, target)
+        # The staged copy is deliberately left in the spool when it does fail:
+        # nothing in the published tree changed, and the bytes are still there
+        # to look at.
+        await self._rename(staged, target, destination)
         await self.tidy_spool(staged.parent)
 
         elapsed = monotonic() - started
@@ -76,6 +87,81 @@ class SshArchiveSession(ArchiveSession):
             pretty_duration(elapsed),
             size / elapsed / 1e6 if elapsed else 0.0,
         )
+
+    async def list_dir(self, destination: PurePosixPath) -> list[ArchiveEntry]:
+        resolved = self.resolve(destination)
+
+        # Asked before reading rather than caught after: asyncssh raises a
+        # different SFTPError depending on what the server decided the problem
+        # was, and "no such directory" is not a problem here anyway.
+        if not await self.sftp.isdir(resolved):
+            return []
+
+        entries = []
+        for entry in await self.sftp.readdir(resolved):
+            if entry.filename in (".", ".."):
+                continue
+            is_dir = stat.S_ISDIR(entry.attrs.permissions or 0)
+            entries.append(
+                ArchiveEntry(
+                    path=destination / entry.filename,
+                    is_dir=is_dir,
+                    size=0 if is_dir else (entry.attrs.size or 0),
+                )
+            )
+        return sorted(entries, key=lambda entry: entry.path)
+
+    async def get(self, source: PurePosixPath, destination: Path) -> None:
+        origin = self.resolve(source)
+        staged = destination.with_name(destination.name + ".part")
+
+        logger.info("Downloading %s to %s", origin, destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        started = monotonic()
+        try:
+            await self.sftp.get(origin, staged)
+        except asyncssh.SFTPError as e:
+            # A missing original is a condition callers act on -- it is what a
+            # videofile row pointing at nothing looks like from here -- so it
+            # arrives as the same exception the local archive raises, rather
+            # than as an asyncssh type only one backend can produce.
+            if not await self.sftp.exists(origin):
+                raise FileNotFoundError(f"{source} is not in the archive") from e
+            raise
+        staged.replace(destination)
+
+        elapsed = monotonic() - started
+        size = destination.stat().st_size
+        logger.info(
+            "Downloaded %s in %s (%.1f MB/s)",
+            origin,
+            pretty_duration(elapsed),
+            size / elapsed / 1e6 if elapsed else 0.0,
+        )
+
+    async def move(self, source: PurePosixPath, destination: PurePosixPath) -> None:
+        origin = self.resolve(source)
+        target = self.resolve(destination)
+
+        logger.info("Moving %s to %s", origin, target)
+        await self.sftp.makedirs(target.parent, exist_ok=True)
+        await self._rename(origin, target, destination)
+
+    async def _rename(self, origin: PurePosixPath, target: PurePosixPath, destination: PurePosixPath) -> None:
+        """Rename within the archive, in this codebase's own vocabulary.
+
+        SFTP reports an occupied destination as a generic failure, which a
+        caller cannot tell apart from a full disk or a permission problem
+        without knowing about asyncssh. Asking afterwards is what turns it back
+        into the one condition callers actually handle.
+        """
+        try:
+            await self.sftp.rename(origin, target)
+        except asyncssh.SFTPError as e:
+            if await self.sftp.exists(target):
+                raise FileAlreadyArchived(f"{destination} already exists in the archive") from e
+            raise
 
     async def tidy_spool(self, directory: PurePosixPath) -> None:
         """Remove the staging directories the transfer just emptied.
