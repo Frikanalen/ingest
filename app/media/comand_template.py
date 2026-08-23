@@ -3,7 +3,7 @@ from typing import TypedDict
 
 import yaml
 from jinja2 import Template
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from app.media.loudness.loudness_measurement import LoudnessMeasurement
 from tests.get_git_root import get_git_root
@@ -19,6 +19,16 @@ class ProfileMetadata(BaseModel):
     #: templates emit two `-progress` streams back to back). Used to turn
     #: ffmpeg's per-pass progress into progress across the whole command.
     passes: int = 1
+    #: Which iteration of this profile the template currently describes.
+    #: Recorded against every file it produces, so that output made by an
+    #: earlier iteration can be found and replaced without inspecting it.
+    #:
+    #: Bump it whenever a change makes existing output worth rebuilding -- a
+    #: different ladder, a corrected keyframe interval -- and leave it alone
+    #: for a change that does not, such as a comment or a rename. Numbering
+    #: starts at 1 because 0 is reserved for files registered before any of
+    #: this existed; see app.formats.UNTRACKED_REVISION.
+    revision: int = Field(default=1, ge=1)
 
     @model_validator(mode="after")
     def _names_its_output_exactly_one_way(self) -> "ProfileMetadata":

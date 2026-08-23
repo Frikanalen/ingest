@@ -93,6 +93,7 @@ class DjangoApiService:
         video_id: str,
         file_format: FormatEnum,
         loudness: LoudnessMeasurement | None = None,
+        profile_revision: int | None = None,
     ):
         """Register a file against a video, with its loudness if we have it.
 
@@ -100,6 +101,10 @@ class DjangoApiService:
         so they describe the file that was actually measured: the figures
         playout levels from belong to the original, not to a derivative
         that has already been normalized to something else.
+
+        `profile_revision` says which iteration of the template produced the
+        file, which is what lets a reconciler find output made by a profile we
+        have since moved past without inspecting the file itself.
         """
         req = VideoFileRequest(
             filename=str(filename),
@@ -108,6 +113,17 @@ class DjangoApiService:
             integrated_lufs=loudness.integrated_lufs if loudness else UNSET,
             truepeak_lufs=loudness.truepeak_lufs if loudness else UNSET,
         )
+
+        if profile_revision is not None:
+            # Sent as an extra property until schema.yaml catches up with
+            # django-api's profileRevision column and the client is
+            # regenerated, at which point this becomes an ordinary argument
+            # above. An API that does not know the field yet drops it, and the
+            # row reads back as 0 -- "produced before we tracked this", and so
+            # as stale. Shipping this ahead of the migration therefore costs a
+            # redundant re-encode later, never a row that lies about itself.
+            req["profileRevision"] = profile_revision
+
         return await videofiles_create.asyncio(client=self.client, body=req)
 
     async def create_program_image(

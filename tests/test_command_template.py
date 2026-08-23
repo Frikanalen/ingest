@@ -203,3 +203,26 @@ def test_a_template_must_say_how_its_output_is_named():
 
     with pytest.raises(ValueError):
         ProfileMetadata(output_file_extension="webm", output_file_name="manifest.mpd")
+
+
+def test_revision_defaults_to_the_first_one():
+    """A template that says nothing is revision 1, not revision 0.
+
+    Zero is reserved for files registered before revisions were recorded at
+    all, so a template must never be able to claim it.
+    """
+    assert ProfileMetadata(output_file_extension="jpg").revision == 1
+
+
+def test_revision_cannot_claim_the_untracked_sentinel():
+    with pytest.raises(ValueError):
+        ProfileMetadata(output_file_extension="jpg", revision=0)
+
+
+def test_revision_is_read_from_the_header():
+    assert ProfileMetadata(output_file_name="manifest.mpd", revision=4).revision == 4
+
+
+@pytest.mark.parametrize("format_name", [f.value for f in (FormatEnum.DASH, FormatEnum.LARGE_THUMB)])
+def test_shipped_templates_declare_a_usable_revision(format_name):
+    assert TemplatedCommandGenerator(format_name).metadata.revision >= 1

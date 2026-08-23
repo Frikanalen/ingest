@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from datetime import datetime
 from logging import Logger, getLogger
 from pathlib import Path
@@ -7,24 +8,16 @@ from tempfile import TemporaryDirectory
 from frikanalen_django_api_client.models import IngestStateEnum
 
 from app.django_client.service import DjangoApiService, FormatEnum
+from app.formats import DESIRED_FORMATS
 from app.ingest_reporting import IngestErrorCode, IngestReporter
-from app.util.file_name_utils import derived_file_location, original_file_location
+from app.media.produce import FormatProducer, PublishFailed, SourceMedia, TranscodeFailed
+from app.util.file_name_utils import original_file_location
 from app.util.logging import VideoIdFilter
 
 from .archive_store import ArchiveSession, ArchiveStore
-from .media.comand_template import ProfileTemplateArguments, TemplatedCommandGenerator
 from .media.ffprobe_schema import FfprobeOutput
 from .media.loudness.loudness_measurement import LoudnessMeasurement
 from .media.loudness.measure import measure_loudness
-from .media.segmentation import segmentation_for
-from .runner import Task
-
-DESIRED_FORMATS = (
-    FormatEnum.LARGE_THUMB,
-    FormatEnum.MED_THUMB,
-    FormatEnum.SMALL_THUMB,
-    FormatEnum.DASH,
-)
 
 
 class Ingester:
@@ -34,6 +27,10 @@ class Ingester:
     local scratch space; only finished files are handed to the archive. That
     keeps ffmpeg off the archive entirely, so the archive can live on another
     host.
+
+    Producing each format is FormatProducer's job, not this class's: a backfill
+    runs exactly the same code against a source it fetched from the archive
+    instead of one tusd left behind.
     """
 
     django_api: DjangoApiService
@@ -70,11 +67,13 @@ class Ingester:
             await reporter.failed(IngestErrorCode.INTERNAL_ERROR, str(e))
             raise
 
-        has_audio = any(stream.codec_type == "audio" for stream in metadata.streams or [])
-        loudness = await self._measure_loudness(original_file, has_audio, reporter)
+        source = SourceMedia.probed(video_id, original_file, metadata)
+        source = replace(source, loudness=await self._measure_loudness(source, reporter))
 
         async with self.archive.open() as archive:
-            await self._archive_original(archive, video_id, original_file, metadata, reporter, loudness)
+            await self._archive_original(archive, source, reporter)
+
+            producer = FormatProducer(archive, self.django_api)
 
             with TemporaryDirectory(dir=self.work_dir, prefix=f"ingest-{video_id}-") as scratch:
                 # No percentage yet: thumbnails are over before ffmpeg would
@@ -83,17 +82,7 @@ class Ingester:
                 # _transcode_progress_reporter once it starts.
                 await reporter.state(IngestStateEnum.TRANSCODING)
                 for file_format in DESIRED_FORMATS:
-                    await self._process_format(
-                        archive,
-                        file_format,
-                        metadata,
-                        original_file,
-                        video_id,
-                        Path(scratch),
-                        reporter,
-                        has_audio,
-                        loudness,
-                    )
+                    await self._produce(producer, source, file_format, Path(scratch), reporter)
 
         await self.django_api.set_video_proper_import(video_id, True)
         await reporter.state(IngestStateEnum.DONE, percentage_done=100)
@@ -103,9 +92,35 @@ class Ingester:
         self.logger.info("Removing uploaded file %s", original_file)
         original_file.unlink()
 
-    async def _measure_loudness(
-        self, original_file: Path, has_audio: bool, reporter: IngestReporter
-    ) -> LoudnessMeasurement | None:
+    async def _produce(
+        self,
+        producer: FormatProducer,
+        source: SourceMedia,
+        file_format: FormatEnum,
+        scratch: Path,
+        reporter: IngestReporter,
+    ) -> None:
+        """Run one format, and say what went wrong in the uploader's terms.
+
+        The producer reports failures as what they were rather than as an error
+        code, because a backfill has no uploader to answer to and would
+        classify the same failure differently.
+        """
+        try:
+            await producer.produce(
+                source,
+                file_format,
+                scratch,
+                on_progress=self._transcode_progress_reporter(reporter),
+            )
+        except TranscodeFailed as e:
+            await reporter.failed(IngestErrorCode.TRANSCODE_FAILED, str(e))
+            raise
+        except PublishFailed as e:
+            await reporter.failed(IngestErrorCode.ARCHIVE_FAILED, str(e))
+            raise
+
+    async def _measure_loudness(self, source: SourceMedia, reporter: IngestReporter) -> LoudnessMeasurement | None:
         """Measure the upload before anything has been done to it.
 
         This has to happen on the original: it is the figure playout levels
@@ -117,18 +132,18 @@ class Ingester:
         decodes audio and discards it, which next to the VP9 ladder is not
         long enough to be worth a percentage.
         """
-        if not has_audio:
+        if not source.has_audio:
             return None
 
         await reporter.state(IngestStateEnum.PROBING)
-        loudness = await measure_loudness(original_file)
+        loudness = await measure_loudness(source.path)
 
         if loudness is None:
-            self.logger.warning("No usable loudness measurement for %s", original_file)
+            self.logger.warning("No usable loudness measurement for %s", source.path)
         else:
             self.logger.info(
                 "Measured %s at %.1f LUFS, true peak %s dBTP",
-                original_file,
+                source.path,
                 loudness.integrated_lufs,
                 loudness.truepeak_lufs,
             )
@@ -137,130 +152,35 @@ class Ingester:
     async def _archive_original(
         self,
         archive: ArchiveSession,
-        video_id: str,
-        original_file: Path,
-        metadata: FfprobeOutput,
+        source: SourceMedia,
         reporter: IngestReporter,
-        loudness: LoudnessMeasurement | None = None,
     ):
-        destination = original_file_location(video_id, Path(original_file.name))
+        destination = original_file_location(source.video_id, Path(source.path.name))
         await reporter.state(IngestStateEnum.ARCHIVING)
 
         try:
             self.logger.info("Storing original file at %s", destination)
             await archive.assert_absent(destination)
-            await archive.put(original_file, destination)
+            await archive.put(source.path, destination)
         except Exception as e:
             self.logger.error("Failed to store original file in archive: %s", e)
             await reporter.failed(IngestErrorCode.ARCHIVE_FAILED, str(e))
             raise
 
         try:
-            self.logger.info("Setting video duration: %s", metadata.format.duration)
-            await self.django_api.set_video_duration(video_id, metadata.format.duration)
+            self.logger.info("Setting video duration: %s", source.metadata.format.duration)
+            await self.django_api.set_video_duration(source.video_id, source.metadata.format.duration)
 
             await self.django_api.create_video_file(
                 filename=str(destination),
                 file_format=FormatEnum.ORIGINAL,
-                video_id=video_id,
-                loudness=loudness,
+                video_id=source.video_id,
+                loudness=source.loudness,
             )
         except Exception as e:
             self.logger.error("django-api error post original ingest: %s", e)
             await reporter.failed(IngestErrorCode.INTERNAL_ERROR, str(e))
             raise
-
-    async def _process_format(
-        self,
-        archive: ArchiveSession,
-        file_format: FormatEnum,
-        metadata: FfprobeOutput,
-        source_file: Path,
-        video_id: str,
-        scratch: Path,
-        reporter: IngestReporter,
-        has_audio: bool,
-        loudness: LoudnessMeasurement | None,
-    ):
-        self.logger.info("Processing %s as %s", source_file, file_format)
-
-        self.logger.info("Building command for format: %s", file_format)
-        template = TemplatedCommandGenerator(file_format)
-
-        # Each format gets a directory of its own, and whatever the command
-        # leaves in it is what gets archived. A format can therefore produce a
-        # set of files -- DASH writes a manifest and the media it names --
-        # without ingest having to know the shape of any of them.
-        output_dir = scratch / str(file_format)
-        output_dir.mkdir()
-        output_file = output_dir / template.metadata.output_name_for(source_file)
-        duration_s = float(metadata.format.duration)
-
-        segmentation = segmentation_for(metadata)
-
-        template_args = ProfileTemplateArguments(
-            input_file=source_file,
-            output_file=output_file,
-            output_dir=output_dir,
-            scratch_dir=scratch,
-            seek_s=(duration_s * 0.25 or 30),
-            has_audio=has_audio,
-            loudness=loudness,
-            gop_frames=segmentation.gop_frames,
-            segment_duration_s=segmentation.segment_duration_arg,
-        )
-
-        command = template.render(template_args)
-        self.logger.debug("Generated command: %s", command)
-
-        try:
-            await Task(
-                command,
-                duration_s=duration_s,
-                passes=template.metadata.passes,
-                on_progress=self._transcode_progress_reporter(reporter),
-            ).execute()
-        except Exception as e:
-            self.logger.error("Failed to produce %s: %s", file_format, e)
-            await reporter.failed(IngestErrorCode.TRANSCODE_FAILED, str(e))
-            raise
-
-        destination = derived_file_location(video_id, str(file_format), output_file)
-        self.logger.info("Storing %s to %s", file_format, destination)
-        try:
-            await self._publish(archive, output_dir, output_file, video_id, file_format)
-        except Exception as e:
-            self.logger.error("Failed to archive %s: %s", file_format, e)
-            await reporter.failed(IngestErrorCode.ARCHIVE_FAILED, str(e))
-            raise
-
-        self.logger.info("Creating video file entry for %s", destination)
-        await self.django_api.create_video_file(filename=str(destination), file_format=file_format, video_id=video_id)
-
-    async def _publish(
-        self,
-        archive: ArchiveSession,
-        output_dir: Path,
-        primary: Path,
-        video_id: str,
-        file_format: FormatEnum,
-    ) -> None:
-        """Copy everything one format produced into the archive, primary last.
-
-        The archive is exported read-only to the playout hosts, so a manifest
-        arriving before the media it references would be briefly readable and
-        broken. Publishing it last means the format either is not there yet or
-        is there in full.
-        """
-        outputs = sorted(output_dir.iterdir(), key=lambda output: output == primary)
-
-        if nested := [output for output in outputs if not output.is_file()]:
-            # derived_file_location flattens to a basename, so a template that
-            # nested its output would silently archive to the wrong paths.
-            raise NotImplementedError(f"{file_format} produced directories, which cannot be archived: {nested}")
-
-        for output in outputs:
-            await archive.put(output, derived_file_location(video_id, str(file_format), output))
 
     def _transcode_progress_reporter(self, reporter: IngestReporter) -> Callable[[float], Awaitable[None]]:
         """Turns ffmpeg's own -progress stream into a percentage.
