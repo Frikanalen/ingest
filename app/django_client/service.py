@@ -2,11 +2,17 @@ from datetime import datetime
 from enum import Enum
 
 from frikanalen_django_api_client import AuthenticatedClient
-from frikanalen_django_api_client.api.videofiles import videofiles_create, videofiles_list
+from frikanalen_django_api_client.api.videofiles import (
+    videofiles_create,
+    videofiles_destroy,
+    videofiles_list,
+    videofiles_partial_update,
+)
 from frikanalen_django_api_client.api.videos import videos_ingest_report, videos_list, videos_partial_update
 from frikanalen_django_api_client.models import (
     IngestJobRequest,
     IngestStateEnum,
+    PatchedVideoFileRequest,
     PatchedVideoRequest,
     VideoFileRequest,
     VideoFileVariantEnum,
@@ -149,6 +155,53 @@ class DjangoApiService:
             },
         )
         response.raise_for_status()
+
+    async def retag_video_file(self, file_id: int, file_format: FormatEnum, filename: str):
+        """Point an existing videofile row at a new path and variant.
+
+        Used when a legacy `broadcast/` directory turns out to be the original:
+        the record is updated rather than replaced, so the file keeps whatever
+        history and identity the row already carried.
+        """
+        return await videofiles_partial_update.asyncio(
+            file_id,
+            client=self.client,
+            body=PatchedVideoFileRequest(
+                variant=VideoFileVariantEnum[file_format.name],
+                filename=str(filename),
+            ),
+        )
+
+    async def set_video_file_loudness(self, file_id: int, loudness: LoudnessMeasurement):
+        return await videofiles_partial_update.asyncio(
+            file_id,
+            client=self.client,
+            body=PatchedVideoFileRequest(
+                integrated_lufs=loudness.integrated_lufs,
+                truepeak_lufs=loudness.truepeak_lufs,
+            ),
+        )
+
+    async def delete_video_file(self, file_id: int):
+        """Drop a videofile row whose file we are deliberately removing.
+
+        Never called because a file turned out to be missing: that is an
+        incident, and the row is the only remaining record that it existed.
+        """
+        return await videofiles_destroy.asyncio_detailed(file_id, client=self.client)
+
+    async def set_video_framerate(self, video_id: str, framerate_milli: int):
+        """Record the source's frame rate, in thousandths of a frame per second.
+
+        Ingest has always computed this -- DASH segments have to fall on whole
+        frames -- and has never been able to store it, because the field is
+        read-only until django-api's change lands. Sent the same way as
+        profileRevision until then; dropped by an API that does not know it
+        yet, which leaves the field empty and the next run trying again.
+        """
+        body = PatchedVideoRequest()
+        body["framerate"] = framerate_milli
+        return await videos_partial_update.asyncio(video_id, client=self.client, body=body)
 
     async def get_videos(self, limit=10):
         return (await videos_list.asyncio(client=self.client, limit=limit, ordering="-uploaded_time")).results or []
