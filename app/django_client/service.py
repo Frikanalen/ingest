@@ -2,15 +2,23 @@ from datetime import datetime
 from enum import Enum
 
 from frikanalen_django_api_client import AuthenticatedClient
+from frikanalen_django_api_client.api.ingest import ingest_claim
 from frikanalen_django_api_client.api.videofiles import (
     videofiles_create,
     videofiles_destroy,
     videofiles_list,
     videofiles_partial_update,
 )
-from frikanalen_django_api_client.api.videos import videos_ingest_report, videos_list, videos_partial_update
+from frikanalen_django_api_client.api.videos import (
+    videos_ingest_report,
+    videos_list,
+    videos_partial_update,
+    videos_retrieve,
+)
 from frikanalen_django_api_client.models import (
+    IngestClaimRequest,
     IngestJobRequest,
+    IngestKindEnum,
     IngestStateEnum,
     PatchedVideoFileRequest,
     PatchedVideoRequest,
@@ -89,6 +97,29 @@ class DjangoApiService:
                 error_code=error_code,
             ),
         )
+
+    async def claim_ingest_job(self, worker: str, kind: str | None = None):
+        """Take the next job off the queue, or None if there is nothing to take.
+
+        The whole decision happens in one statement on django-api's side --
+        which job, and marking it taken -- so two workers asking at the same
+        moment cannot come away with the same video. Nothing here needs to
+        retry a lost race, because there is no race to lose.
+
+        `kind` is what a worker can reach rather than what it prefers: an
+        upload's source is in the tusd volume, which only one pod has. Omitting
+        it means "anything", which is right for a pool that can reach both.
+        """
+        return await ingest_claim.asyncio(
+            client=self.client,
+            body=IngestClaimRequest(
+                worker=worker,
+                kind=IngestKindEnum(kind) if kind else UNSET,
+            ),
+        )
+
+    async def get_video(self, video_id: str):
+        return await videos_retrieve.asyncio(int(video_id), client=self.client)
 
     async def get_files_for_video(self, video_id: str):
         return await videofiles_list.asyncio(client=self.client, video_id=int(video_id))

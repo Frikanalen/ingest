@@ -1,4 +1,3 @@
-from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import datetime
 from logging import Logger, getLogger
@@ -9,7 +8,7 @@ from frikanalen_django_api_client.models import IngestStateEnum
 
 from app.django_client.service import DjangoApiService, FormatEnum
 from app.formats import DESIRED_FORMATS
-from app.ingest_reporting import IngestErrorCode, IngestReporter
+from app.ingest_reporting import IngestErrorCode, IngestReporter, transcode_progress_reporter
 from app.media.produce import FormatProducer, PublishFailed, SourceMedia, TranscodeFailed
 from app.util.file_name_utils import original_file_location
 from app.util.logging import VideoIdFilter
@@ -111,7 +110,7 @@ class Ingester:
                 source,
                 file_format,
                 scratch,
-                on_progress=self._transcode_progress_reporter(reporter),
+                on_progress=transcode_progress_reporter(reporter),
             )
         except TranscodeFailed as e:
             await reporter.failed(IngestErrorCode.TRANSCODE_FAILED, str(e))
@@ -181,27 +180,3 @@ class Ingester:
             self.logger.error("django-api error post original ingest: %s", e)
             await reporter.failed(IngestErrorCode.INTERNAL_ERROR, str(e))
             raise
-
-    def _transcode_progress_reporter(self, reporter: IngestReporter) -> Callable[[float], Awaitable[None]]:
-        """Turns ffmpeg's own -progress stream into a percentage.
-
-        Only the DASH template emits -progress; thumbnails are over before
-        ffmpeg would have anything to report. So in practice this is the DASH
-        encode's own completion fraction, and nothing else moves the bar --
-        which matches reality, since a 60s 1080p source measures the DASH
-        ladder at roughly 100x the cost of the other three formats combined.
-
-        Reports are throttled to one per whole percentage point: ffmpeg's
-        -progress stream updates far more often than that, and each report
-        is a call to django-api.
-        """
-        last_reported = -1
-
-        async def report(fraction: float) -> None:
-            nonlocal last_reported
-            percentage = round(100 * fraction)
-            if percentage != last_reported:
-                last_reported = percentage
-                await reporter.state(IngestStateEnum.TRANSCODING, percentage_done=percentage)
-
-        return report

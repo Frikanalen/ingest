@@ -57,6 +57,17 @@ def _profile_revision(row) -> int:
     return UNTRACKED_REVISION if declared is None else int(declared)
 
 
+def _registered(row) -> RegisteredFile:
+    """A videofile row, in the terms the chores reason about."""
+    return RegisteredFile(
+        id=row.id,
+        variant=FormatEnum(str(row.variant)),
+        filename=PurePosixPath(row.filename),
+        profile_revision=_profile_revision(row),
+        integrated_lufs=_optional(row.integrated_lufs),
+    )
+
+
 @dataclass(frozen=True)
 class CatalogueVideo:
     """What django-api says about a video, aside from its files."""
@@ -110,15 +121,7 @@ class Observer:
         files: dict[str, list[RegisteredFile]] = {}
 
         async for row in self._pages(self.django_api.list_video_files_page, "videofiles"):
-            files.setdefault(str(row.video), []).append(
-                RegisteredFile(
-                    id=row.id,
-                    variant=FormatEnum(str(row.variant)),
-                    filename=PurePosixPath(row.filename),
-                    profile_revision=_profile_revision(row),
-                    integrated_lufs=_optional(row.integrated_lufs),
-                )
-            )
+            files.setdefault(str(row.video), []).append(_registered(row))
         return {video_id: tuple(rows) for video_id, rows in files.items()}
 
     async def _pages(self, fetch, what: str):
@@ -170,6 +173,32 @@ class Observer:
             directories=await self._archived_directories(video_id),
             duration=catalogue.duration if catalogue else None,
             framerate=catalogue.framerate if catalogue else None,
+        )
+
+    async def observe_one(self, video_id: str) -> VideoState:
+        """Assemble one video's state without reading the whole catalogue.
+
+        What a worker uses: it has been handed a single video and asking for
+        every row in the database to learn about one of them would be absurd.
+        The bulk snapshot is for planning across the catalogue, where the
+        opposite is true.
+        """
+        video, files, directories = await asyncio.gather(
+            self.django_api.get_video(video_id),
+            self.django_api.get_files_for_video(video_id),
+            self._archived_directories(video_id),
+        )
+
+        return VideoState(
+            video_id=video_id,
+            # A video handed to a worker exists by construction -- the job is
+            # attached to it -- so this is about the row having been readable,
+            # not about the video having been deleted under us.
+            in_catalogue=video is not None,
+            files=tuple(_registered(row) for row in (files.results or [])),
+            directories=directories,
+            duration=_optional(getattr(video, "duration", None)) if video else None,
+            framerate=_optional(getattr(video, "framerate", None)) if video else None,
         )
 
     async def _archived_directories(self, video_id: str) -> dict[str, tuple[ArchiveEntry, ...]]:

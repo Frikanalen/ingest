@@ -1,5 +1,7 @@
+import os
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -68,6 +70,30 @@ class SshArchiveSettings(BaseModel):
         return None
 
 
+class WorkerSettings(BaseModel):
+    """A process that drains the ingest queue."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        default="",
+        description="How this worker identifies itself when claiming. Empty uses the hostname, "
+        "which in Kubernetes is the pod name and is what an operator will look for.",
+    )
+    kind: Literal["upload", "backfill"] | None = Field(
+        default=None,
+        description="Only claim jobs whose source this worker can reach. Unset claims either, which "
+        "is right for a pool that can reach both the upload volume and the archive.",
+    )
+    poll_interval_s: float = Field(
+        default=30.0,
+        description="How long to wait before asking again when the queue is empty",
+    )
+
+    def identify(self) -> str:
+        return self.name or os.environ.get("HOSTNAME", "ingest-worker")
+
+
 class IngestAppSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env", env_nested_delimiter="_", env_nested_max_split=1, env_prefix="FK_"
@@ -102,6 +128,8 @@ class IngestAppSettings(BaseSettings):
         default=None,
         description="Local scratch space for transcoding. Defaults to the system temporary directory.",
     )
+
+    worker: WorkerSettings = Field(default_factory=WorkerSettings, description="Queue-draining behaviour")
 
 
 @lru_cache

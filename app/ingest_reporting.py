@@ -1,3 +1,4 @@
+from collections.abc import Awaitable, Callable
 from enum import StrEnum
 from logging import getLogger
 
@@ -91,3 +92,29 @@ class IngestReporter:
                 self.video_id,
                 exc_info=True,
             )
+
+
+def transcode_progress_reporter(reporter: IngestReporter) -> Callable[[float], Awaitable[None]]:
+    """Turns ffmpeg's own -progress stream into a percentage.
+
+    Only the DASH template emits -progress; thumbnails are over before ffmpeg
+    would have anything to report. So in practice this is the DASH encode's own
+    completion fraction, and nothing else moves the bar -- which matches
+    reality, since a 60s 1080p source measures the DASH ladder at roughly 100x
+    the cost of the other three formats combined.
+
+    Reports are throttled to one per whole percentage point: ffmpeg's -progress
+    stream updates far more often than that, and each report is a call to
+    django-api. It is also what keeps a claim alive, since the lease is read
+    from the same updated_time these reports move.
+    """
+    last_reported = -1
+
+    async def report(fraction: float) -> None:
+        nonlocal last_reported
+        percentage = round(100 * fraction)
+        if percentage != last_reported:
+            last_reported = percentage
+            await reporter.state(IngestStateEnum.TRANSCODING, percentage_done=percentage)
+
+    return report
