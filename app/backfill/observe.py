@@ -47,15 +47,13 @@ def _optional(value):
 
 
 def _profile_revision(row) -> int:
-    """Which revision produced this file, however the client spells it.
+    """Which revision produced this file.
 
-    Reads the generated attribute when the client has been regenerated against
-    a django-api that has the column, and the raw property before then. A row
-    that says nothing is UNTRACKED_REVISION, which reads as stale.
+    The column is NOT NULL with a zero default, so every row has one; the
+    fallback covers a row the API declined to serialize rather than a row that
+    genuinely has no answer. Either way, nothing recorded reads as stale.
     """
     declared = _optional(getattr(row, "profile_revision", None))
-    if declared is None:
-        declared = row.additional_properties.get("profileRevision")
     return UNTRACKED_REVISION if declared is None else int(declared)
 
 

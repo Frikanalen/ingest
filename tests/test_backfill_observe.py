@@ -26,14 +26,20 @@ def video_row(video_id: int, duration="00:10:00", framerate=25000):
     return SimpleNamespace(id=video_id, duration=duration, framerate=framerate)
 
 
-def file_row(file_id, video, variant, filename, revision=None, lufs=-23.0):
+def file_row(file_id, video, variant, filename, revision=UNTRACKED_REVISION, lufs=-23.0):
+    """A videofile as the client hands it over.
+
+    `profile_revision` is NOT NULL with a zero default, so a real row always
+    carries one; pass UNSET to model a response that left it out.
+    """
     return SimpleNamespace(
         id=file_id,
         video=video,
         variant=VideoFileVariantEnum(variant),
         filename=filename,
         integrated_lufs=lufs,
-        additional_properties={} if revision is None else {"profileRevision": revision},
+        profile_revision=revision,
+        additional_properties={},
     )
 
 
@@ -58,9 +64,7 @@ def archive_root(tmp_path):
 def django_api():
     api = AsyncMock()
     api.list_videos_page = pager([video_row(12345)])
-    api.list_video_files_page = pager(
-        [file_row(1, 12345, "original", f"{VIDEO_ID}/original/source.mp4", revision=None)]
-    )
+    api.list_video_files_page = pager([file_row(1, 12345, "original", f"{VIDEO_ID}/original/source.mp4")])
     return api
 
 
@@ -130,24 +134,12 @@ async def test_a_recorded_revision_is_read_back(observer, django_api):
 
 
 @pytest.mark.asyncio
-async def test_a_generated_field_wins_over_the_raw_property(observer, django_api):
-    """Once the client is regenerated the column is an attribute; the bridge
-    that reads it as a raw property must not shadow it."""
-    row = file_row(2, 12345, "dash", f"{VIDEO_ID}/dash/manifest.mpd")
-    row.profile_revision = 3
+async def test_a_row_that_omits_the_revision_reads_as_untracked(observer, django_api):
+    """Nothing recorded must read as stale rather than as current."""
+    django_api.list_video_files_page = pager(
+        [file_row(2, 12345, "dash", f"{VIDEO_ID}/dash/manifest.mpd", revision=UNSET)]
+    )
 
-    django_api.list_video_files_page = pager([row])
-    snapshot = await observer.snapshot()
-
-    assert snapshot.files_for(VIDEO_ID)[0].profile_revision == 3
-
-
-@pytest.mark.asyncio
-async def test_an_unset_generated_field_falls_back_to_untracked(observer, django_api):
-    row = file_row(2, 12345, "dash", f"{VIDEO_ID}/dash/manifest.mpd")
-    row.profile_revision = UNSET
-
-    django_api.list_video_files_page = pager([row])
     snapshot = await observer.snapshot()
 
     assert snapshot.files_for(VIDEO_ID)[0].profile_revision == UNTRACKED_REVISION

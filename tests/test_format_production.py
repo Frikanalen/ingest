@@ -136,6 +136,7 @@ async def test_create_video_file_sends_the_profile_revision(monkeypatch):
         profile_revision=3,
     )
 
+    assert captured["body"].profile_revision == 3
     assert captured["body"].to_dict()["profileRevision"] == 3
 
 

@@ -118,18 +118,11 @@ class DjangoApiService:
             variant=VideoFileVariantEnum[file_format.name],
             integrated_lufs=loudness.integrated_lufs if loudness else UNSET,
             truepeak_lufs=loudness.truepeak_lufs if loudness else UNSET,
+            # Left unset rather than sent as 0 for a file no template produced,
+            # so the original keeps saying "no profile" instead of claiming to
+            # predate one.
+            profile_revision=profile_revision if profile_revision is not None else UNSET,
         )
-
-        if profile_revision is not None:
-            # Sent as an extra property until schema.yaml catches up with
-            # django-api's profileRevision column and the client is
-            # regenerated, at which point this becomes an ordinary argument
-            # above. An API that does not know the field yet drops it, and the
-            # row reads back as 0 -- "produced before we tracked this", and so
-            # as stale. Shipping this ahead of the migration therefore costs a
-            # redundant re-encode later, never a row that lies about itself.
-            req["profileRevision"] = profile_revision
-
         return await videofiles_create.asyncio(client=self.client, body=req)
 
     async def create_program_image(
@@ -193,15 +186,14 @@ class DjangoApiService:
     async def set_video_framerate(self, video_id: str, framerate_milli: int):
         """Record the source's frame rate, in thousandths of a frame per second.
 
-        Ingest has always computed this -- DASH segments have to fall on whole
-        frames -- and has never been able to store it, because the field is
-        read-only until django-api's change lands. Sent the same way as
-        profileRevision until then; dropped by an API that does not know it
-        yet, which leaves the field empty and the next run trying again.
+        Ingest works the exact rate out anyway -- DASH segments have to fall on
+        whole frames, so it has to -- and until recently had nowhere to put it.
         """
-        body = PatchedVideoRequest()
-        body["framerate"] = framerate_milli
-        return await videos_partial_update.asyncio(video_id, client=self.client, body=body)
+        return await videos_partial_update.asyncio(
+            video_id,
+            client=self.client,
+            body=PatchedVideoRequest(framerate=framerate_milli),
+        )
 
     async def list_videos_page(self, limit: int, offset: int):
         """One page of the catalogue, ordered so paging is stable.
