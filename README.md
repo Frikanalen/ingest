@@ -1,6 +1,6 @@
 # Ingest
 
-Ingest handles tusd uploads for Frikanalen by validating metadata, archiving source files, generating derivative media, and updating the Django API.
+Ingest handles tusd uploads for Frikanalen by validating metadata, archiving source files, generating derivative media, and updating the Django API. It also reconciles the existing catalogue against the same declaration of what a video should have — see [Reconciling the catalogue](#reconciling-the-catalogue).
 
 It exposes these application endpoints:
 
@@ -63,6 +63,38 @@ place once complete, so an interrupted transfer cannot leave a truncated file
 that later looks like a finished one.
 
 Both SSH credentials must be given explicitly — ingest will not reach for the running user's `~/.ssh`, and it never disables host key verification. If either is missing, ingest logs a warning and archives to `FK_ARCHIVE_FALLBACK_DIR` instead, so you can run it locally without setting up SSH at all. **Set `FK_ARCHIVE_REQUIRED=true` anywhere that actually archives over SSH**: otherwise a secret that fails to mount leaves ingest quietly writing to scratch space, where files are lost on restart.
+
+## Reconciling the catalogue
+
+Ingest is not only a hook handler. What a video is *supposed* to have is declared in one place — `DESIRED_FORMATS` in `app/formats.py`, and the revision each template in `templates/` declares — and both paths that produce media converge on it: a fresh upload, and a video that has been in the archive for years.
+
+That matters because "this video has DASH" and "this video has *current* DASH" are different statements. Each template carries a `revision`, and `profileRevision` on the videofile row records which one produced the file. Revisions number from 1, so 0 means "registered before any of this was recorded" — which is what every pre-existing row reads as, and therefore as stale. Changing a profile is then: edit the template, bump its revision, and everything built by the old one becomes due for a rebuild without anybody keeping a list.
+
+### Chores
+
+| Chore | What it settles |
+| --- | --- |
+| `gc` | Media in the archive for a video the catalogue no longer has |
+| `sources` | Whether the source lives in `original/` or the legacy `broadcast/` |
+| `metadata` | `duration`, `framerate` and R.128 loudness, re-derived from the original |
+| `formats` | Derivatives that are missing, or built by a superseded profile |
+
+Each is a pure function from an observed `VideoState` to the actions that would close the gap, so the awkward cases — a video whose source is still called `broadcast`, a format registered twice, media nothing claims — are unit tests rather than fixtures.
+
+**The database decides.** No chore invents a videofile row from a file it found, and none deletes a row because a file is missing. The first lets the archive overrule the catalogue; the second destroys the only remaining evidence of an incident. Both are reported instead, as notes nothing acts on.
+
+**Nothing here deletes.** `ArchiveSession` has no way to destroy archived media: removing something is a rename into `.trash/<timestamp>/<original path>`, so putting it back is the reverse rename. Purging is a separate act, and is not built yet.
+
+### Seeing what needs doing
+
+```bash
+uv run python -m app.backfill plan --limit 50
+uv run python -m app.backfill plan 12345
+```
+
+This reads and changes nothing. It needs an API token and access to the archive, and reports what every video would need, with a summary at the end.
+
+Carrying a plan out is the worker pool's job — see [Queue workers](#queue-workers). Workers claim videos whose ingest job is `pending`; **putting work on that queue is not built yet**, so at present the pool has nothing to drain and `plan` is the useful half. `gc` is also not reachable from the queue: a video the catalogue has deleted has no ingest job to claim, so it needs a sweep rather than a job, and that too is still to build.
 
 ## Deployment
 
