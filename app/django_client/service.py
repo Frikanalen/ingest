@@ -203,6 +203,18 @@ class DjangoApiService:
         body["framerate"] = framerate_milli
         return await videos_partial_update.asyncio(video_id, client=self.client, body=body)
 
+    async def list_videos_page(self, limit: int, offset: int):
+        """One page of the catalogue, ordered so paging is stable.
+
+        Ordered by id rather than by upload time: a backfill pages through the
+        whole catalogue while uploads are still arriving, and paging by
+        anything that new rows sort into shifts rows between pages under you.
+        """
+        return await videos_list.asyncio(client=self.client, limit=limit, offset=offset, ordering="id")
+
+    async def list_video_files_page(self, limit: int, offset: int):
+        return await videofiles_list.asyncio(client=self.client, limit=limit, offset=offset, ordering="id")
+
     async def get_videos(self, limit=10):
         return (await videos_list.asyncio(client=self.client, limit=limit, ordering="-uploaded_time")).results or []
 
