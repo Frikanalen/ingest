@@ -227,28 +227,31 @@ def produce_formats(state: VideoState, desired: DesiredState) -> Fragment:
 
     for file_format, wanted in desired.formats.items():
         directory = PurePosixPath(state.video_id) / str(file_format)
-
-        if not state.rows_for(file_format):
-            actions.append(ProduceFormat(file_format=file_format, to_revision=wanted))
-            continue
-
+        registered = state.rows_for(file_format)
         have = state.revision_of(file_format)
-        if have >= wanted:
+
+        if registered and have >= wanted:
             continue
 
-        if str(file_format) not in state.directories:
-            # Registered, superseded, and not actually there. Rebuilding is
+        # Whether something is in the way is a question about the archive, not
+        # about the rows. A registration that failed after its files were
+        # published leaves a complete directory nothing claims, and publishing
+        # into it would collide rather than replace -- put() refuses to
+        # overwrite, by design. So the swap is keyed off what is actually
+        # there.
+        occupied = str(file_format) in state.directories
+
+        if registered and not occupied:
+            # Registered, due a rebuild, and not actually there. Rebuilding is
             # still right, but the absence is worth saying out loud.
             notes.append(f"{directory} is registered but missing from the archive")
-            actions.append(ProduceFormat(file_format=file_format, from_revision=have, to_revision=wanted))
-            continue
 
         actions.append(
             ProduceFormat(
                 file_format=file_format,
                 from_revision=have,
                 to_revision=wanted,
-                replacing=directory,
+                replacing=directory if occupied else None,
             )
         )
 

@@ -113,9 +113,11 @@ class ProduceFormat(Action):
     needs_original: ClassVar[bool] = True
 
     def describe(self) -> str:
+        if self.from_revision != UNTRACKED_REVISION:
+            return f"produce {self.file_format} (revision {self.from_revision} -> {self.to_revision})"
         if self.replacing is None:
             return f"produce {self.file_format} (missing)"
-        return f"produce {self.file_format} (revision {self.from_revision} -> {self.to_revision})"
+        return f"produce {self.file_format} (replacing output nothing claims)"
 
 
 @dataclass(frozen=True)

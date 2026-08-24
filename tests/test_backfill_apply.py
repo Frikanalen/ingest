@@ -181,3 +181,27 @@ async def test_producing_a_missing_format_registers_it(applier, archive_root, dj
     assert (archive_root / VIDEO_ID / "med_thumb" / "source.jpg").exists()
     [call] = django_api.create_video_file.call_args_list
     assert call.kwargs["profile_revision"] == 1
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg missing")
+@pytest.mark.asyncio
+async def test_producing_over_output_nothing_claims_replaces_it(applier, archive_root, django_api, color_bars_video):
+    """put() refuses to overwrite, so a rebuild into an occupied directory has
+    to swap it. Without `replacing` this raises FileAlreadyArchived, and would
+    do so again on every retry."""
+    place(archive_root, ORIGINAL, color_bars_video.read_bytes())
+    place(archive_root, PurePosixPath(f"{VIDEO_ID}/med_thumb/source.jpg"), b"an earlier, unregistered thumbnail")
+
+    await applier.apply(
+        plan_of(
+            ProduceFormat(
+                file_format=FormatEnum.MED_THUMB,
+                to_revision=1,
+                replacing=PurePosixPath(f"{VIDEO_ID}/med_thumb"),
+            )
+        )
+    )
+
+    rebuilt = archive_root / VIDEO_ID / "med_thumb" / "source.jpg"
+    assert rebuilt.read_bytes() != b"an earlier, unregistered thumbnail"
+    assert list((archive_root / TRASH_DIR).rglob("source.jpg"))

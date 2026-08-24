@@ -344,9 +344,38 @@ def test_chores_can_be_selected():
 
 
 def test_a_plan_describes_itself():
-    state = video(files=(registered(FormatEnum.ORIGINAL, "source.mp4", file_id=1),))
+    state = video(
+        files=(registered(FormatEnum.ORIGINAL, "source.mp4", file_id=1),),
+        directories={"original": (entry(f"{VIDEO_ID}/original/source.mp4"),)},
+    )
 
     described = plan(state, DESIRED).describe()
 
     assert f"video {VIDEO_ID}" in described
     assert "produce dash (missing)" in described
+
+
+def test_output_nothing_claims_is_replaced_rather_than_collided_with():
+    """A registration that failed after publishing leaves a complete directory
+    with no row. Producing into it would hit put()'s refusal to overwrite and
+    fail the same way on every retry, so the rebuild has to swap it."""
+    state = video(
+        files=(registered(FormatEnum.ORIGINAL, "source.mp4", file_id=1),),
+    )
+
+    produced = {a.file_format: a for a in actions_of(state) if isinstance(a, ProduceFormat)}
+
+    assert produced[FormatEnum.DASH].replacing == PurePosixPath(f"{VIDEO_ID}/dash")
+    assert "replacing output nothing claims" in produced[FormatEnum.DASH].describe()
+
+
+def test_a_format_absent_from_both_is_produced_without_replacing_anything():
+    state = video(
+        files=(registered(FormatEnum.ORIGINAL, "source.mp4", file_id=1),),
+        directories={"original": (entry(f"{VIDEO_ID}/original/source.mp4"),)},
+    )
+
+    produced = {a.file_format: a for a in actions_of(state) if isinstance(a, ProduceFormat)}
+
+    assert produced[FormatEnum.DASH].replacing is None
+    assert "missing" in produced[FormatEnum.DASH].describe()
