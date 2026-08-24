@@ -98,13 +98,26 @@ Carrying a plan out is the worker pool's job — see [Queue workers](#queue-work
 
 ## Deployment
 
-`chart/` holds the Helm chart. It deploys tusd alongside ingest in the same pod, so tusd reaches the hook endpoint over the pod's loopback and the two share the upload volume rather than passing files across a network. Only tusd is exposed, through an ingress on the upload hostname; ingest's own endpoints stay cluster-internal.
+`chart/` holds the Helm chart. It deploys two things: the `-upload` Deployment, which runs tusd alongside ingest in the same pod so tusd reaches the hook endpoint over the pod's loopback and the two share the upload volume rather than passing files across a network; and the `-workers` Deployment, which drains the ingest queue and is described under [Queue workers](#queue-workers). Only tusd is exposed, through an ingress on the upload hostname; ingest's own endpoints stay cluster-internal.
 
-Because one pod owns the upload volume, the chart runs a single replica with the `Recreate` strategy. Going multi-replica would need `ReadWriteMany` storage and session affinity, since a resumed upload has to reach the pod holding its partial file.
+Because one pod owns the upload volume, the upload Deployment runs a single replica with the `Recreate` strategy. Going multi-replica would need `ReadWriteMany` storage and session affinity, since a resumed upload has to reach the pod holding its partial file.
 
 tusd is served at `/upload` on the main site — `https://frikanalen.no/upload`, `https://staging.frikanalen.no/upload` — sharing the host with the frontend at `/` and the API at `/api`, so no upload subdomain is needed per environment. The ingress path is tusd's own `basePath` and is passed through unstripped, so tusd sees the URLs it advertises.
 
 `FK_UPLOAD_URL` in the Django settings must point at that same URL, since it is handed to the frontend as a video's `uploadUrl`.
+
+#### Upgrading past the rename
+
+The upload Deployment used to be named after the release alone; it is now suffixed `-upload`, because it is the half that owns tusd and the upload volume rather than the whole of ingest. The Service, Ingress and PersistentVolumeClaim keep the unsuffixed name — the Service is the address tusd is reached at, and renaming the claim would orphan the volume holding uploads that have not been archived yet.
+
+To Kubernetes a rename is a delete and a create, and this Deployment owns a `ReadWriteOnce` volume, so the replacement cannot attach it until the old pod has released it. Do the delete yourself rather than trusting Helm to order the two:
+
+```bash
+kubectl delete deployment/ingest --wait
+helm upgrade ingest ./chart
+```
+
+In-progress uploads survive: the volume is untouched, and a tus client resumes from the offset it left off at once the new pod is serving.
 
 ### Queue workers
 
