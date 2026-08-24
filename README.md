@@ -74,6 +74,24 @@ tusd is served at `/upload` on the main site — `https://frikanalen.no/upload`,
 
 `FK_UPLOAD_URL` in the Django settings must point at that same URL, since it is handed to the frontend as a video's `uploadUrl`.
 
+### Queue workers
+
+`workers` in the chart is a second Deployment of the same image running `python -m app.worker`, which claims jobs from django-api's ingest queue instead of serving tusd's hooks. It mounts no upload volume, and that is the point: the upload volume is `ReadWriteOnce` and therefore single-node, which is what pins the ingest pod to one replica. A worker needs only the archive, an API token and scratch space, so the pool scales freely.
+
+It has no Service and no ingress. Workers reach out to django-api and to the archive; nothing reaches in, so there is no endpoint to protect.
+
+Capacity is `replicas`, and nothing else — a worker asks for a job only when it is free, so no dispatcher has to know how many there are. It ships at zero, and a backfill is something you start deliberately:
+
+```bash
+kubectl scale deployment/ingest-workers --replicas=6
+```
+
+That is reverted by the next `helm upgrade`, which sets it back to `workers.replicaCount`; set it there for anything you want to keep. Overshooting is safe — the scheduler leaves the surplus Pending rather than overcommitting the nodes.
+
+`workers.kind` says what the pool can reach rather than what it prefers. `backfill` means its sources are in the archive; an upload's source is in the upload volume, which no worker mounts, so it must not be handed one.
+
+Scaling down mid-encode costs the encode. `SIGTERM` makes a worker stop claiming and finish the job it holds, but only within `terminationGracePeriodSeconds`; anything still running when that elapses is killed, and its lease expires so another worker picks the video up later. The default is an hour, which is also how long a node drain will wait for a worker.
+
 The SSH credentials come from a Kubernetes secret created outside the chart, by the `ingest_archive_account` role in the [infra](https://github.com/Frikanalen/infra) repository. The private key is generated on first run and stored only in that secret, so it never passes through Git or the vault. That role's README covers the `authorized_keys` restrictions on the archive host and rotation.
 
 ## Requirements
