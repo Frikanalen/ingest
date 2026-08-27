@@ -2,7 +2,6 @@ import logging
 from pathlib import Path
 from uuid import uuid4
 
-import httpx
 from fastapi import APIRouter, Depends
 from frikanalen_django_api_client.models import IngestStateEnum
 from starlette.exceptions import HTTPException
@@ -18,7 +17,7 @@ from app.api.hooks.metadata import (
 from app.api.hooks.schema.request import HookRequest
 from app.api.hooks.schema.response import FileInfoChanges, HookResponse
 from app.archive_store import ArchiveStore
-from app.django_client.service import DjangoApiService
+from app.django_client.service import DjangoApiError, DjangoApiService
 from app.ingest import Ingester
 from app.ingest_reporting import IngestErrorCode, IngestReporter
 from app.program_image import MAX_IMAGE_BYTES, ImageComplianceError, ProgramImageIngester
@@ -39,9 +38,9 @@ async def prepare_upload(
     metadata = get_upload_metadata(hook_request)
     try:
         await django_api.verify_upload_token(metadata.video_id, metadata.upload_token)
-    except httpx.HTTPStatusError as error:
+    except DjangoApiError as error:
         logger.warning("Upload token verification failed for video %s", metadata.video_id)
-        raise HTTPException(status_code=error.response.status_code, detail="Invalid upload token") from error
+        raise HTTPException(status_code=error.status_code, detail="Invalid upload token") from error
 
     sanitized_filename = secure_filename(metadata.orig_file_name)
     if not sanitized_filename:
@@ -79,7 +78,7 @@ async def ingest_program_image(
         await ProgramImageIngester(archive=archive, django_api=django_api).ingest(
             video_id=upload_meta.video_id,
             image_id=image_id,
-            role=upload_meta.image_role.value,
+            role=upload_meta.image_role,
             uploaded_file=upload_file,
         )
     except ImageComplianceError as error:

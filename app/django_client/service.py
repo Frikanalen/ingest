@@ -1,36 +1,50 @@
 from datetime import datetime
-from enum import Enum
+from http import HTTPStatus
 
 from frikanalen_django_api_client import AuthenticatedClient
 from frikanalen_django_api_client.api.videofiles import videofiles_create, videofiles_list
-from frikanalen_django_api_client.api.videos import videos_ingest_report, videos_list, videos_partial_update
+from frikanalen_django_api_client.api.videos import (
+    videos_images_create,
+    videos_ingest_report,
+    videos_list,
+    videos_partial_update,
+    videos_upload_token_verify,
+)
 from frikanalen_django_api_client.models import (
     IngestJobRequest,
     IngestStateEnum,
+    MediaTypeEnum,
     PatchedVideoRequest,
+    ProgramImageRegistrationRequest,
+    RoleEnum,
+    UploadTokenVerificationRequest,
     VideoFileRequest,
     VideoFileVariantEnum,
 )
-from frikanalen_django_api_client.types import UNSET
+from frikanalen_django_api_client.types import UNSET, Response
 
 from app.media.loudness.loudness_measurement import LoudnessMeasurement
 from app.util.pprint_object_list import pprint_object_list
 
 
-class FormatEnum(str, Enum):
-    BROADCAST = "broadcast"
-    CLOUDFLARE_ID = "cloudflare_id"
-    DASH = "dash"
-    LARGE_THUMB = "large_thumb"
-    MED_THUMB = "med_thumb"
-    ORIGINAL = "original"
-    SMALL_THUMB = "small_thumb"
-    SRT = "srt"
-    THEORA = "theora"
-    VC1 = "vc1"
+class DjangoApiError(Exception):
+    """django-api answered with something other than the success we wanted.
 
-    def __str__(self) -> str:
-        return str(self.value)
+    The generated client only raises by itself for statuses the schema does
+    not document; a documented failure -- a rejected upload token included
+    -- comes back as a parsed body instead. Callers here want the failure,
+    so it becomes one, carrying the status for whoever has an HTTP request
+    of their own to answer.
+    """
+
+    def __init__(self, status_code: int, content: bytes = b""):
+        super().__init__(f"django-api returned {status_code}: {content.decode(errors='ignore')}")
+        self.status_code = status_code
+
+
+def _expect(response: Response, status: HTTPStatus) -> None:
+    if response.status_code != status:
+        raise DjangoApiError(response.status_code, response.content)
 
 
 class DjangoApiService:
@@ -40,24 +54,26 @@ class DjangoApiService:
         self.client = client
 
     async def verify_upload_token(self, video_id: str, upload_token: str) -> None:
-        response = await self.client.get_async_httpx_client().post(
-            f"/api/videos/{video_id}/upload_token/verify", json={"uploadToken": upload_token}
+        response = await videos_upload_token_verify.asyncio_detailed(
+            int(video_id),
+            client=self.client,
+            body=UploadTokenVerificationRequest(upload_token=upload_token),
         )
-        response.raise_for_status()
+        _expect(response, HTTPStatus.NO_CONTENT)
 
     async def set_video_duration(self, video_id: str, duration: str):
         return await videos_partial_update.asyncio(
-            video_id, client=self.client, body=PatchedVideoRequest(duration=duration)
+            int(video_id), client=self.client, body=PatchedVideoRequest(duration=duration)
         )
 
     async def set_video_uploaded_time(self, video_id: str, uploaded_time: datetime):
         return await videos_partial_update.asyncio(
-            video_id, client=self.client, body=PatchedVideoRequest(uploaded_time=uploaded_time)
+            int(video_id), client=self.client, body=PatchedVideoRequest(uploaded_time=uploaded_time)
         )
 
     async def set_video_proper_import(self, video_id: str, proper_import: bool):
         return await videos_partial_update.asyncio(
-            video_id, client=self.client, body=PatchedVideoRequest(proper_import=proper_import)
+            int(video_id), client=self.client, body=PatchedVideoRequest(proper_import=proper_import)
         )
 
     async def report_ingest_state(
@@ -74,7 +90,7 @@ class DjangoApiService:
         thing as the first one did.
         """
         return await videos_ingest_report.asyncio(
-            video_id,
+            int(video_id),
             client=self.client,
             body=IngestJobRequest(
                 state=state,
@@ -91,7 +107,7 @@ class DjangoApiService:
         self,
         filename: str,
         video_id: str,
-        file_format: FormatEnum,
+        file_format: VideoFileVariantEnum,
         loudness: LoudnessMeasurement | None = None,
     ):
         """Register a file against a video, with its loudness if we have it.
@@ -104,7 +120,7 @@ class DjangoApiService:
         req = VideoFileRequest(
             filename=str(filename),
             video=int(video_id),
-            variant=VideoFileVariantEnum[file_format.name],
+            variant=file_format,
             integrated_lufs=loudness.integrated_lufs if loudness else UNSET,
             truepeak_lufs=loudness.truepeak_lufs if loudness else UNSET,
         )
@@ -114,25 +130,26 @@ class DjangoApiService:
         self,
         *,
         video_id: str,
-        role: str,
+        role: RoleEnum,
         filename: str,
-        media_type: str,
+        media_type: MediaTypeEnum,
         width: int,
         height: int,
     ) -> None:
         """Register an image only after the archive has published it."""
 
-        response = await self.client.get_async_httpx_client().post(
-            f"/api/videos/{int(video_id)}/images",
-            json={
-                "role": role,
-                "filename": filename,
-                "mediaType": media_type,
-                "width": width,
-                "height": height,
-            },
+        response = await videos_images_create.asyncio_detailed(
+            int(video_id),
+            client=self.client,
+            body=ProgramImageRegistrationRequest(
+                role=role,
+                filename=filename,
+                media_type=media_type,
+                width=width,
+                height=height,
+            ),
         )
-        response.raise_for_status()
+        _expect(response, HTTPStatus.CREATED)
 
     async def get_videos(self, limit=10):
         return (await videos_list.asyncio(client=self.client, limit=limit, ordering="-uploaded_time")).results or []
