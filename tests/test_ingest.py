@@ -13,10 +13,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
+from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.api.hooks.metadata import MetadataExtractor
 from app.archive_store import FileAlreadyArchived, SshArchiveStore
-from app.django_client.service import FormatEnum
 from app.ingest import Ingester
 from app.media.loudness.measure import measure_loudness
 from app.util.settings import SshArchiveSettings
@@ -109,7 +109,7 @@ async def ingested_with_tone(archive, django_api, work_dir, uploaded_file_with_t
     )
 
 
-def _created_file(django_api, file_format: FormatEnum):
+def _created_file(django_api, file_format: VideoFileVariantEnum):
     for call in django_api.create_video_file.await_args_list:
         if call.kwargs["file_format"] == file_format:
             return call.kwargs
@@ -121,7 +121,7 @@ async def test_records_the_originals_loudness_against_the_original(ingested_with
     """The stored figure is what playout levels to -23 LUFS from, so it has to
     describe the file as uploaded -- not the DASH output, which ingest has
     already normalized to a different target."""
-    loudness = _created_file(django_api, FormatEnum.ORIGINAL)["loudness"]
+    loudness = _created_file(django_api, VideoFileVariantEnum.ORIGINAL)["loudness"]
 
     assert loudness is not None
     assert loudness.truepeak_lufs is not None
@@ -133,7 +133,7 @@ async def test_records_the_originals_loudness_against_the_original(ingested_with
 
 @pytest.mark.asyncio
 async def test_records_no_loudness_for_a_file_with_no_audio(ingested, django_api):
-    assert _created_file(django_api, FormatEnum.ORIGINAL)["loudness"] is None
+    assert _created_file(django_api, VideoFileVariantEnum.ORIGINAL)["loudness"] is None
 
 
 @pytest.mark.asyncio
@@ -222,13 +222,13 @@ async def test_registers_archive_relative_paths_with_django(ingested, django_api
     }
 
     assert registered == {
-        FormatEnum.ORIGINAL: f"{VIDEO_ID}/original/example_video.mp4",
-        FormatEnum.LARGE_THUMB: f"{VIDEO_ID}/large_thumb/example_video.jpg",
-        FormatEnum.MED_THUMB: f"{VIDEO_ID}/med_thumb/example_video.jpg",
-        FormatEnum.SMALL_THUMB: f"{VIDEO_ID}/small_thumb/example_video.jpg",
+        VideoFileVariantEnum.ORIGINAL: f"{VIDEO_ID}/original/example_video.mp4",
+        VideoFileVariantEnum.LARGE_THUMB: f"{VIDEO_ID}/large_thumb/example_video.jpg",
+        VideoFileVariantEnum.MED_THUMB: f"{VIDEO_ID}/med_thumb/example_video.jpg",
+        VideoFileVariantEnum.SMALL_THUMB: f"{VIDEO_ID}/small_thumb/example_video.jpg",
         # Only the manifest: the media it names is reached through it, never
         # on its own.
-        FormatEnum.DASH: f"{VIDEO_ID}/dash/manifest.mpd",
+        VideoFileVariantEnum.DASH: f"{VIDEO_ID}/dash/manifest.mpd",
     }
 
 

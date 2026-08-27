@@ -3,6 +3,7 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
+from frikanalen_django_api_client.models import MediaTypeEnum, RoleEnum
 from PIL import Image, UnidentifiedImageError
 
 from app.archive_store import ArchiveStore
@@ -13,9 +14,9 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_DIMENSION = 65_535
 
 IMAGE_FORMATS = {
-    "JPEG": ("image/jpeg", ".jpg"),
-    "PNG": ("image/png", ".png"),
-    "WEBP": ("image/webp", ".webp"),
+    "JPEG": (MediaTypeEnum.IMAGEJPEG, ".jpg"),
+    "PNG": (MediaTypeEnum.IMAGEPNG, ".png"),
+    "WEBP": (MediaTypeEnum.IMAGEWEBP, ".webp"),
 }
 
 
@@ -25,7 +26,7 @@ class ImageComplianceError(ValueError):
 
 @dataclass(frozen=True)
 class ProgramImageMetadata:
-    media_type: str
+    media_type: MediaTypeEnum
     extension: str
     width: int
     height: int
@@ -74,7 +75,7 @@ class ProgramImageIngester:
         *,
         video_id: str,
         image_id: str,
-        role: str,
+        role: RoleEnum,
         uploaded_file: Path,
     ) -> None:
         metadata = await asyncio.to_thread(inspect_program_image, uploaded_file)

@@ -4,9 +4,9 @@ from logging import Logger, getLogger
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from frikanalen_django_api_client.models import IngestStateEnum
+from frikanalen_django_api_client.models import IngestStateEnum, VideoFileVariantEnum
 
-from app.django_client.service import DjangoApiService, FormatEnum
+from app.django_client.service import DjangoApiService
 from app.ingest_reporting import IngestErrorCode, IngestReporter
 from app.util.file_name_utils import derived_file_location, original_file_location
 from app.util.logging import VideoIdFilter
@@ -20,10 +20,10 @@ from .media.segmentation import segmentation_for
 from .runner import Task
 
 DESIRED_FORMATS = (
-    FormatEnum.LARGE_THUMB,
-    FormatEnum.MED_THUMB,
-    FormatEnum.SMALL_THUMB,
-    FormatEnum.DASH,
+    VideoFileVariantEnum.LARGE_THUMB,
+    VideoFileVariantEnum.MED_THUMB,
+    VideoFileVariantEnum.SMALL_THUMB,
+    VideoFileVariantEnum.DASH,
 )
 
 
@@ -161,7 +161,7 @@ class Ingester:
 
             await self.django_api.create_video_file(
                 filename=str(destination),
-                file_format=FormatEnum.ORIGINAL,
+                file_format=VideoFileVariantEnum.ORIGINAL,
                 video_id=video_id,
                 loudness=loudness,
             )
@@ -173,7 +173,7 @@ class Ingester:
     async def _process_format(
         self,
         archive: ArchiveSession,
-        file_format: FormatEnum,
+        file_format: VideoFileVariantEnum,
         metadata: FfprobeOutput,
         source_file: Path,
         video_id: str,
@@ -243,7 +243,7 @@ class Ingester:
         output_dir: Path,
         primary: Path,
         video_id: str,
-        file_format: FormatEnum,
+        file_format: VideoFileVariantEnum,
     ) -> None:
         """Copy everything one format produced into the archive, primary last.
 

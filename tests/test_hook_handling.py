@@ -2,11 +2,11 @@ import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock
 
-import httpx
 from fastapi.testclient import TestClient
 
 from app.api.hooks.schema.request import FileInfo, Header, HookEvent, HookRequest, HTTPRequest, MetaData
 from app.archive_store import LocalArchiveStore
+from app.django_client.service import DjangoApiError
 from app.main import app
 from app.util.app_state import get_archive_store, get_django_api
 from app.util.settings import DjangoApiSettingsPwdAuth, IngestAppSettings, LocalArchiveSettings, get_settings
@@ -172,11 +172,7 @@ def test_pre_create_rejects_a_non_numeric_video_id():
 
 
 def test_pre_create_forwards_upload_token_rejection():
-    django_api.verify_upload_token.side_effect = httpx.HTTPStatusError(
-        "Not Found",
-        request=httpx.Request("POST", "http://django.test/api/videos/1234/upload_token/verify"),
-        response=httpx.Response(404),
-    )
+    django_api.verify_upload_token.side_effect = DjangoApiError(404)
 
     response = client.post(HOOK_PATH, json=pre_create_request_valid.model_dump(by_alias=True))
 

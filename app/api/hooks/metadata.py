@@ -4,6 +4,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from fastapi import HTTPException
+from frikanalen_django_api_client.models import RoleEnum
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.api.hooks.schema.request import HookRequest
@@ -18,29 +19,15 @@ class UploadKind(StrEnum):
     PROGRAM_IMAGE = "program_image"
 
 
-class ImageRole(StrEnum):
-    NETWORK_LOGO = "network_logo"
-    CHANNEL_LOGO = "channel_logo"
-    SHOW_LOGO = "show_logo"
-    SHOW_STILL = "show_still"
-    EPISODE_STILL = "episode_still"
-    KEY_ART_TITLED = "key_art_titled"
-    KEY_ART_UNTITLED = "key_art_untitled"
-    BEHIND_THE_SCENES = "behind_the_scenes"
-    LOCATION = "location"
-    NEWS_EVENT = "news_event"
-    PORTRAIT_HEADSHOT = "portrait_headshot"
-    PORTRAIT_HALF_BODY = "portrait_half_body"
-    PORTRAIT_FULL_BODY = "portrait_full_body"
-    CAST_ENSEMBLE = "cast_ensemble"
-
-
 class UploadMetaData(BaseModel):
     video_id: str = Field(..., alias="videoID")
     orig_file_name: str = Field(..., alias="origFileName")
     upload_token: str = Field(..., alias="uploadToken")
     upload_kind: UploadKind = Field(UploadKind.VIDEO, alias="uploadKind")
-    image_role: ImageRole | None = Field(None, alias="imageRole")
+    # RoleEnum comes from the generated client: the roles django-api will
+    # accept are the roles worth accepting an upload for, so an unknown one
+    # is refused at the hook rather than after the file has been stored.
+    image_role: RoleEnum | None = Field(None, alias="imageRole")
 
     @model_validator(mode="after")
     def image_upload_has_a_role(self):
