@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/Frikanalen/ingest/compare/v0.1.0...v0.1.1) (2026-08-31)
+
+
+### Bug Fixes
+
+* **ci:** tag release images with the release-please version ([#23](https://github.com/Frikanalen/ingest/issues/23)) ([b01a719](https://github.com/Frikanalen/ingest/commit/b01a719d93752e078401c68a827ef61008c86589))
+
 ## 0.1.0 (2026-08-27)
 
 
