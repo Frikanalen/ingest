@@ -7,12 +7,29 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
-  packages: write  # Needed to push to ghcr.io
+  contents: write
+  pull-requests: write
+  issues: write
+  packages: write
 
 jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      created: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - name: Release PR or GitHub Release (main only)
+        id: release
+        if: ${{ github.ref == 'refs/heads/main' }}
+        uses: googleapis/release-please-action@v4
+        with:
+          release-type: python
+          package-name: ingest
+
   build:
     name: Build and push Docker image to GHCR
+    needs: release
     runs-on: ubuntu-latest
 
     steps:
@@ -39,12 +56,10 @@ jobs:
         with:
           images: ghcr.io/frikanalen/ingest
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=ref,event=tag
             type=ref,event=branch
-            type=ref,event=tag
-            type=raw,value=latest
-            type=sha
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ needs.release.outputs.tag }},enable=${{ github.ref == 'refs/heads/main' && needs.release.outputs.created == 'true' }}
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
