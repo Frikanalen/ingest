@@ -1,12 +1,14 @@
 """The terminal end of a backfill.
 
-`plan` is the whole command for now. It reads the catalogue and the archive,
-works out what every video needs, and prints it -- which is the thing worth
-having before anything else exists, because it turns "the archive has drifted"
-into a number, and that number decides whether this is a weekend or a month.
+`plan` reads the catalogue and the archive, works out what every video needs,
+and prints it. `apply` does the same and then puts those videos in the queue
+for the worker pool to drain. Neither does the work itself: what a video needs
+is decided again by whichever worker claims it, so nothing here can hand a
+worker a stale instruction, and closing the terminal stops nothing.
 
-It changes nothing. Applying a plan is the worker pool's job, and enqueueing
-work for it needs django-api's claim endpoint.
+`gc` is the exception, and has to be. Reclaiming media for a video the
+catalogue has deleted cannot go through the queue -- an ingest job belongs to a
+video, and that video is gone -- so the sweep does the work itself.
 """
 
 import argparse
@@ -20,7 +22,9 @@ from frikanalen_django_api_client import AuthenticatedClient
 
 from app.archive_store import create_archive_store
 from app.backfill.chores import CHORES, DesiredState, Plan, plan
+from app.backfill.enqueue import Enqueuer
 from app.backfill.observe import CatalogueSnapshot, Observer
+from app.backfill.sweep import DEFAULT_MAX_DELETE_FRACTION, Sweep, TooMuchGarbage
 from app.django_client.service import DjangoApiService
 from app.util.lifespan import get_token
 from app.util.settings import get_settings
@@ -28,10 +32,10 @@ from app.util.settings import get_settings
 logger = logging.getLogger("backfill")
 
 
-def _bytes(count: int) -> str:
+def _bytes(count: float) -> str:
     for unit in ("B", "kB", "MB", "GB", "TB"):
         if abs(count) < 1000 or unit == "TB":
-            return f"{count:.1f} {unit}" if unit != "B" else f"{count} B"
+            return f"{count:.0f} {unit}" if unit == "B" else f"{count:.1f} {unit}"
         count /= 1000.0
     return f"{count} B"
 
@@ -59,14 +63,10 @@ class Summary:
             self.notes[note.split(";")[0].split(" holds ")[0]] += 1
 
     def report(self) -> str:
-        lines = [
-            "",
-            f"{self.videos} videos looked at, {self.with_work} need something done.",
-        ]
+        lines = ["", f"{self.videos} videos looked at, {self.with_work} need something done."]
         if self.actions:
             lines.append("")
-            for name, count in self.actions.most_common():
-                lines.append(f"  {count:>7}  {name}")
+            lines += [f"  {count:>7}  {name}" for name, count in self.actions.most_common()]
         if self.needing_original:
             lines += [
                 "",
@@ -75,12 +75,12 @@ class Summary:
             ]
         if self.notes:
             lines += ["", "  reported, not acted on:"]
-            for note, count in self.notes.most_common():
-                lines.append(f"  {count:>7}  {note}")
+            lines += [f"  {count:>7}  {note}" for note, count in self.notes.most_common()]
         return "\n".join(lines)
 
 
-async def _run_plan(args: argparse.Namespace) -> int:
+async def _with_services(handler):
+    """Open the archive and an authenticated API client, and hand them over."""
     settings = get_settings()
 
     archive_store = create_archive_store(settings.archive)
@@ -93,18 +93,7 @@ async def _run_plan(args: argparse.Namespace) -> int:
         raise_on_unexpected_status=True,
         follow_redirects=True,
     ) as client:
-        django_api = DjangoApiService(client)
-
-        async with archive_store.open() as archive:
-            observer = Observer(archive, django_api)
-
-            logger.info("Reading the catalogue")
-            snapshot = await observer.snapshot()
-
-            video_ids = await _selection(args, observer, snapshot)
-            logger.info("Planning %d videos", len(video_ids))
-
-            return await _report(args, observer, snapshot, video_ids)
+        return await handler(settings, archive_store, DjangoApiService(client))
 
 
 async def _selection(args, observer: Observer, snapshot: CatalogueSnapshot) -> Sequence[str]:
@@ -118,27 +107,107 @@ async def _selection(args, observer: Observer, snapshot: CatalogueSnapshot) -> S
     return ids[: args.limit] if args.limit else ids
 
 
-async def _report(args, observer: Observer, snapshot: CatalogueSnapshot, video_ids: Sequence[str]) -> int:
-    desired = DesiredState.from_templates()
-    summary = Summary()
-    trashed_bytes = 0
+async def _run_plan(args: argparse.Namespace) -> int:
+    async def go(settings, archive_store, django_api):
+        async with archive_store.open() as archive:
+            observer = Observer(archive, django_api)
 
-    async for state in observer.observe_all(video_ids, snapshot):
-        result = plan(state, desired, chores=tuple(args.chore))
-        summary.add(result)
+            logger.info("Reading the catalogue")
+            snapshot = await observer.snapshot()
 
-        if result and not args.quiet:
-            print(result.describe())
+            video_ids = await _selection(args, observer, snapshot)
+            logger.info("Planning %d videos", len(video_ids))
 
-        trashed_bytes += sum(
-            entry.size for contents in state.directories.values() for entry in contents if not entry.is_dir
-        ) * (not state.in_catalogue)
+            summary = Summary()
+            wanted: list[Plan] = []
 
-    print(summary.report())
-    if trashed_bytes:
-        print(f"\n  {_bytes(trashed_bytes)} of media belongs to videos the catalogue no longer has.")
-    print("\nNothing was changed. Applying a plan needs the worker pool.")
-    return 0
+            async for state in observer.observe_all(video_ids, snapshot):
+                result = plan(state, DesiredState.from_templates(), chores=tuple(args.chore))
+                summary.add(result)
+                if result:
+                    wanted.append(result)
+                    if not args.quiet:
+                        print(result.describe())
+
+            print(summary.report())
+
+            if not args.enqueue:
+                print("\nNothing was changed. `apply` puts this work in the queue.")
+                return 0
+
+            return await _enqueue(args, django_api, wanted)
+
+    return await _with_services(go)
+
+
+async def _enqueue(args, django_api, wanted: list[Plan]) -> int:
+    if not wanted:
+        print("\nNothing to queue.")
+        return 0
+
+    destructive = [result for result in wanted if result.is_destructive]
+    if destructive and not args.yes:
+        print(
+            f"\n{len(destructive)} of these move media out of the published tree. "
+            f"Re-run with --yes once the plan above looks right."
+        )
+        return 1
+
+    report = await Enqueuer(django_api, priority=args.priority).enqueue_all(r.video_id for r in wanted)
+    print()
+    print(report.describe())
+    print("\nDrain it by scaling the pool: kubectl scale deployment/ingest-workers --replicas=N")
+    return 1 if report.failed else 0
+
+
+async def _run_gc(args: argparse.Namespace) -> int:
+    async def go(settings, archive_store, django_api):
+        sweep = Sweep(
+            archive_store,
+            django_api,
+            max_delete_fraction=args.max_delete_fraction,
+            work_dir=settings.work_dir,
+        )
+
+        try:
+            report = await sweep.run(apply=args.yes)
+        except TooMuchGarbage as refusal:
+            print(f"\nRefusing to sweep: {refusal}")
+            return 1
+
+        print(
+            f"\n{len(report.orphans)} of {report.archived} archived videos are not in the catalogue "
+            f"({report.share:.1%}), holding {_bytes(report.reclaimable_bytes)}."
+        )
+        for video_id in report.orphans[:20]:
+            print(f"  {video_id}")
+        if len(report.orphans) > 20:
+            print(f"  ... and {len(report.orphans) - 20} more")
+
+        if args.yes:
+            print(f"\n{len(report.trashed)} moved into .trash/, recoverable until purged.")
+        else:
+            print("\nNothing was changed. Pass --yes to move these into .trash/.")
+        return 0
+
+    return await _with_services(go)
+
+
+def _add_selection_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("video_id", nargs="*", help="videos to look at; omit for all of them")
+    parser.add_argument("--limit", type=int, help="stop after this many videos")
+    parser.add_argument(
+        "--chore",
+        action="append",
+        choices=list(CHORES),
+        help=(
+            "consider only these chores when deciding whether a video needs anything. "
+            "Repeatable, defaults to all of them. Note that this selects which videos "
+            "are queued, not what happens to them: a worker that claims one re-plans it "
+            "and does everything it turns out to need."
+        ),
+    )
+    parser.add_argument("-q", "--quiet", action="store_true", help="print the summary only")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -146,16 +215,32 @@ def build_parser() -> argparse.ArgumentParser:
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     planner = subcommands.add_parser("plan", help="say what the catalogue needs, and change nothing")
-    planner.add_argument("video_id", nargs="*", help="videos to look at; omit for all of them")
-    planner.add_argument("--limit", type=int, help="stop after this many videos")
-    planner.add_argument(
-        "--chore",
-        action="append",
-        choices=list(CHORES),
-        help="run only these chores; repeatable, defaults to all of them",
+    _add_selection_arguments(planner)
+    planner.set_defaults(handler=_run_plan, enqueue=False)
+
+    applier = subcommands.add_parser("apply", help="queue the work for the worker pool")
+    _add_selection_arguments(applier)
+    applier.add_argument(
+        "--priority",
+        type=int,
+        default=0,
+        help="claim order among waiting jobs; higher is sooner. Leave at 0 so a member's upload goes first.",
     )
-    planner.add_argument("-q", "--quiet", action="store_true", help="print the summary only")
-    planner.set_defaults(handler=_run_plan)
+    applier.add_argument("--yes", action="store_true", help="confirm work that moves media out of the published tree")
+    applier.set_defaults(handler=_run_plan, enqueue=True)
+
+    collector = subcommands.add_parser("gc", help="reclaim media for videos the catalogue no longer has")
+    collector.add_argument(
+        "--max-delete-fraction",
+        type=float,
+        default=DEFAULT_MAX_DELETE_FRACTION,
+        help=(
+            "refuse to sweep if more than this share of the archive is unaccounted for. "
+            "Crossing it usually means FK_API_URL and FK_ARCHIVE_DIR name different environments."
+        ),
+    )
+    collector.add_argument("--yes", action="store_true", help="actually move the orphans into .trash/")
+    collector.set_defaults(handler=_run_gc)
 
     return parser
 
@@ -164,14 +249,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 
     args = build_parser().parse_args(argv)
-    if not getattr(args, "chore", None):
+    if getattr(args, "chore", None) is None and hasattr(args, "video_id"):
         args.chore = list(CHORES)
 
-    started = asyncio.get_event_loop_policy().new_event_loop()
-    try:
-        return started.run_until_complete(args.handler(args))
-    finally:
-        started.close()
+    return asyncio.run(args.handler(args))
 
 
 if __name__ == "__main__":

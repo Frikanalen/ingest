@@ -85,16 +85,46 @@ Each is a pure function from an observed `VideoState` to the actions that would 
 
 **Nothing here deletes.** `ArchiveSession` has no way to destroy archived media: removing something is a rename into `.trash/<timestamp>/<original path>`, so putting it back is the reverse rename. Purging is a separate act, and is not built yet.
 
-### Seeing what needs doing
+### Running one
+
+`fk-backfill` needs an API token **and access to the archive**, since planning reads both. That means running it from somewhere holding the SSH key — a `kubectl exec` into a worker pod is the easy answer.
+
+Look before you leap. `plan` changes nothing:
 
 ```bash
 uv run python -m app.backfill plan --limit 50
 uv run python -m app.backfill plan 12345
 ```
 
-This reads and changes nothing. It needs an API token and access to the archive, and reports what every video would need, with a summary at the end.
+`apply` plans the same way and then puts those videos in the queue, at priority 0 so a member's upload is always claimed ahead of the backfill:
 
-Carrying a plan out is the worker pool's job — see [Queue workers](#queue-workers). Workers claim videos whose ingest job is `pending`; **putting work on that queue is not built yet**, so at present the pool has nothing to drain and `plan` is the useful half. `gc` is also not reachable from the queue: a video the catalogue has deleted has no ingest job to claim, so it needs a sweep rather than a job, and that too is still to build.
+```bash
+uv run python -m app.backfill apply --limit 50
+uv run python -m app.backfill apply            # the whole catalogue
+```
+
+It refuses without `--yes` if any of the plans move media out of the published tree, and it leaves alone any video ingest is working on right now — overwriting that job would reset somebody's upload under them.
+
+Then scale the pool and let it drain. It is safe to close the terminal: the queue is the state, and a worker re-plans each video when it claims it.
+
+```bash
+kubectl scale deployment/ingest-workers --replicas=6
+```
+
+Re-running `apply` is how you resume. The plan is derived from what is actually there, so anything already done is simply not planned again.
+
+### Reclaiming deleted videos
+
+`gc` is separate, and cannot use the queue: an ingest job belongs to a video, so a video the catalogue has deleted has no job to enqueue and none to claim. The sweep compares the whole archive against the whole catalogue and does the work itself.
+
+```bash
+uv run python -m app.backfill gc            # says what it would reclaim
+uv run python -m app.backfill gc --yes      # moves it into .trash/
+```
+
+Two guards, because this is the one operation whose blast radius is the whole archive. The catalogue read refuses to hand back a partial answer, since a short read would make the archive look like garbage in exactly the proportion it fell short by. And the sweep stops if more than `--max-delete-fraction` of the archive turns out to be unaccounted for — 2% by default.
+
+That second one is aimed at a specific mistake: pointing `FK_API_URL` at one environment and `FK_ARCHIVE_DIR` at another. Every individual decision is then locally correct — that video really is not in that catalogue — and only the total is alarming, so the total is what gets checked. If you cross it legitimately, raise it deliberately.
 
 ## Deployment
 

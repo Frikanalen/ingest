@@ -11,6 +11,7 @@ from frikanalen_django_api_client.api.videofiles import (
 )
 from frikanalen_django_api_client.api.videos import (
     videos_ingest_report,
+    videos_ingest_retrieve,
     videos_list,
     videos_partial_update,
     videos_retrieve,
@@ -95,6 +96,32 @@ class DjangoApiService:
                 percentage_done=percentage_done,
                 status_text=status_text,
                 error_code=error_code,
+            ),
+        )
+
+    async def get_ingest_job(self, video_id: str):
+        """How far ingest has got with this video.
+
+        A video nothing has ever reported on answers `pending` from an unsaved
+        row: reading does not put anything in the queue.
+        """
+        return await videos_ingest_retrieve.asyncio(int(video_id), client=self.client)
+
+    async def enqueue_ingest_job(self, video_id: str, kind: str, priority: int):
+        """Put a video in the queue for a worker to pick up.
+
+        `kind` has to be sent explicitly: a video that has never been reported
+        on has no row yet, and the column it would default to says the source
+        is a fresh upload -- which for a backfill is the one thing it is not,
+        and would leave the job claimable only by the pod that cannot do it.
+        """
+        return await videos_ingest_report.asyncio(
+            video_id,
+            client=self.client,
+            body=IngestJobRequest(
+                state=IngestStateEnum.PENDING,
+                kind=IngestKindEnum(kind),
+                priority=priority,
             ),
         )
 
