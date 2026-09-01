@@ -9,9 +9,9 @@ broken, which is worse than one that has not arrived at all.
 from pathlib import Path, PurePosixPath
 
 import pytest
+from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.archive_store import ArchiveSession
-from app.django_client.service import FormatEnum
 from app.ingest import Ingester
 
 VIDEO_ID = "12345"
@@ -48,7 +48,7 @@ def dash_output(tmp_path) -> Path:
 async def test_publishes_the_manifest_after_the_media_it_references(dash_output, ingester):
     session = RecordingSession()
 
-    await ingester._publish(session, dash_output, dash_output / "manifest.mpd", VIDEO_ID, FormatEnum.DASH)
+    await ingester._publish(session, dash_output, dash_output / "manifest.mpd", VIDEO_ID, VideoFileVariantEnum.DASH)
 
     assert [p.name for p in session.puts][-1] == "manifest.mpd"
     assert len(session.puts) == 4
@@ -58,7 +58,7 @@ async def test_publishes_the_manifest_after_the_media_it_references(dash_output,
 async def test_publishes_every_file_under_the_format_directory(dash_output, ingester):
     session = RecordingSession()
 
-    await ingester._publish(session, dash_output, dash_output / "manifest.mpd", VIDEO_ID, FormatEnum.DASH)
+    await ingester._publish(session, dash_output, dash_output / "manifest.mpd", VIDEO_ID, VideoFileVariantEnum.DASH)
 
     assert sorted(str(p) for p in session.puts) == sorted(
         f"{VIDEO_ID}/dash/{name}"
@@ -74,6 +74,6 @@ async def test_refuses_to_archive_a_format_that_nested_its_output(dash_output, i
     session = RecordingSession()
 
     with pytest.raises(NotImplementedError):
-        await ingester._publish(session, dash_output, dash_output / "manifest.mpd", VIDEO_ID, FormatEnum.DASH)
+        await ingester._publish(session, dash_output, dash_output / "manifest.mpd", VIDEO_ID, VideoFileVariantEnum.DASH)
 
     assert session.puts == []

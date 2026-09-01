@@ -1,0 +1,9 @@
+# Config for scripts/generate-client.sh.
+
+# The TV-Anytime endpoints serve application/xml, which the generator has no
+# source for -- it knows text/*, application/json and application/octet-stream
+# -- so every response on them parses as a warning and --fail-on-warning stops
+# the run. The documents are XML text, so saying so gets them generated as text
+# responses. Nothing else in the schema serves XML.
+content_type_overrides:
+  application/xml: text/xml

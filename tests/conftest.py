@@ -11,9 +11,11 @@ from pathlib import Path
 
 import pytest
 import requests
+from frikanalen_django_api_client import AuthenticatedClient
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
 
+from app.django_client.service import DjangoApiService
 from tests.get_git_root import get_git_root
 from tests.run_test_server import run_server
 from tests.utils.get_free_port import get_free_port
@@ -21,6 +23,16 @@ from tests.utils.tusd_command import TusdConfig, TusdHttpHookConfig
 from tests.utils.tusd_process import TusdProcess
 
 logger = logging.getLogger(__name__)
+
+
+@pytest.fixture
+def django_api_service(httpserver):
+    """The service talking to a stub django-api over real HTTP.
+
+    The generated client is what turns a call here into a request, so the
+    only way to pin the request it actually sends is to let it send one.
+    """
+    return DjangoApiService(AuthenticatedClient(base_url=httpserver.url_for(""), token="secret", prefix="Token"))
 
 
 @pytest.fixture(scope="session")

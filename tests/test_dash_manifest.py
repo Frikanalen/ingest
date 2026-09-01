@@ -14,8 +14,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from frikanalen_django_api_client.models import VideoFileVariantEnum
 
-from app.django_client.service import FormatEnum
 from app.media.comand_template import ProfileTemplateArguments, TemplatedCommandGenerator
 from app.media.ffprobe_schema import FfprobeOutput
 from app.media.segmentation import segmentation_for
@@ -83,7 +83,7 @@ def _make_source(path: Path, rate: str, duration: int) -> Path:
 def _build_dash(work: Path, source: Path, segmentation) -> Path:
     output_dir = work / "out"
     output_dir.mkdir()
-    command = TemplatedCommandGenerator(FormatEnum.DASH).render(
+    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(
         ProfileTemplateArguments(
             input_file=source,
             output_file=output_dir / "manifest.mpd",
