@@ -54,6 +54,50 @@ def test_falls_back_to_r_frame_rate_when_the_average_is_missing():
     assert segmentation_for(probe(r_frame_rate="60000/1001")).frame_rate == Fraction(60000, 1001)
 
 
+@pytest.mark.parametrize(
+    "average,declared,expected",
+    [
+        # The one that got out: a 25fps recording whose frame count and
+        # duration disagree about the final frame, so the measured average
+        # lands 0.001% below the rate the container declares -- enough to put
+        # 150 frames at 6.000065s instead of the 6.000000s they really are.
+        ("2295400/91817", "25/1", Fraction(25)),
+        ("60000/1001", "60000/1001", Fraction(60000, 1001)),
+        # Genuinely different rates, not one rate measured twice: believe the
+        # measurement, which is what the file actually plays at.
+        ("25/1", "50/1", Fraction(25)),
+        ("30000/1001", "1000/1", Fraction(30000, 1001)),
+    ],
+)
+def test_a_measured_rate_a_hair_off_the_declared_one_is_the_declared_one(average, declared, expected):
+    """avg_frame_rate is frame count over duration, so on a constant-rate file
+    it lands near the container's exact ratio rather than on it. Carrying that
+    near-miss forward puts a segment length in the manifest that no segment
+    has."""
+    assert segmentation_for(probe(avg_frame_rate=average, r_frame_rate=declared)).frame_rate == expected
+
+
+@pytest.mark.parametrize(
+    "average,declared",
+    [("2295400/91817", "25/1"), ("60000/1001", "60000/1001"), ("25/1", "50/1"), ("1439/60", "24/1")],
+)
+def test_the_declared_length_is_never_longer_than_the_real_one(average, declared):
+    """ffmpeg ends a segment at the first keyframe at or past the declared
+    length. Declare a hair too much and it skips that keyframe for the next
+    one: segments come out twice as long as the manifest says, and every seek
+    lands in the wrong half of the timeline."""
+    segmentation = segmentation_for(probe(avg_frame_rate=average, r_frame_rate=declared))
+
+    assert Fraction(segmentation.segment_duration_arg) <= segmentation.segment_duration
+    assert segmentation.segment_duration - Fraction(segmentation.segment_duration_arg) < Fraction(1, 1_000_000)
+
+
+def test_the_frame_rate_is_handed_over_as_an_exact_ratio():
+    """A decimal would put the same rounding back that the ratio avoids."""
+    assert segmentation_for(probe(avg_frame_rate="60000/1001")).frame_rate_arg == "60000/1001"
+    assert segmentation_for(probe(avg_frame_rate="25/1")).frame_rate_arg == "25/1"
+
+
 @pytest.mark.parametrize("nonsense", ["0/0", "0/1", "", "not-a-rate", "100000/1"])
 def test_ignores_a_frame_rate_that_cannot_be_true(nonsense):
     """Encoding is CFR, so believing a malformed file's 100000fps would try to

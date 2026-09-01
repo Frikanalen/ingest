@@ -25,6 +25,7 @@ def template_args(**overrides) -> ProfileTemplateArguments:
             "seek_s": 0.2,
             "has_audio": True,
             "loudness": None,
+            "frame_rate": "25/1",
             "gop_frames": 150,
             "segment_duration_s": "6.000000",
             **overrides,
@@ -134,6 +135,25 @@ def test_dash_encodes_at_a_constant_frame_rate():
     assert "-fps_mode cfr" in command
 
 
+def test_dash_is_told_which_constant_frame_rate():
+    """Left to infer it, ffmpeg may not settle on the rate the GOP length and
+    the segment length were worked out from -- and then the manifest describes
+    segments the encoder never produced."""
+    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args(frame_rate="60000/1001"))
+
+    assert "-r 60000/1001" in command
+
+
+def test_dash_audio_is_aac():
+    """Opus in an MP4 is silence on anything running WebKit -- which on iOS is
+    every browser, Firefox and Chrome included. AAC-LC is the one audio codec
+    every DASH client will decode."""
+    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args())
+
+    assert "-c:a aac" in command
+    assert "libopus" not in command
+
+
 def test_dash_normalizes_a_measured_source_to_the_web_target():
     """-16 LUFS is what the rest of a browser tab sounds like. Playout works
     to -23 from the figure stored against the original instead, which is why
@@ -155,11 +175,11 @@ def test_dash_normalizes_in_one_linear_pass_rather_than_riding_the_gain():
 
 
 def test_dash_resamples_after_normalizing():
-    """loudnorm outputs 192kHz, which libopus does not accept -- without a
-    resampler the encode fails outright rather than sounding wrong."""
+    """loudnorm outputs 192kHz, which the AAC encoder does not accept -- without
+    a resampler the encode fails outright rather than sounding wrong."""
     command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args(loudness=MEASURED))
 
-    assert command.index("loudnorm") < command.index("-ar 48000") < command.index("libopus")
+    assert command.index("loudnorm") < command.index("-ar 48000") < command.index("-c:a aac")
 
 
 def test_dash_leaves_the_level_alone_when_nothing_was_measured():
@@ -167,7 +187,7 @@ def test_dash_leaves_the_level_alone_when_nothing_was_measured():
     command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args(loudness=None))
 
     assert "loudnorm" not in command
-    assert "-map 0:a:0 -c:a libopus" in command
+    assert "-map 0:a:0 -c:a aac" in command
 
 
 def test_dash_does_not_normalize_a_source_with_no_measurable_peak():
@@ -193,7 +213,7 @@ def test_dash_leaves_out_the_audio_adaptation_set_when_there_is_no_audio():
 def test_dash_includes_the_audio_adaptation_set_when_there_is_audio():
     command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args(has_audio=True))
 
-    assert "-map 0:a:0 -c:a libopus" in command
+    assert "-map 0:a:0 -c:a aac" in command
     assert '-adaptation_sets "id=0,streams=v id=1,streams=a"' in command
 
 
