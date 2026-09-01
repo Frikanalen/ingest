@@ -8,15 +8,16 @@ the two paths is how the archive drifted in the first place.
 
 from functools import lru_cache
 
-from app.django_client.service import FormatEnum
+from frikanalen_django_api_client.models import VideoFileVariantEnum
+
 from app.media.comand_template import TemplatedCommandGenerator
 
 #: Produced for every video, from its original.
 DESIRED_FORMATS = (
-    FormatEnum.LARGE_THUMB,
-    FormatEnum.MED_THUMB,
-    FormatEnum.SMALL_THUMB,
-    FormatEnum.DASH,
+    VideoFileVariantEnum.LARGE_THUMB,
+    VideoFileVariantEnum.MED_THUMB,
+    VideoFileVariantEnum.SMALL_THUMB,
+    VideoFileVariantEnum.DASH,
 )
 
 #: What a file registered before profiles carried revisions reads as. No
@@ -26,7 +27,7 @@ UNTRACKED_REVISION = 0
 
 
 @lru_cache
-def current_revision(file_format: FormatEnum) -> int:
+def current_revision(file_format: VideoFileVariantEnum) -> int:
     """Which revision of `file_format` the shipped template currently is.
 
     Cached because it reads the template off disk, and a catalogue-wide plan

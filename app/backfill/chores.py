@@ -15,6 +15,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
 
+from frikanalen_django_api_client.models import VideoFileVariantEnum
+
 from app.backfill.actions import (
     Action,
     MovePath,
@@ -25,7 +27,6 @@ from app.backfill.actions import (
     UnregisterFile,
 )
 from app.backfill.state import VideoState
-from app.django_client.service import FormatEnum
 from app.formats import DESIRED_FORMATS, current_revision
 
 ORIGINAL_DIR = "original"
@@ -36,7 +37,7 @@ BROADCAST_DIR = "broadcast"
 class DesiredState:
     """What every video is supposed to have, and at which revision."""
 
-    formats: Mapping[FormatEnum, int]
+    formats: Mapping[VideoFileVariantEnum, int]
 
     @classmethod
     def from_templates(cls) -> "DesiredState":
@@ -112,7 +113,7 @@ def reconcile_sources(state: VideoState, desired: DesiredState) -> Fragment:
     original = state.contents_of(ORIGINAL_DIR)
     broadcast = state.contents_of(BROADCAST_DIR)
     broadcast_dir = PurePosixPath(state.video_id) / BROADCAST_DIR
-    rows = state.rows_for(FormatEnum.BROADCAST)
+    rows = state.rows_for(VideoFileVariantEnum.BROADCAST)
 
     if not broadcast:
         if not original:
@@ -125,7 +126,7 @@ def reconcile_sources(state: VideoState, desired: DesiredState) -> Fragment:
         return Fragment(
             state=replace(
                 state.without_directory(BROADCAST_DIR),
-                files=tuple(row for row in state.files if row.variant != FormatEnum.BROADCAST),
+                files=tuple(row for row in state.files if row.variant != VideoFileVariantEnum.BROADCAST),
             ),
             actions=(
                 TrashPath(path=broadcast_dir, reason="original/ already holds the source"),
@@ -153,10 +154,10 @@ def reconcile_sources(state: VideoState, desired: DesiredState) -> Fragment:
     retagged = tuple(
         replace(
             row,
-            variant=FormatEnum.ORIGINAL,
+            variant=VideoFileVariantEnum.ORIGINAL,
             filename=PurePosixPath(state.video_id) / ORIGINAL_DIR / row.filename.name,
         )
-        if row.variant == FormatEnum.BROADCAST
+        if row.variant == VideoFileVariantEnum.BROADCAST
         else row
         for row in state.files
     )
@@ -171,7 +172,7 @@ def reconcile_sources(state: VideoState, desired: DesiredState) -> Fragment:
             *(
                 RetagFile(
                     file_id=row.id,
-                    variant=FormatEnum.ORIGINAL,
+                    variant=VideoFileVariantEnum.ORIGINAL,
                     filename=PurePosixPath(state.video_id) / ORIGINAL_DIR / row.filename.name,
                 )
                 for row in rows
@@ -191,7 +192,7 @@ def refresh_metadata(state: VideoState, desired: DesiredState) -> Fragment:
     if not state.in_catalogue:
         return Fragment(state)
 
-    originals = state.rows_for(FormatEnum.ORIGINAL)
+    originals = state.rows_for(VideoFileVariantEnum.ORIGINAL)
     if not originals:
         return Fragment(state)
 
@@ -217,7 +218,7 @@ def produce_formats(state: VideoState, desired: DesiredState) -> Fragment:
     if not state.in_catalogue:
         return Fragment(state)
 
-    if not state.rows_for(FormatEnum.ORIGINAL):
+    if not state.rows_for(VideoFileVariantEnum.ORIGINAL):
         if state.has_archived_media:
             return Fragment(state, notes=("no original is registered; nothing can be derived",))
         return Fragment(state)

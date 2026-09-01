@@ -12,10 +12,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
+from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.api.hooks.metadata import MetadataExtractor
 from app.archive_store import ArchiveEntry, ArchiveSession
-from app.django_client.service import DjangoApiService, FormatEnum
+from app.django_client.service import DjangoApiService
 from app.media.produce import FormatProducer, SourceMedia, TranscodeFailed
 
 VIDEO_ID = "12345"
@@ -74,17 +75,17 @@ async def source(color_bars_video) -> SourceMedia:
 
 @pytest.mark.asyncio
 async def test_registers_the_revision_the_template_declared(producer, django_api, source, tmp_path):
-    await producer.produce(source, FormatEnum.LARGE_THUMB, tmp_path)
+    await producer.produce(source, VideoFileVariantEnum.LARGE_THUMB, tmp_path)
 
     [call] = django_api.create_video_file.call_args_list
     assert call.kwargs["profile_revision"] == 1
-    assert call.kwargs["file_format"] == FormatEnum.LARGE_THUMB
+    assert call.kwargs["file_format"] == VideoFileVariantEnum.LARGE_THUMB
 
 
 @pytest.mark.asyncio
 async def test_registers_only_after_every_file_is_archived(producer, archive, source, tmp_path):
     """A row that appeared first would claim a format that is not there yet."""
-    await producer.produce(source, FormatEnum.LARGE_THUMB, tmp_path)
+    await producer.produce(source, VideoFileVariantEnum.LARGE_THUMB, tmp_path)
 
     assert archive.events[-1].startswith("register")
     assert any(event.startswith("put") for event in archive.events)
@@ -92,7 +93,7 @@ async def test_registers_only_after_every_file_is_archived(producer, archive, so
 
 @pytest.mark.asyncio
 async def test_returns_where_the_primary_output_landed(producer, source, tmp_path):
-    destination = await producer.produce(source, FormatEnum.MED_THUMB, tmp_path)
+    destination = await producer.produce(source, VideoFileVariantEnum.MED_THUMB, tmp_path)
 
     assert destination == PurePosixPath(f"{VIDEO_ID}/med_thumb/{source.path.stem}.jpg")
 
@@ -102,7 +103,7 @@ async def test_a_failing_encode_registers_nothing(producer, django_api, source, 
     missing = SourceMedia.probed(VIDEO_ID, Path("/nonexistent/source.mp4"), source.metadata)
 
     with pytest.raises(TranscodeFailed):
-        await producer.produce(missing, FormatEnum.LARGE_THUMB, tmp_path)
+        await producer.produce(missing, VideoFileVariantEnum.LARGE_THUMB, tmp_path)
 
     django_api.create_video_file.assert_not_awaited()
 
@@ -132,7 +133,7 @@ async def test_create_video_file_sends_the_profile_revision(monkeypatch):
     await DjangoApiService(client=None).create_video_file(
         filename=f"{VIDEO_ID}/dash/manifest.mpd",
         video_id=VIDEO_ID,
-        file_format=FormatEnum.DASH,
+        file_format=VideoFileVariantEnum.DASH,
         profile_revision=3,
     )
 
@@ -153,7 +154,7 @@ async def test_create_video_file_omits_the_revision_when_there_is_none(monkeypat
     await DjangoApiService(client=None).create_video_file(
         filename=f"{VIDEO_ID}/original/video.mp4",
         video_id=VIDEO_ID,
-        file_format=FormatEnum.ORIGINAL,
+        file_format=VideoFileVariantEnum.ORIGINAL,
     )
 
     assert "profileRevision" not in captured["body"].to_dict()

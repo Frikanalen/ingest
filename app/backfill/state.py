@@ -9,8 +9,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import PurePosixPath
 
+from frikanalen_django_api_client.models import VideoFileVariantEnum
+
 from app.archive_store import ArchiveEntry
-from app.django_client.service import FormatEnum
 from app.formats import UNTRACKED_REVISION
 
 
@@ -19,7 +20,7 @@ class RegisteredFile:
     """A videofile row: what django-api says this video has."""
 
     id: int
-    variant: FormatEnum
+    variant: VideoFileVariantEnum
     filename: PurePosixPath
     #: Which iteration of the template produced it. UNTRACKED_REVISION means
     #: the row predates revisions being recorded, which reads as stale.
@@ -47,14 +48,14 @@ class VideoState:
     def has_archived_media(self) -> bool:
         return any(self.contents_of(name) for name in self.directories)
 
-    def rows_for(self, variant: FormatEnum) -> tuple[RegisteredFile, ...]:
+    def rows_for(self, variant: VideoFileVariantEnum) -> tuple[RegisteredFile, ...]:
         return tuple(f for f in self.files if f.variant == variant)
 
     def contents_of(self, directory: str) -> tuple[ArchiveEntry, ...]:
         """The files -- not the subdirectories -- directly inside `directory`."""
         return tuple(entry for entry in self.directories.get(directory, ()) if not entry.is_dir)
 
-    def revision_of(self, variant: FormatEnum) -> int:
+    def revision_of(self, variant: VideoFileVariantEnum) -> int:
         """The newest revision registered for `variant`.
 
         Newest rather than oldest: a format registered twice has been rebuilt,

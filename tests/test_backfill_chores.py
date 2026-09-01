@@ -8,6 +8,7 @@ table tests. No archive, no API, no ffmpeg.
 from pathlib import PurePosixPath
 
 import pytest
+from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.archive_store import ArchiveEntry
 from app.backfill.actions import (
@@ -20,14 +21,13 @@ from app.backfill.actions import (
 )
 from app.backfill.chores import DesiredState, plan
 from app.backfill.state import RegisteredFile, VideoState
-from app.django_client.service import FormatEnum
 from app.formats import UNTRACKED_REVISION
 
 VIDEO_ID = "12345"
 
 #: Small and explicit, so a test says what it depends on rather than inheriting
 #: whatever the shipped templates happen to declare today.
-DESIRED = DesiredState(formats={FormatEnum.DASH: 2, FormatEnum.LARGE_THUMB: 1})
+DESIRED = DesiredState(formats={VideoFileVariantEnum.DASH: 2, VideoFileVariantEnum.LARGE_THUMB: 1})
 
 
 def entry(path: str, is_dir: bool = False, size: int = 1024) -> ArchiveEntry:
@@ -35,7 +35,7 @@ def entry(path: str, is_dir: bool = False, size: int = 1024) -> ArchiveEntry:
 
 
 def registered(
-    variant: FormatEnum,
+    variant: VideoFileVariantEnum,
     name: str,
     revision: int = UNTRACKED_REVISION,
     lufs: float | None = -23.0,
@@ -58,9 +58,9 @@ def video(**overrides) -> VideoState:
         duration="00:10:00",
         framerate=25000,
         files=(
-            registered(FormatEnum.ORIGINAL, "source.mp4", file_id=1),
-            registered(FormatEnum.DASH, "manifest.mpd", revision=2, file_id=2),
-            registered(FormatEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
+            registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", file_id=1),
+            registered(VideoFileVariantEnum.DASH, "manifest.mpd", revision=2, file_id=2),
+            registered(VideoFileVariantEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
         ),
         directories={
             "original": (entry(f"{VIDEO_ID}/original/source.mp4"),),
@@ -103,12 +103,12 @@ def test_nothing_is_derived_for_a_video_being_collected():
 
 def test_a_format_directory_with_no_row_is_not_garbage():
     """It reads as missing to the formats chore, which rebuilds it."""
-    state = video(files=tuple(f for f in video().files if f.variant != FormatEnum.DASH))
+    state = video(files=tuple(f for f in video().files if f.variant != VideoFileVariantEnum.DASH))
 
     actions = actions_of(state)
 
     assert not any(isinstance(action, TrashPath) for action in actions)
-    assert [a.file_format for a in actions if isinstance(a, ProduceFormat)] == [FormatEnum.DASH]
+    assert [a.file_format for a in actions if isinstance(a, ProduceFormat)] == [VideoFileVariantEnum.DASH]
 
 
 # --- original / broadcast --------------------------------------------------
@@ -118,9 +118,9 @@ def broadcast_only(**overrides) -> VideoState:
     """The legacy shape: the source is there, under the name the old system used."""
     defaults = dict(
         files=(
-            registered(FormatEnum.BROADCAST, "source.mp4", file_id=7),
-            registered(FormatEnum.DASH, "manifest.mpd", revision=2, file_id=2),
-            registered(FormatEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
+            registered(VideoFileVariantEnum.BROADCAST, "source.mp4", file_id=7),
+            registered(VideoFileVariantEnum.DASH, "manifest.mpd", revision=2, file_id=2),
+            registered(VideoFileVariantEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
         ),
         directories={
             "broadcast": (entry(f"{VIDEO_ID}/broadcast/source.mp4"),),
@@ -133,7 +133,7 @@ def broadcast_only(**overrides) -> VideoState:
 
 def test_broadcast_is_trashed_when_an_original_exists():
     state = video(
-        files=(*video().files, registered(FormatEnum.BROADCAST, "source.mp4", file_id=7)),
+        files=(*video().files, registered(VideoFileVariantEnum.BROADCAST, "source.mp4", file_id=7)),
         directories={**video().directories, "broadcast": (entry(f"{VIDEO_ID}/broadcast/source.mp4"),)},
     )
 
@@ -153,7 +153,7 @@ def test_broadcast_becomes_the_original_when_there_is_no_other():
     assert move.source == PurePosixPath(f"{VIDEO_ID}/broadcast/source.mp4")
     assert move.destination == PurePosixPath(f"{VIDEO_ID}/original/source.mp4")
     assert retag.file_id == 7
-    assert retag.variant == FormatEnum.ORIGINAL
+    assert retag.variant == VideoFileVariantEnum.ORIGINAL
     assert retag.filename == PurePosixPath(f"{VIDEO_ID}/original/source.mp4")
 
 
@@ -170,12 +170,12 @@ def test_formats_are_planned_against_the_renamed_original():
     though it had -- otherwise a broadcast-only video looks sourceless and
     every derivative it needs goes unplanned."""
     state = broadcast_only(
-        files=(registered(FormatEnum.BROADCAST, "source.mp4", file_id=7),),
+        files=(registered(VideoFileVariantEnum.BROADCAST, "source.mp4", file_id=7),),
     )
 
     produced = [a.file_format for a in actions_of(state) if isinstance(a, ProduceFormat)]
 
-    assert set(produced) == {FormatEnum.DASH, FormatEnum.LARGE_THUMB}
+    assert set(produced) == {VideoFileVariantEnum.DASH, VideoFileVariantEnum.LARGE_THUMB}
 
 
 def test_unclaimed_broadcast_media_is_reported_not_moved():
@@ -204,15 +204,15 @@ def test_a_video_with_no_source_at_all_is_reported():
 def test_a_superseded_format_is_rebuilt_by_swapping_its_directory():
     state = video(
         files=(
-            registered(FormatEnum.ORIGINAL, "source.mp4", file_id=1),
-            registered(FormatEnum.DASH, "manifest.mpd", revision=1, file_id=2),
-            registered(FormatEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
+            registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", file_id=1),
+            registered(VideoFileVariantEnum.DASH, "manifest.mpd", revision=1, file_id=2),
+            registered(VideoFileVariantEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
         )
     )
 
     [produce] = [a for a in actions_of(state) if isinstance(a, ProduceFormat)]
 
-    assert produce.file_format == FormatEnum.DASH
+    assert produce.file_format == VideoFileVariantEnum.DASH
     assert produce.from_revision == 1
     assert produce.to_revision == 2
     assert produce.replacing == PurePosixPath(f"{VIDEO_ID}/dash")
@@ -221,27 +221,27 @@ def test_a_superseded_format_is_rebuilt_by_swapping_its_directory():
 def test_a_file_registered_before_revisions_existed_is_stale():
     state = video(
         files=(
-            registered(FormatEnum.ORIGINAL, "source.mp4", file_id=1),
-            registered(FormatEnum.DASH, "manifest.mpd", revision=UNTRACKED_REVISION, file_id=2),
-            registered(FormatEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
+            registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", file_id=1),
+            registered(VideoFileVariantEnum.DASH, "manifest.mpd", revision=UNTRACKED_REVISION, file_id=2),
+            registered(VideoFileVariantEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
         )
     )
 
     [produce] = [a for a in actions_of(state) if isinstance(a, ProduceFormat)]
 
-    assert produce.file_format == FormatEnum.DASH
+    assert produce.file_format == VideoFileVariantEnum.DASH
     assert produce.from_revision == UNTRACKED_REVISION
 
 
 def test_a_missing_format_is_produced_without_replacing_anything():
     state = video(
-        files=tuple(f for f in video().files if f.variant != FormatEnum.LARGE_THUMB),
+        files=tuple(f for f in video().files if f.variant != VideoFileVariantEnum.LARGE_THUMB),
         directories={k: v for k, v in video().directories.items() if k != "large_thumb"},
     )
 
     [produce] = [a for a in actions_of(state) if isinstance(a, ProduceFormat)]
 
-    assert produce.file_format == FormatEnum.LARGE_THUMB
+    assert produce.file_format == VideoFileVariantEnum.LARGE_THUMB
     assert produce.replacing is None
 
 
@@ -249,10 +249,10 @@ def test_a_rebuilt_format_takes_the_newest_revision_registered():
     """Registered twice means rebuilt, and the rebuild is what is there now."""
     state = video(
         files=(
-            registered(FormatEnum.ORIGINAL, "source.mp4", file_id=1),
-            registered(FormatEnum.DASH, "manifest.mpd", revision=1, file_id=2),
-            registered(FormatEnum.DASH, "manifest.mpd", revision=2, file_id=4),
-            registered(FormatEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
+            registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", file_id=1),
+            registered(VideoFileVariantEnum.DASH, "manifest.mpd", revision=1, file_id=2),
+            registered(VideoFileVariantEnum.DASH, "manifest.mpd", revision=2, file_id=4),
+            registered(VideoFileVariantEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
         )
     )
 
@@ -262,9 +262,9 @@ def test_a_rebuilt_format_takes_the_newest_revision_registered():
 def test_a_registered_format_missing_from_the_archive_is_rebuilt_and_reported():
     state = video(
         files=(
-            registered(FormatEnum.ORIGINAL, "source.mp4", file_id=1),
-            registered(FormatEnum.DASH, "manifest.mpd", revision=1, file_id=2),
-            registered(FormatEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
+            registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", file_id=1),
+            registered(VideoFileVariantEnum.DASH, "manifest.mpd", revision=1, file_id=2),
+            registered(VideoFileVariantEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
         ),
         directories={k: v for k, v in video().directories.items() if k != "dash"},
     )
@@ -277,7 +277,7 @@ def test_a_registered_format_missing_from_the_archive_is_rebuilt_and_reported():
 
 
 def test_nothing_is_derived_without_a_registered_original():
-    state = video(files=(registered(FormatEnum.DASH, "manifest.mpd", revision=2, file_id=2),))
+    state = video(files=(registered(VideoFileVariantEnum.DASH, "manifest.mpd", revision=2, file_id=2),))
 
     result = plan(state, DESIRED)
 
@@ -306,9 +306,9 @@ def test_missing_video_metadata_is_refreshed_from_the_original(override, expecte
 def test_a_missing_loudness_measurement_is_refreshed():
     state = video(
         files=(
-            registered(FormatEnum.ORIGINAL, "source.mp4", lufs=None, file_id=1),
-            registered(FormatEnum.DASH, "manifest.mpd", revision=2, file_id=2),
-            registered(FormatEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
+            registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", lufs=None, file_id=1),
+            registered(VideoFileVariantEnum.DASH, "manifest.mpd", revision=2, file_id=2),
+            registered(VideoFileVariantEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
         )
     )
 
@@ -323,7 +323,7 @@ def test_a_missing_loudness_measurement_is_refreshed():
 def test_a_directory_only_plan_does_not_need_the_original():
     """Several gigabytes a video rides on this being right."""
     state = video(
-        files=(*video().files, registered(FormatEnum.BROADCAST, "source.mp4", file_id=7)),
+        files=(*video().files, registered(VideoFileVariantEnum.BROADCAST, "source.mp4", file_id=7)),
         directories={**video().directories, "broadcast": (entry(f"{VIDEO_ID}/broadcast/source.mp4"),)},
     )
 
@@ -331,7 +331,7 @@ def test_a_directory_only_plan_does_not_need_the_original():
 
 
 def test_a_plan_that_transcodes_needs_the_original():
-    state = video(files=(registered(FormatEnum.ORIGINAL, "source.mp4", file_id=1),))
+    state = video(files=(registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", file_id=1),))
 
     assert plan(state, DESIRED).needs_original
 
@@ -345,7 +345,7 @@ def test_chores_can_be_selected():
 
 def test_a_plan_describes_itself():
     state = video(
-        files=(registered(FormatEnum.ORIGINAL, "source.mp4", file_id=1),),
+        files=(registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", file_id=1),),
         directories={"original": (entry(f"{VIDEO_ID}/original/source.mp4"),)},
     )
 
@@ -360,22 +360,22 @@ def test_output_nothing_claims_is_replaced_rather_than_collided_with():
     with no row. Producing into it would hit put()'s refusal to overwrite and
     fail the same way on every retry, so the rebuild has to swap it."""
     state = video(
-        files=(registered(FormatEnum.ORIGINAL, "source.mp4", file_id=1),),
+        files=(registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", file_id=1),),
     )
 
     produced = {a.file_format: a for a in actions_of(state) if isinstance(a, ProduceFormat)}
 
-    assert produced[FormatEnum.DASH].replacing == PurePosixPath(f"{VIDEO_ID}/dash")
-    assert "replacing output nothing claims" in produced[FormatEnum.DASH].describe()
+    assert produced[VideoFileVariantEnum.DASH].replacing == PurePosixPath(f"{VIDEO_ID}/dash")
+    assert "replacing output nothing claims" in produced[VideoFileVariantEnum.DASH].describe()
 
 
 def test_a_format_absent_from_both_is_produced_without_replacing_anything():
     state = video(
-        files=(registered(FormatEnum.ORIGINAL, "source.mp4", file_id=1),),
+        files=(registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", file_id=1),),
         directories={"original": (entry(f"{VIDEO_ID}/original/source.mp4"),)},
     )
 
     produced = {a.file_format: a for a in actions_of(state) if isinstance(a, ProduceFormat)}
 
-    assert produced[FormatEnum.DASH].replacing is None
-    assert "missing" in produced[FormatEnum.DASH].describe()
+    assert produced[VideoFileVariantEnum.DASH].replacing is None
+    assert "missing" in produced[VideoFileVariantEnum.DASH].describe()

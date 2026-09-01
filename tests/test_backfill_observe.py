@@ -16,7 +16,6 @@ from frikanalen_django_api_client.types import UNSET
 
 from app.archive_store import LocalArchiveStore
 from app.backfill.observe import IncompleteSnapshot, Observer
-from app.django_client.service import FormatEnum
 from app.formats import UNTRACKED_REVISION
 
 VIDEO_ID = "12345"
@@ -92,7 +91,10 @@ async def test_snapshot_groups_files_by_video(observer, django_api):
 
     snapshot = await observer.snapshot()
 
-    assert {row.variant for row in snapshot.files_for(VIDEO_ID)} == {FormatEnum.ORIGINAL, FormatEnum.DASH}
+    assert {row.variant for row in snapshot.files_for(VIDEO_ID)} == {
+        VideoFileVariantEnum.ORIGINAL,
+        VideoFileVariantEnum.DASH,
+    }
     assert len(snapshot.files_for("999")) == 1
     assert snapshot.files_for("nobody") == ()
 

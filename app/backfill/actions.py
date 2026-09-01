@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import ClassVar
 
-from app.django_client.service import FormatEnum
+from frikanalen_django_api_client.models import VideoFileVariantEnum
+
 from app.formats import UNTRACKED_REVISION
 
 
@@ -70,7 +71,7 @@ class RetagFile(Action):
     """
 
     file_id: int
-    variant: FormatEnum
+    variant: VideoFileVariantEnum
     filename: PurePosixPath
 
     def describe(self) -> str:
@@ -99,7 +100,7 @@ class UnregisterFile(Action):
 class ProduceFormat(Action):
     """Build a derived format from the original and register it."""
 
-    file_format: FormatEnum
+    file_format: VideoFileVariantEnum
     to_revision: int
     #: What is registered now. UNTRACKED_REVISION covers both "nothing" and
     #: "made before we recorded this", which want the same treatment.

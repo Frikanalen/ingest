@@ -11,8 +11,10 @@ from dataclasses import dataclass
 from logging import getLogger
 from pathlib import Path, PurePosixPath
 
+from frikanalen_django_api_client.models import VideoFileVariantEnum
+
 from app.archive_store import ArchiveSession
-from app.django_client.service import DjangoApiService, FormatEnum
+from app.django_client.service import DjangoApiService
 from app.media.comand_template import ProfileTemplateArguments, TemplatedCommandGenerator
 from app.media.ffprobe_schema import FfprobeOutput
 from app.media.loudness.loudness_measurement import LoudnessMeasurement
@@ -82,7 +84,7 @@ class FormatProducer:
     async def produce(
         self,
         source: SourceMedia,
-        file_format: FormatEnum,
+        file_format: VideoFileVariantEnum,
         scratch: Path,
         on_progress: ProgressCallback | None = None,
     ) -> PurePosixPath:
@@ -152,7 +154,7 @@ class FormatProducer:
         output_dir: Path,
         primary: Path,
         video_id: str,
-        file_format: FormatEnum,
+        file_format: VideoFileVariantEnum,
     ) -> None:
         """Copy everything one format produced into the archive, primary last.
 

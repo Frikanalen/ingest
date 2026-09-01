@@ -4,9 +4,9 @@ from logging import Logger, getLogger
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from frikanalen_django_api_client.models import IngestStateEnum
+from frikanalen_django_api_client.models import IngestStateEnum, VideoFileVariantEnum
 
-from app.django_client.service import DjangoApiService, FormatEnum
+from app.django_client.service import DjangoApiService
 from app.formats import DESIRED_FORMATS
 from app.ingest_reporting import IngestErrorCode, IngestReporter, transcode_progress_reporter
 from app.media.produce import FormatProducer, PublishFailed, SourceMedia, TranscodeFailed
@@ -95,7 +95,7 @@ class Ingester:
         self,
         producer: FormatProducer,
         source: SourceMedia,
-        file_format: FormatEnum,
+        file_format: VideoFileVariantEnum,
         scratch: Path,
         reporter: IngestReporter,
     ) -> None:
@@ -172,7 +172,7 @@ class Ingester:
 
             await self.django_api.create_video_file(
                 filename=str(destination),
-                file_format=FormatEnum.ORIGINAL,
+                file_format=VideoFileVariantEnum.ORIGINAL,
                 video_id=source.video_id,
                 loudness=source.loudness,
             )

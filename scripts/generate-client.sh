@@ -17,6 +17,7 @@ uv run --group dev openapi-python-client generate \
   --path "$SCHEMA" \
   --output-path "$OUTPUT" \
   --meta none \
+  --config openapi-python-client.yaml \
   --fail-on-warning
 
 # --meta none skips py.typed, so restore it to keep the installed package typed.

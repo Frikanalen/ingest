@@ -11,13 +11,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
+from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.archive_store import LocalArchiveStore
 from app.archive_store.base import TRASH_DIR
 from app.backfill.actions import MovePath, ProduceFormat, RefreshMetadata, RetagFile, TrashPath, UnregisterFile
 from app.backfill.apply import Applier, SourceUnavailable
 from app.backfill.chores import Plan
-from app.django_client.service import FormatEnum
 
 VIDEO_ID = "12345"
 ORIGINAL = PurePosixPath(f"{VIDEO_ID}/original/source.mp4")
@@ -82,9 +82,9 @@ async def test_moving_relocates_the_media(applier, archive_root):
 
 @pytest.mark.asyncio
 async def test_retagging_updates_the_row_rather_than_creating_one(applier, archive_root, django_api):
-    await applier.apply(plan_of(RetagFile(file_id=7, variant=FormatEnum.ORIGINAL, filename=ORIGINAL)))
+    await applier.apply(plan_of(RetagFile(file_id=7, variant=VideoFileVariantEnum.ORIGINAL, filename=ORIGINAL)))
 
-    django_api.retag_video_file.assert_awaited_once_with(7, FormatEnum.ORIGINAL, str(ORIGINAL))
+    django_api.retag_video_file.assert_awaited_once_with(7, VideoFileVariantEnum.ORIGINAL, str(ORIGINAL))
     django_api.create_video_file.assert_not_awaited()
 
 
@@ -158,7 +158,7 @@ async def test_rebuilding_a_format_swaps_the_directory(applier, archive_root, dj
     await applier.apply(
         plan_of(
             ProduceFormat(
-                file_format=FormatEnum.LARGE_THUMB,
+                file_format=VideoFileVariantEnum.LARGE_THUMB,
                 from_revision=0,
                 to_revision=1,
                 replacing=PurePosixPath(f"{VIDEO_ID}/large_thumb"),
@@ -176,7 +176,7 @@ async def test_rebuilding_a_format_swaps_the_directory(applier, archive_root, dj
 async def test_producing_a_missing_format_registers_it(applier, archive_root, django_api, color_bars_video):
     place(archive_root, ORIGINAL, color_bars_video.read_bytes())
 
-    await applier.apply(plan_of(ProduceFormat(file_format=FormatEnum.MED_THUMB, to_revision=1)))
+    await applier.apply(plan_of(ProduceFormat(file_format=VideoFileVariantEnum.MED_THUMB, to_revision=1)))
 
     assert (archive_root / VIDEO_ID / "med_thumb" / "source.jpg").exists()
     [call] = django_api.create_video_file.call_args_list
@@ -195,7 +195,7 @@ async def test_producing_over_output_nothing_claims_replaces_it(applier, archive
     await applier.apply(
         plan_of(
             ProduceFormat(
-                file_format=FormatEnum.MED_THUMB,
+                file_format=VideoFileVariantEnum.MED_THUMB,
                 to_revision=1,
                 replacing=PurePosixPath(f"{VIDEO_ID}/med_thumb"),
             )

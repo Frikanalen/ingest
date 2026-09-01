@@ -20,7 +20,7 @@ from frikanalen_django_api_client.types import UNSET
 
 from app.archive_store import ArchiveEntry, ArchiveSession
 from app.backfill.state import RegisteredFile, VideoState
-from app.django_client.service import DjangoApiService, FormatEnum
+from app.django_client.service import DjangoApiService
 from app.formats import UNTRACKED_REVISION
 
 logger = getLogger(__name__)
@@ -61,7 +61,7 @@ def _registered(row) -> RegisteredFile:
     """A videofile row, in the terms the chores reason about."""
     return RegisteredFile(
         id=row.id,
-        variant=FormatEnum(str(row.variant)),
+        variant=row.variant,
         filename=PurePosixPath(row.filename),
         profile_revision=_profile_revision(row),
         integrated_lufs=_optional(row.integrated_lufs),
