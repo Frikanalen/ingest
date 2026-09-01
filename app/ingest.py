@@ -206,6 +206,7 @@ class Ingester:
             seek_s=(duration_s * 0.25 or 30),
             has_audio=has_audio,
             loudness=loudness,
+            frame_rate=segmentation.frame_rate_arg,
             gop_frames=segmentation.gop_frames,
             segment_duration_s=segmentation.segment_duration_arg,
         )

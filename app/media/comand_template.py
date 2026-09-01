@@ -47,6 +47,10 @@ class ProfileTemplateArguments(TypedDict):
     #: otherwise declare an empty audio output has to leave it out entirely:
     #: an adaptation set with no representation in it is not valid DASH.
     has_audio: bool
+    #: The rate to encode at, as an exact ratio ("25/1"). Set explicitly so
+    #: that gop_frames really is segment_duration_s long: left to infer it,
+    #: ffmpeg may not pick the rate those two were worked out from.
+    frame_rate: str
     #: Keyframe interval, in frames. Set explicitly because libvpx places
     #: keyframes of its own otherwise, and a segmented format can only cut
     #: where a keyframe is -- see app.media.segmentation.
