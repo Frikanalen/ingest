@@ -113,6 +113,7 @@ class FormatProducer:
             loudness=source.loudness,
             gop_frames=segmentation.gop_frames,
             segment_duration_s=segmentation.segment_duration_arg,
+            frame_rate=segmentation.frame_rate_arg,
         )
 
         command = template.render(template_args)

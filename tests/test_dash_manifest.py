@@ -26,6 +26,12 @@ pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg m
 # first real upload to hit this was shot at.
 BROADCAST_RATE = "60000/1001"
 
+# What ffprobe measured on a 25fps conference recording whose frame count and
+# duration disagree about the final frame. 24.99973fps: near enough to 25 to
+# look like the rounding artefact it is, far enough to describe segments that
+# no encoder will produce.
+NEAR_MISS_RATE = "2295400/91817"
+
 
 def _probe(path: Path) -> FfprobeOutput:
     out = subprocess.run(
@@ -49,10 +55,7 @@ def _segment_durations(representation: str, media: bytes) -> list[float]:
     return durations
 
 
-@pytest.fixture(scope="module")
-def dash_output(tmp_path_factory) -> Path:
-    work = tmp_path_factory.mktemp("dash")
-    source = work / "source.mp4"
+def _make_source(path: Path, rate: str, duration: int) -> Path:
     subprocess.run(
         [
             "ffmpeg",
@@ -62,22 +65,24 @@ def dash_output(tmp_path_factory) -> Path:
             "-f",
             "lavfi",
             "-i",
-            f"testsrc2=size=320x180:rate={BROADCAST_RATE}:duration=40",
+            f"testsrc2=size=320x180:rate={rate}:duration={duration}",
             "-c:v",
             "libx264",
             "-preset",
             "ultrafast",
             "-pix_fmt",
             "yuv420p",
-            str(source),
+            str(path),
             "-y",
         ],
         check=True,
     )
+    return path
 
+
+def _build_dash(work: Path, source: Path, segmentation) -> Path:
     output_dir = work / "out"
     output_dir.mkdir()
-    segmentation = segmentation_for(_probe(source))
     command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(
         ProfileTemplateArguments(
             input_file=source,
@@ -87,12 +92,20 @@ def dash_output(tmp_path_factory) -> Path:
             seek_s=1,
             has_audio=False,
             loudness=None,
+            frame_rate=segmentation.frame_rate_arg,
             gop_frames=segmentation.gop_frames,
             segment_duration_s=segmentation.segment_duration_arg,
         )
     )
     subprocess.run(command, shell=True, check=True, capture_output=True)
     return output_dir / "manifest.mpd"
+
+
+@pytest.fixture(scope="module")
+def dash_output(tmp_path_factory) -> Path:
+    work = tmp_path_factory.mktemp("dash")
+    source = _make_source(work / "source.mp4", BROADCAST_RATE, 40)
+    return _build_dash(work, source, segmentation_for(_probe(source)))
 
 
 def test_every_representation_has_evenly_spaced_segments(dash_output):
@@ -132,3 +145,32 @@ def test_renditions_share_segment_boundaries(dash_output):
         per_rendition.append(_segment_durations(representation, media))
 
     assert all(durations == per_rendition[0] for durations in per_rendition)
+
+
+def test_a_measured_rate_a_hair_off_the_real_one_still_segments_honestly(tmp_path):
+    """The regression a real upload arrived with.
+
+    ffmpeg ends a segment at the first keyframe at or past -seg_duration. The
+    source's measured 25.0000544fps put that at 6.000065s for a GOP that is
+    really 6.000000s, so every other keyframe was a hair too early to cut on:
+    segments came out 12s long while the manifest went on declaring 6.000065s.
+    Players locate a segment by dividing, so every seek landed in the wrong
+    half of the timeline and stalled there.
+    """
+    source = _make_source(tmp_path / "source.mp4", "25", 20)
+    probe = _probe(source)
+    probe.streams[0].avg_frame_rate = NEAR_MISS_RATE
+
+    segmentation = segmentation_for(probe)
+    manifest_path = _build_dash(tmp_path, source, segmentation)
+    manifest = manifest_path.read_text()
+
+    for representation in re.findall(r'<Representation id="\d+".*?</Representation>', manifest, re.S):
+        declared = int(re.search(r'<SegmentList timescale="(\d+)" duration="(\d+)"', representation).group(2)) / 1e6
+        media = (manifest_path.parent / re.search(r"<BaseURL>([^<]+)</BaseURL>", representation).group(1)).read_bytes()
+        durations = _segment_durations(representation, media)
+
+        assert len(durations) > 2, f"segments came out {durations[0]}s long, so there are only {len(durations)}"
+        assert declared == pytest.approx(durations[0], abs=0.001), (
+            f"manifest declares {declared}s but segments are {durations[0]}s"
+        )
