@@ -93,9 +93,9 @@ async def test_an_empty_queue_claims_nothing(worker, django_api):
 
 
 @pytest.mark.asyncio
-async def test_the_worker_says_what_it_can_reach(worker, django_api):
-    """An upload's source is in a volume only one pod has, so a worker that
-    cannot reach it must not be handed one."""
+async def test_a_pool_that_names_a_queue_asks_only_for_that_queue(worker, django_api):
+    """A pool pinned to one kind is how you keep member uploads out of a lane
+    that is busy with a catalogue-wide re-encode."""
     await worker.run_once()
 
     django_api.claim_ingest_job.assert_awaited_once_with(worker="test-worker", kind="backfill")
@@ -235,8 +235,8 @@ async def test_rebuilt_files_carry_the_current_revision(worker, django_api, arch
 
 @pytest.mark.asyncio
 async def test_the_source_is_left_where_the_archive_has_it(worker, django_api, archive_root, color_bars_video):
-    """A backfill must not delete the original the way an upload deletes the
-    file tusd left behind."""
+    """The archived original is the source for every rebuild after this one, so
+    a worker reads it and never removes it."""
     original = archive_root / VIDEO_ID / "original" / "source.mp4"
     original.parent.mkdir(parents=True)
     original.write_bytes(color_bars_video.read_bytes())
@@ -253,24 +253,13 @@ async def test_the_source_is_left_where_the_archive_has_it(worker, django_api, a
 
 
 @pytest.mark.asyncio
-async def test_work_it_cannot_do_is_failed_rather_than_reported_done(worker, django_api):
-    """An upload's source is in the upload volume, which no worker mounts, and
-    no chore archives one. Claiming it and reporting success would record the
-    video as ingested having had nothing done to it."""
-    django_api.claim_ingest_job.side_effect = [SimpleNamespace(video=int(VIDEO_ID), kind="upload"), None]
+async def test_an_upload_is_serviced_like_anything_else(worker, django_api):
+    """Kind says who is waiting, not what the worker can reach. Once the hook
+    has archived the original there is nothing about an upload a worker cannot
+    do, so refusing one would be refusing work it is perfectly able to finish."""
+    django_api.claim_ingest_job.side_effect = [job(kind="upload"), None]
 
     assert await worker.run_once() is True
 
-    [failure] = [c for c in django_api.report_ingest_state.await_args_list if c.args[1] == IngestStateEnum.FAILED]
-    assert "cannot service" in failure.kwargs["status_text"]
-    assert IngestStateEnum.DONE not in reported_states(django_api)
-
-
-@pytest.mark.asyncio
-async def test_refused_work_does_not_come_straight_back(worker, django_api):
-    """Releasing it to pending would put it in front of the same worker again."""
-    django_api.claim_ingest_job.side_effect = [SimpleNamespace(video=int(VIDEO_ID), kind="upload"), None]
-
-    await worker.run_once()
-
-    assert reported_states(django_api)[-1] == IngestStateEnum.FAILED
+    assert reported_states(django_api)[-1] == IngestStateEnum.DONE
+    assert IngestStateEnum.FAILED not in reported_states(django_api)

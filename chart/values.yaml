@@ -118,11 +118,12 @@ workers:
   # something you start deliberately. `kubectl scale` is the capacity control.
   replicaCount: 0
 
-  # What this pool can reach. An upload's source is in the upload volume, which
-  # no worker mounts, so it must only claim work whose source is the archive.
-  # Leave empty to claim either, which is only right once workers can reach
-  # both.
-  kind: backfill
+  # Which queue this pool serves. Every job's source is the archive now -- the
+  # hook archives the original before it queues anything -- so this is about
+  # who is waiting rather than what the worker can reach. Empty serves both.
+  # Set it to `upload` on a second, small pool if you want member uploads in a
+  # lane that never queues behind a catalogue-wide re-encode.
+  kind: ""
 
   # How long to wait before asking again when the queue is empty.
   pollIntervalSeconds: 30

@@ -4,9 +4,10 @@ A worker asks for a job only when it has capacity for one, so nothing has to
 decide where work goes: adding a worker is starting another process, and there
 is no dispatcher, no load balancer and no back-pressure protocol between them.
 
-The same loop serves both kinds of work. A fresh upload and a video whose
-ladder predates a profile change differ in where the source file is and in
-nothing else, so both are a claim, a plan, and the plan carried out.
+The same loop serves every kind of work. A job names a video, and what that
+video needs is worked out when it is claimed rather than when it was queued,
+so nothing here has to know why the job exists -- only that its source is in
+the archive, which after the hook has done its part is true of all of them.
 """
 
 import asyncio
@@ -15,7 +16,7 @@ import signal
 from logging import getLogger
 from pathlib import Path
 
-from frikanalen_django_api_client.models import IngestKindEnum, IngestStateEnum
+from frikanalen_django_api_client.models import IngestStateEnum
 
 from app.archive_store import ArchiveError, ArchiveStore
 from app.backfill.apply import Applier, SourceUnavailable
@@ -27,17 +28,6 @@ from app.media.produce import PublishFailed, TranscodeFailed
 from app.util.logging import VideoIdFilter
 
 logger = getLogger(__name__)
-
-#: The kinds of work a worker can actually carry out, which is narrower than
-#: the kinds that exist. An upload's source is a file tusd left in the upload
-#: volume and nothing has archived yet, and no chore knows how to archive one --
-#: that step still lives in Ingester, called inline from the post-finish hook.
-#: Nothing enqueues an upload today, and the chart pins the pool to backfill
-#: anyway, so this is a guard against a worker started without a kind rather
-#: than against anything the system currently does.
-#:
-#: When uploads do move onto the queue, this is where that becomes true.
-SERVICEABLE_KINDS = frozenset({IngestKindEnum.BACKFILL})
 
 
 class Worker:
@@ -108,24 +98,8 @@ class Worker:
         logger.addFilter(VideoIdFilter(video_id))
         logger.info("Claimed video %s", video_id)
 
-        if job.kind not in SERVICEABLE_KINDS:
-            # Failed rather than released. Releasing it would put it straight
-            # back in front of the same worker, and reporting it done would be
-            # a lie that reads as success -- the video would be recorded as
-            # ingested having had nothing done to it at all.
-            await self._refuse(video_id, job.kind)
-            return True
-
         await self._work(video_id)
         return True
-
-    async def _refuse(self, video_id: str, kind) -> None:
-        detail = (
-            f"this worker cannot service {kind} jobs: the source is not in the archive. "
-            f"It can service {', '.join(sorted(SERVICEABLE_KINDS))}."
-        )
-        logger.error("video %s refused: %s", video_id, detail)
-        await IngestReporter(self.django_api, video_id).failed(IngestErrorCode.INTERNAL_ERROR, detail)
 
     async def _work(self, video_id: str) -> None:
         reporter = IngestReporter(self.django_api, video_id)

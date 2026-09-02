@@ -82,8 +82,9 @@ class WorkerSettings(BaseModel):
     )
     kind: Literal["upload", "backfill"] | None = Field(
         default=None,
-        description="Only claim jobs whose source this worker can reach. Unset claims either, which "
-        "is right for a pool that can reach both the upload volume and the archive.",
+        description="Which queue this pool serves. Every job's source is the archive, so this is "
+        "about who is waiting rather than what the worker can reach: unset serves both, which is "
+        "the normal deployment, and `upload` runs a small lane that never queues behind a backfill.",
     )
     poll_interval_s: float = Field(
         default=30.0,
