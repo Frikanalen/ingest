@@ -263,3 +263,42 @@ async def test_an_upload_is_serviced_like_anything_else(worker, django_api):
 
     assert reported_states(django_api)[-1] == IngestStateEnum.DONE
     assert IngestStateEnum.FAILED not in reported_states(django_api)
+
+
+@pytest.mark.asyncio
+async def test_an_upload_is_marked_importable_when_it_finishes(worker, django_api):
+    """The flag means "this video is everything it was supposed to be", and the
+    worker is the one that knows -- the hook returned long before any format
+    existed."""
+    django_api.claim_ingest_job.side_effect = [job(kind="upload"), None]
+
+    await worker.run_once()
+
+    django_api.set_video_proper_import.assert_awaited_once_with(VIDEO_ID, True)
+
+
+@pytest.mark.asyncio
+async def test_a_backfill_does_not_mark_anything_importable(worker, django_api):
+    """A backfill promises only that its plan ran. Flipping the flag on a
+    legacy video would publish something the catalogue is currently hiding,
+    which is an editorial decision and not one a reconciler gets to make."""
+    django_api.claim_ingest_job.side_effect = [job(kind="backfill"), None]
+
+    await worker.run_once()
+
+    django_api.set_video_proper_import.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_upload_is_not_marked_importable(worker, django_api, archive_root):
+    """Nothing was built, so nothing may be published."""
+    django_api.claim_ingest_job.side_effect = [job(kind="upload"), None]
+    django_api.get_files_for_video.return_value = files(
+        file_row(1, "original", f"{VIDEO_ID}/original/missing.mp4", revision=0)
+    )
+    (archive_root / VIDEO_ID / "original").mkdir(parents=True)
+
+    await worker.run_once()
+
+    django_api.set_video_proper_import.assert_not_awaited()
+    assert reported_states(django_api)[-1] == IngestStateEnum.FAILED

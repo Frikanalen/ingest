@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from frikanalen_django_api_client.models import IngestStateEnum
+from frikanalen_django_api_client.models import IngestKindEnum, IngestStateEnum
 
 from app.backfill.enqueue import Enqueuer
 
@@ -101,3 +101,34 @@ async def test_reading_the_state_never_creates_a_row(django_api):
 
     assert django_api.get_ingest_job.await_count == 1
     assert django_api.enqueue_ingest_job.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_queued_upload_is_left_alone(django_api):
+    """A member's upload waiting to be claimed is not idle work to be swept up.
+
+    PUTting over it would drop it to backfill priority behind everything else
+    and take away the kind the completion step keys on, so the video would
+    finish without ever being marked importable.
+    """
+    django_api.get_ingest_job.return_value = SimpleNamespace(
+        state=IngestStateEnum.PENDING, kind=IngestKindEnum.UPLOAD
+    )
+
+    report = await Enqueuer(django_api).enqueue_all(["12345"])
+
+    assert report.already_running == ["12345"]
+    django_api.enqueue_ingest_job.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_queued_backfill_is_replaced(django_api):
+    """Re-running `apply` is how you resume, so a waiting backfill is ours to
+    re-queue -- only an upload is somebody else's."""
+    django_api.get_ingest_job.return_value = SimpleNamespace(
+        state=IngestStateEnum.PENDING, kind=IngestKindEnum.BACKFILL
+    )
+
+    report = await Enqueuer(django_api).enqueue_all(["12345"])
+
+    assert report.enqueued == ["12345"]

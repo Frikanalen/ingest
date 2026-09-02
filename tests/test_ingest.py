@@ -1,8 +1,14 @@
 """End-to-end ingest against a real SSH archive.
 
-The point of these is the split the SSH archive forced: ffmpeg reads the upload
-where tusd left it and writes to local scratch, and only finished files travel
-to the archive.
+Ingest is two halves now: the hook archives the original and queues a job, and
+a worker drains it. Most of these drive both, because what matters to a member
+is the state the pair leaves behind, and a test that stopped at the hook would
+be blind to a seam that is exactly where things can go wrong. The ones that
+name `archived` are about the hook alone.
+
+The point they have always made still holds: ffmpeg reads a file from local
+disk and writes to local scratch, and only finished files travel to the
+archive.
 """
 
 import re
@@ -12,7 +18,7 @@ from pathlib import PurePosixPath
 
 import pytest
 import pytest_asyncio
-from frikanalen_django_api_client.models import VideoFileVariantEnum
+from frikanalen_django_api_client.models import IngestKindEnum, VideoFileVariantEnum
 
 from app.api.hooks.metadata import MetadataExtractor
 from app.archive_store import FileAlreadyArchived, SshArchiveStore
@@ -21,6 +27,7 @@ from app.ingest import Ingester
 from app.media.loudness.measure import measure_loudness
 from app.util.settings import SshArchiveSettings
 from tests.utils.catalogue import recording_django_api, registered_file
+from tests.utils.drain import drain_one
 from tests.utils.ssh_server import run_ssh_server
 
 VIDEO_ID = "12345"
@@ -108,8 +115,15 @@ async def metadata(uploaded_file):
 
 
 @pytest_asyncio.fixture
-async def ingested(archive, django_api, work_dir, uploaded_file, metadata):
-    await Ingester(archive=archive, django_api=django_api, work_dir=work_dir).ingest(VIDEO_ID, uploaded_file, metadata)
+async def archived(archive, django_api, work_dir, uploaded_file, metadata):
+    """The hook's half: the original archived and registered, a job queued."""
+    await Ingester(archive=archive, django_api=django_api).ingest(VIDEO_ID, uploaded_file, metadata)
+
+
+@pytest_asyncio.fixture
+async def ingested(archived, archive, django_api, work_dir):
+    """Both halves: the hook, then a worker draining what it queued."""
+    await drain_one(archive, django_api, work_dir)
 
 
 @pytest.fixture
@@ -122,9 +136,10 @@ def uploaded_file_with_tone(upload_dir, color_bars_video_with_tone):
 @pytest_asyncio.fixture
 async def ingested_with_tone(archive, django_api, work_dir, uploaded_file_with_tone):
     metadata = await MetadataExtractor().do_probe(uploaded_file_with_tone)
-    await Ingester(archive=archive, django_api=django_api, work_dir=work_dir).ingest(
+    await Ingester(archive=archive, django_api=django_api).ingest(
         VIDEO_ID, uploaded_file_with_tone, metadata
     )
+    await drain_one(archive, django_api, work_dir)
 
 
 def _created_file(django_api, file_format: VideoFileVariantEnum):
@@ -138,8 +153,14 @@ def _created_file(django_api, file_format: VideoFileVariantEnum):
 async def test_records_the_originals_loudness_against_the_original(ingested_with_tone, django_api):
     """The stored figure is what playout levels to -23 LUFS from, so it has to
     describe the file as uploaded -- not the DASH output, which ingest has
-    already normalized to a different target."""
-    loudness = _created_file(django_api, VideoFileVariantEnum.ORIGINAL)["loudness"]
+    already normalized to a different target.
+
+    Measured by the worker now, against the archived original, and written to
+    the row the hook created. The hook does not measure: the worker fetches
+    that file anyway, and two passes over the same audio for the same number
+    is one too many."""
+    django_api.set_video_file_loudness.assert_awaited_once()
+    _, loudness = django_api.set_video_file_loudness.await_args.args
 
     assert loudness is not None
     assert loudness.truepeak_lufs is not None
@@ -151,7 +172,7 @@ async def test_records_the_originals_loudness_against_the_original(ingested_with
 
 @pytest.mark.asyncio
 async def test_records_no_loudness_for_a_file_with_no_audio(ingested, django_api):
-    assert _created_file(django_api, VideoFileVariantEnum.ORIGINAL)["loudness"] is None
+    django_api.set_video_file_loudness.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -223,7 +244,9 @@ async def test_leaves_no_spool_behind(ingested, archive_root):
 
 
 @pytest.mark.asyncio
-async def test_removes_the_upload_once_it_is_safely_archived(ingested, uploaded_file, upload_dir):
+async def test_removes_the_upload_once_it_is_safely_archived(archived, uploaded_file, upload_dir):
+    """The archive holds the same bytes and the queued job reads from there, so
+    keeping the tusd copy past this point would only fill the upload volume."""
     assert not uploaded_file.exists()
     assert list(upload_dir.iterdir()) == []
 
@@ -252,7 +275,39 @@ async def test_registers_archive_relative_paths_with_django(ingested, django_api
 
 @pytest.mark.asyncio
 async def test_marks_the_import_complete(ingested, django_api):
+    """The worker's job, and only on an upload: it is the one that knows every
+    format landed."""
     django_api.set_video_proper_import.assert_awaited_once_with(VIDEO_ID, True)
+
+
+@pytest.mark.asyncio
+async def test_the_hook_does_not_mark_the_import_complete(archived, django_api):
+    """Between the hook returning and a worker finishing, the video is archived
+    but not yet everything it is supposed to be."""
+    django_api.set_video_proper_import.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_queues_the_rest_of_the_work(archived, django_api):
+    django_api.enqueue_ingest_job.assert_awaited_once()
+
+    video_id = django_api.enqueue_ingest_job.await_args.args[0]
+    assert video_id == VIDEO_ID
+    assert django_api.enqueue_ingest_job.await_args.kwargs["kind"] == IngestKindEnum.UPLOAD
+    # Above the backfill's 0, so a member's upload is claimed before a
+    # catalogue-wide re-encode that is already waiting.
+    assert django_api.enqueue_ingest_job.await_args.kwargs["priority"] > 0
+
+
+@pytest.mark.asyncio
+async def test_the_hook_archives_only_the_original(archived, archive_root, django_api):
+    """Everything else needs the original in place first, which is exactly what
+    makes it a worker's to do."""
+    assert (archive_root / VIDEO_ID / "original" / "example_video.mp4").is_file()
+    assert sorted(p.name for p in (archive_root / VIDEO_ID).iterdir()) == ["original"]
+
+    registered = [call.kwargs["file_format"] for call in django_api.create_video_file.await_args_list]
+    assert registered == [VideoFileVariantEnum.ORIGINAL]
 
 
 @pytest.mark.asyncio
@@ -275,9 +330,10 @@ async def test_builds_only_what_is_missing(archive, django_api_with_dash, work_d
     already has at the current revision is not built a second time, so a video
     that comes back through here does not collide with its own output --
     put() refuses to overwrite, by design."""
-    await Ingester(archive=archive, django_api=django_api_with_dash, work_dir=work_dir).ingest(
+    await Ingester(archive=archive, django_api=django_api_with_dash).ingest(
         VIDEO_ID, uploaded_file, metadata
     )
+    await drain_one(archive, django_api_with_dash, work_dir)
 
     built = [call.kwargs["file_format"] for call in django_api_with_dash.create_video_file.await_args_list]
 
@@ -295,10 +351,10 @@ async def test_keeps_the_upload_when_the_archive_rejects_it(
     occupied.write_bytes(b"already archived")
 
     with pytest.raises(FileAlreadyArchived):
-        await Ingester(archive=archive, django_api=django_api, work_dir=work_dir).ingest(
+        await Ingester(archive=archive, django_api=django_api).ingest(
             VIDEO_ID, uploaded_file, metadata
         )
 
     assert uploaded_file.exists()
     assert occupied.read_bytes() == b"already archived"
-    django_api.set_video_proper_import.assert_not_awaited()
+    django_api.enqueue_ingest_job.assert_not_awaited()

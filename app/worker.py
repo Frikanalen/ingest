@@ -16,7 +16,7 @@ import signal
 from logging import getLogger
 from pathlib import Path
 
-from frikanalen_django_api_client.models import IngestStateEnum
+from frikanalen_django_api_client.models import IngestKindEnum, IngestStateEnum
 
 from app.archive_store import ArchiveError, ArchiveStore
 from app.backfill.apply import Applier, SourceUnavailable
@@ -98,10 +98,10 @@ class Worker:
         logger.addFilter(VideoIdFilter(video_id))
         logger.info("Claimed video %s", video_id)
 
-        await self._work(video_id)
+        await self._work(video_id, job.kind)
         return True
 
-    async def _work(self, video_id: str) -> None:
+    async def _work(self, video_id: str, kind=None) -> None:
         reporter = IngestReporter(self.django_api, video_id)
 
         try:
@@ -120,6 +120,17 @@ class Worker:
 
                 for note in work.notes:
                     logger.warning("video %s: %s", video_id, note)
+
+            if kind == IngestKindEnum.UPLOAD:
+                # The upload contract, and only the upload's: this video is now
+                # everything it was supposed to be, so the catalogue may show
+                # it. A backfill makes no such promise -- flipping the flag on
+                # a legacy video would publish something the catalogue is
+                # currently, and perhaps deliberately, hiding.
+                #
+                # Inside the try, so a failure here is a failed job rather than
+                # an exception escaping past the DONE report.
+                await self.django_api.set_video_proper_import(video_id, True)
 
         except TranscodeFailed as e:
             await self._fail(reporter, IngestErrorCode.TRANSCODE_FAILED, e)

@@ -112,7 +112,7 @@ async def receive_hook(
             await ingest_program_image(hook_request, upload_meta, upload_file, archive, django_api)
             return {}
 
-        ingest = Ingester(archive=archive, django_api=django_api, work_dir=settings.work_dir)
+        ingest = Ingester(archive=archive, django_api=django_api)
         # One reporter for the whole run, handed to the Ingester below so that
         # the probe and the pipeline read as a single sequence of states.
         reporter = IngestReporter(django_api, upload_meta.video_id)

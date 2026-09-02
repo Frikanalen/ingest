@@ -8,9 +8,13 @@ It exposes these application endpoints:
 - `GET /internal/isAlive` is the health check.
 - `GET /watchFolder/tusFiles` and `GET /watchFolder/archive` stream directory listings as server-sent events for debugging. Filesystem changes do not start ingest jobs.
 
-For a completed upload, ingest checks the media with FFprobe and copies the source file from `FK_TUSD_DIR` to `<archive>/<video-id>/original/<filename>`. FFmpeg outputs are stored alongside it by format, currently as `<archive>/<video-id>/large_thumb/<stem>.jpg`, `<archive>/<video-id>/med_thumb/<stem>.jpg`, `<archive>/<video-id>/small_thumb/<stem>.jpg`, and `<archive>/<video-id>/dash/`. Ingest records the original and generated files, duration, upload time, and completion status in the Django API. The uploaded file is removed from `FK_TUSD_DIR` once the whole job has succeeded, so a failed ingest leaves it in place.
+For a completed upload the hook checks the media with FFprobe, copies the source file from `FK_TUSD_DIR` to `<archive>/<video-id>/original/<filename>`, registers it along with the video's duration and upload time, and queues an ingest job. Then it returns. The uploaded file is removed from `FK_TUSD_DIR` at that point, because the archive now holds the same bytes and the queued job reads from there; a failure before the file is archived leaves it in place for a retry.
 
-FFmpeg always reads the uploaded file where tusd left it and writes to local scratch space; only finished files are handed to the archive. That is what lets the archive live on another host.
+Everything after that is a [queue worker](#queue-workers)'s: loudness, framerate, and every derived format — `<archive>/<video-id>/large_thumb/<stem>.jpg`, `<archive>/<video-id>/med_thumb/<stem>.jpg`, `<archive>/<video-id>/small_thumb/<stem>.jpg` and `<archive>/<video-id>/dash/`. **A member's upload therefore depends on the worker pool being scaled above zero.** Nothing in ingest notices a job nobody claims.
+
+The split is the upload volume. It is `ReadWriteOnce`, which pins the hook's pod to a single replica; a worker mounts no upload volume, which is why the pool scales. Archiving the original is the step that turns a file only one pod can see into a file every worker can, so it is the last thing that has to happen in the request.
+
+FFmpeg always reads a file from local disk and writes to local scratch space; only finished files are handed to the archive. That is what lets the archive live on another host.
 
 ### Programme images
 
@@ -117,11 +121,15 @@ kubectl scale deployment/ingest-workers --replicas=6
 
 Re-running `apply` is how you resume. The plan is derived from what is actually there, so anything already done is simply not planned again.
 
-### What the queue is not
+### What is not on the queue
 
-Uploads do not go through it. tusd's `post-finish` hook still calls the ingest pipeline inline, exactly as it always has, so a member's upload is probed, archived and transcoded inside that request and never becomes a job. The queue exists for the backfill.
+Everything derived from a video's original goes through it, uploads included. Two things do not, both for structural reasons rather than as a transition.
 
-`IngestKind` has an `upload` value because django-api models both, but no worker can service one: an upload's source is a file in the upload volume that nothing has archived yet, and no chore knows how to archive one. A worker handed such a job fails it rather than reporting it done, since reporting success would record the video as ingested having had nothing done to it.
+**Programme images.** An ingest job is keyed on its video — one row, no history — so two images with different roles would be two pieces of work sharing one row, colliding with that video's own ingest state. An image is a ≤10 MB validation with no transcode; it gains nothing from a queue and stays in the hook.
+
+**`gc`.** An ingest job belongs to a video, so a video the catalogue has deleted has no job to enqueue and none to claim. Note it is the same *model* even so: `Sweep` runs `plan(state, desired, chores=("gc",))` through the same `Applier` a worker uses, with the CLI as the executor instead of a worker. One model, two dispatchers.
+
+`IngestKind` still has both values, but it no longer says where a job's source is — after the hook, every job's source is the archive. It says who is waiting: a member, or a reconciler. That distinction earns its keep twice. It lets a small pool serve uploads without ever queueing behind a catalogue-wide re-encode, and it gates the completion step — only an `upload` job sets `proper_import`, because only it promises the video ends importable. A backfill flipping that flag on a legacy video would publish something the catalogue is currently hiding.
 
 ### Reclaiming deleted videos
 
@@ -170,13 +178,15 @@ The old Service and Ingress go with the upgrade; Helm removes them itself, since
 
 It has no Service and no ingress. Workers reach out to django-api and to the archive; nothing reaches in, so there is no endpoint to protect.
 
-Capacity is `replicas`, and nothing else — a worker asks for a job only when it is free, so no dispatcher has to know how many there are. It ships at zero, and a backfill is something you start deliberately:
+Capacity is `replicas`, and nothing else — a worker asks for a job only when it is free, so no dispatcher has to know how many there are. **It must not be zero**: member uploads are drained by this pool, and a job nobody claims sits at `pending` indefinitely with nothing to notice or complain. It ships at two, which covers a burst of a few simultaneous uploads; scale it up for a backfill:
 
 ```bash
 kubectl scale deployment/ingest-workers --replicas=6
 ```
 
-That is reverted by the next `helm upgrade`, which sets it back to `workers.replicaCount`; set it there for anything you want to keep. Overshooting is safe — the scheduler leaves the surplus Pending rather than overcommitting the nodes.
+That is reverted by the next `helm upgrade`, which sets it back to `workers.replicaCount` — so set it there for anything you want to keep, and be aware that a routine image bump restores whatever that says. Overshooting is safe: the scheduler leaves the surplus Pending rather than overcommitting the nodes.
+
+Scaling down to zero stops uploads being processed. It does not fail them — the jobs wait, and are claimed whenever a worker comes back — but nothing tells the member, and `pending` is indistinguishable from a video nobody has uploaded to yet.
 
 `workers.kind` says which queue the pool serves. Every job's source is the archive — the hook archives the original before it queues anything — so this is about who is waiting rather than what a worker can reach. Empty serves both, which is the normal deployment; setting it to `upload` on a second, small pool is how you keep a member's upload out of a lane busy with a catalogue-wide re-encode.
 

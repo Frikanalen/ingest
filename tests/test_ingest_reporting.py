@@ -19,6 +19,7 @@ from app.ingest import Ingester
 from app.ingest_reporting import IngestErrorCode, IngestReporter
 from app.util.settings import SshArchiveSettings
 from tests.utils.catalogue import recording_django_api
+from tests.utils.drain import drain_one
 from tests.utils.ssh_server import run_ssh_server
 
 VIDEO_ID = "12345"
@@ -96,11 +97,30 @@ async def metadata(uploaded_file):
 async def test_a_successful_ingest_walks_from_archiving_to_done(
     archive, django_api, work_dir, uploaded_file, metadata, reported
 ):
-    await Ingester(archive=archive, django_api=django_api, work_dir=work_dir).ingest(VIDEO_ID, uploaded_file, metadata)
+    """The walk now spans both halves, and the member sees one sequence
+    regardless of which process wrote each step."""
+    await Ingester(archive=archive, django_api=django_api).ingest(VIDEO_ID, uploaded_file, metadata)
+    await drain_one(archive, django_api, work_dir)
 
     assert reported()[0] == IngestStateEnum.ARCHIVING
     assert reported()[-1] == IngestStateEnum.DONE
     assert IngestStateEnum.TRANSCODING in reported()
+
+
+@pytest.mark.asyncio
+async def test_the_hook_leaves_the_video_queued_rather_than_done(
+    archive, django_api, work_dir, uploaded_file, metadata, reported
+):
+    """Between the hook returning and a worker claiming, the honest answer is
+    `pending`. Reporting DONE here would tell a member their video was ready
+    when nothing had been built yet."""
+    await Ingester(archive=archive, django_api=django_api).ingest(VIDEO_ID, uploaded_file, metadata)
+
+    assert reported()[-1] == IngestStateEnum.ARCHIVING
+    assert IngestStateEnum.DONE not in reported()
+
+    queued = await django_api.get_ingest_job(VIDEO_ID)
+    assert queued.state == IngestStateEnum.PENDING
 
 
 @pytest.mark.asyncio
@@ -111,7 +131,8 @@ async def test_transcoding_progress_tracks_dashs_own_position(archive, django_ap
     100x. So there is no ladder of format weights to keep in step with
     reality any more -- entering TRANSCODING reports nothing until DASH's
     own -progress stream starts advancing it, straight to 100 at the end."""
-    await Ingester(archive=archive, django_api=django_api, work_dir=work_dir).ingest(VIDEO_ID, uploaded_file, metadata)
+    await Ingester(archive=archive, django_api=django_api).ingest(VIDEO_ID, uploaded_file, metadata)
+    await drain_one(archive, django_api, work_dir)
 
     percentages = [
         call.kwargs["percentage_done"]
@@ -134,7 +155,7 @@ async def test_a_failed_archive_is_reported_with_a_code(
     occupied.write_bytes(b"already archived")
 
     with pytest.raises(FileAlreadyArchived):
-        await Ingester(archive=archive, django_api=django_api, work_dir=work_dir).ingest(
+        await Ingester(archive=archive, django_api=django_api).ingest(
             VIDEO_ID, uploaded_file, metadata
         )
 
@@ -152,7 +173,8 @@ async def test_a_report_that_cannot_be_delivered_does_not_stop_the_ingest(
     """django-api being down must cost us a status line, not the video."""
     django_api.report_ingest_state.side_effect = RuntimeError("django-api is down")
 
-    await Ingester(archive=archive, django_api=django_api, work_dir=work_dir).ingest(VIDEO_ID, uploaded_file, metadata)
+    await Ingester(archive=archive, django_api=django_api).ingest(VIDEO_ID, uploaded_file, metadata)
+    await drain_one(archive, django_api, work_dir)
 
     django_api.set_video_proper_import.assert_awaited_once_with(VIDEO_ID, True)
 

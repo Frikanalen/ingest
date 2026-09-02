@@ -111,12 +111,19 @@ work:
 # serving tusd's hooks. It mounts no upload volume, which is what frees it from
 # the single-node constraint the ingest pod has, and it needs no Service or
 # ingress because it only ever reaches out.
+#
+# It is on the member-upload path: the hook archives the original and queues a
+# job, and this is what carries that job out. Scaling it to zero stops uploads
+# being processed at all.
 workers:
   enabled: true
 
-  # Zero by default: the pool costs nothing at rest, and a backfill is
-  # something you start deliberately. `kubectl scale` is the capacity control.
-  replicaCount: 0
+  # Member uploads are drained by this pool, so it must not be zero: a video
+  # whose job nobody claims sits at `pending` indefinitely, and nothing in
+  # ingest will notice or complain. Two is enough for a burst of a few
+  # simultaneous uploads; raise it here rather than with `kubectl scale`,
+  # which the next `helm upgrade` reverts to whatever this says.
+  replicaCount: 2
 
   # Which queue this pool serves. Every job's source is the archive now -- the
   # hook archives the original before it queues anything -- so this is about
@@ -221,11 +228,10 @@ resources:
     # a two-hour upload costs about the same as a two-minute one.
     memory: "1Gi"
   limits:
-    # A backstop against a runaway, not a working limit. Nothing bounds how
-    # many ingests run at once -- tusd fires post-finish per completed upload
-    # and each is handled inline -- so this has to cover the concurrency you
-    # expect to see, at ~1Gi apiece, or the second simultaneous upload is
-    # OOMKilled rather than merely slow.
+    # A backstop against a runaway, not a working limit. This pod no longer
+    # transcodes -- it archives the original and queues a job, and the workers
+    # do the rest -- so the ladder's ~1Gi apiece is their problem now, bounded
+    # by their replica count. What is left here is ffprobe and an SFTP put.
     memory: "4Gi"
 
 podAnnotations:
