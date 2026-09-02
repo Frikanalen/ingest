@@ -1,0 +1,49 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same branch makes the run in flight irrelevant.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest and ruff
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # The runner image does not ship ffmpeg, and the suite shells out to
+      # ffmpeg/ffprobe to build its fixture videos and to probe them.
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      # tests/conftest.py imports frikanalen_django_api_client at module level.
+      # The client is generated from the committed schema and is gitignored, so
+      # without this step collection fails before a single test runs.
+      - name: Generate API client
+        run: ./scripts/generate-client.sh
+
+      - name: Run tests
+        run: uv run pytest
+
+      - name: Lint
+        run: uv run ruff check
