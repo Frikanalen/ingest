@@ -120,12 +120,14 @@ class FormatProducer:
         self.logger.debug("Generated command: %s", command)
 
         try:
+            # run(), not execute(): the only thing on this command's stdout is
+            # the progress we are already reporting as it arrives.
             await Task(
                 command,
                 duration_s=source.duration_s,
                 passes=template.metadata.passes,
                 on_progress=on_progress,
-            ).execute()
+            ).run()
         except Exception as e:
             self.logger.error("Failed to produce %s: %s", file_format, e)
             raise TranscodeFailed(str(e)) from e

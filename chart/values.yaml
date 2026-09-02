@@ -156,6 +156,10 @@ workers:
   resources:
     requests:
       cpu: "4"
+      # A ladder's encoder buffers, sized by resolution and not by duration --
+      # see the note on the ingest pod's resources below. Nothing a worker
+      # holds grows with the length of what it is encoding: ffmpeg's progress
+      # stream is parsed and dropped as it arrives rather than accumulated.
       memory: "1Gi"
     limits:
       memory: "4Gi"
