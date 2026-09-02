@@ -35,8 +35,15 @@ dev = [
 
 [tool.ruff]
 line-length = 120
-# generated code files
-exclude = ["app/tus_hook/hook_schema.py", "app/ffprobe_schema.py"]
+# Generated code files. These are committed, but they are the output of
+# scripts/generate-hook-types.sh, so any lint fixed here is undone by the next
+# regeneration. Both previous entries named paths that no longer exist; these
+# are where datamodel-codegen actually writes today.
+exclude = [
+    "app/api/hooks/schema/request.py",
+    "app/api/hooks/schema/response.py",
+    "app/media/ffprobe_schema.py",
+]
 [tool.ruff.lint]
 extend-select = [
     "I",     # isort: import sorting

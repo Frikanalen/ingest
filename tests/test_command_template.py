@@ -36,7 +36,10 @@ def template_args(**overrides) -> ProfileTemplateArguments:
 def test_large_thumb_command_looks_as_expected():
     template = TemplatedCommandGenerator(VideoFileVariantEnum.LARGE_THUMB)
     command = template.render(template_args(output_file=Path("./it would be weird for this to be a file huh")))
-    expected_command = 'ffmpeg -nostats -ss 0.2 -i "hello" -y -vf scale=720:-1 -aspect 16:9 -frames:v 1 "it would be weird for this to be a file huh"'
+    expected_command = (
+        'ffmpeg -nostats -ss 0.2 -i "hello" -y -vf scale=720:-1 -aspect 16:9 '
+        '-frames:v 1 "it would be weird for this to be a file huh"'
+    )
     assert command == expected_command, f"Expected: {expected_command}, but got: {command}"
 
 
