@@ -70,13 +70,21 @@ class MetadataExtractor:
         return FfprobeOutput.model_validate_json(data)
 
     async def assert_compliance(self, upload_file: Path) -> FfprobeOutput:
-        try:
-            metadata = await self.do_probe(upload_file)
-            assert metadata.format.nb_streams > 0, "File has no streams"
-            assert metadata.format.duration is not None, "File metadata does not contain duration"
-            assert float(metadata.format.duration) > 5, "File duration must be greater than 5 seconds"
-        except AssertionError as e:
-            raise ComplianceError(e) from e
+        """Refuse an upload that does not meet the rules a member is told about.
+
+        These are raised, not asserted: `python -O` deletes an `assert`, and a
+        gate that a runtime flag can remove is the wrong shape for the only
+        thing standing between an unusable file and the archive. The messages
+        are load-bearing -- they reach the uploader as the detail of a
+        NOT_COMPLIANT report -- so they are unchanged.
+        """
+        metadata = await self.do_probe(upload_file)
+        if metadata.format.nb_streams <= 0:
+            raise ComplianceError("File has no streams")
+        if metadata.format.duration is None:
+            raise ComplianceError("File metadata does not contain duration")
+        if float(metadata.format.duration) <= 5:
+            raise ComplianceError("File duration must be greater than 5 seconds")
         return metadata
 
 
