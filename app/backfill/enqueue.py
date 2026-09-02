@@ -17,7 +17,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from logging import getLogger
 
-from frikanalen_django_api_client.models import IngestStateEnum
+from frikanalen_django_api_client.models import IngestKindEnum, IngestStateEnum
 
 from app.django_client.service import DjangoApiService
 
@@ -33,6 +33,28 @@ ACTIVE_STATES = frozenset(
         IngestStateEnum.TRANSCODING,
     }
 )
+
+#: Where a member's upload goes in relative to a backfill, which goes in at 0.
+#: Claiming does not preempt -- it hands out the highest-priority job that is
+#: waiting, not one already in progress -- so this decides what a free worker
+#: picks up next rather than interrupting an encode.
+UPLOAD_PRIORITY = 100
+
+
+def is_someone_elses(job) -> bool:
+    """Whether this job belongs to work already under way.
+
+    Two cases. A job in an active state is held by a worker right now. And a
+    queued upload has not been claimed yet but is still somebody's: PUTting
+    over it would drop it to backfill priority behind everything else and take
+    away the kind the completion step keys on, so the video would eventually
+    finish without ever being marked importable -- and the member would watch
+    their upload go back to the end of the queue.
+    """
+    if job.state in ACTIVE_STATES:
+        return True
+
+    return getattr(job, "kind", None) == IngestKindEnum.UPLOAD and job.state == IngestStateEnum.PENDING
 
 #: Reads and writes are small and independent, so they overlap; the cap is
 #: politeness toward django-api rather than a limit of ours.
@@ -100,7 +122,7 @@ class Enqueuer:
         async with self._slots:
             job = await self.django_api.get_ingest_job(video_id)
 
-            if job is not None and job.state in ACTIVE_STATES:
+            if job is not None and is_someone_elses(job):
                 logger.info("Leaving video %s alone: ingest reports %s", video_id, job.state)
                 return False
 

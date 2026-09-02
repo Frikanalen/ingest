@@ -15,6 +15,8 @@ else is still an AsyncMock, so call assertions work as they always did.
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from frikanalen_django_api_client.models import IngestStateEnum
+
 from app.formats import UNTRACKED_REVISION
 
 
@@ -69,10 +71,43 @@ def recording_django_api(video_id: str, files: list[SimpleNamespace] | None = No
     async def get_files_for_video(_video_id):
         return SimpleNamespace(count=len(rows), results=list(rows))
 
+    # The queue, such as it is: one job per video, which is what django-api
+    # holds too. Enough for a test to hand a worker the job the hook just
+    # queued and watch the two halves meet.
+    queue: dict[str, SimpleNamespace] = {}
+
+    async def enqueue_ingest_job(a_video_id, kind, priority):
+        queue[str(a_video_id)] = SimpleNamespace(
+            video=int(a_video_id),
+            kind=kind,
+            priority=priority,
+            state=IngestStateEnum.PENDING,
+        )
+
+    async def get_ingest_job(a_video_id):
+        return queue.get(str(a_video_id))
+
+    async def claim_ingest_job(worker, kind=None):
+        """Hand out the highest-priority waiting job, as the real endpoint does."""
+        waiting = [
+            job
+            for job in queue.values()
+            if job.state == IngestStateEnum.PENDING and (kind is None or job.kind == kind)
+        ]
+        if not waiting:
+            return None
+
+        claimed = max(waiting, key=lambda job: job.priority)
+        claimed.state = IngestStateEnum.PROBING
+        return claimed
+
     api.create_video_file.side_effect = create_video_file
     api.set_video_duration.side_effect = set_video_duration
     api.set_video_framerate.side_effect = set_video_framerate
     api.get_video.side_effect = get_video
     api.get_files_for_video.side_effect = get_files_for_video
+    api.enqueue_ingest_job.side_effect = enqueue_ingest_job
+    api.get_ingest_job.side_effect = get_ingest_job
+    api.claim_ingest_job.side_effect = claim_ingest_job
 
     return api
