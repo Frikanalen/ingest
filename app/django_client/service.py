@@ -266,14 +266,31 @@ class DjangoApiService:
             body=PatchedVideoRequest(framerate=framerate_milli),
         )
 
-    async def list_videos_page(self, limit: int, offset: int):
+    async def list_videos_page(self, limit: int, offset: int, *, proper_import: bool):
         """One page of the catalogue, ordered so paging is stable.
 
         Ordered by id rather than by upload time: a backfill pages through the
         whole catalogue while uploads are still arriving, and paging by
         anything that new rows sort into shifts rows between pages under you.
+
+        `proper_import` has no default on purpose. django-api's own default,
+        when the parameter is omitted, is true -- the endpoint then returns
+        only videos whose ingest finished, which is the public catalogue and
+        not the whole database. That is a sensible default for a public list
+        and a dangerous one here: the caller that reads this is building the
+        picture gc uses to decide which archived media no longer belongs to
+        any video, and it reads absence as permission to trash. Omitting the
+        filter made every in-flight and every failed ingest look deleted. So
+        there is nothing to omit -- ask for a half, and if you want the whole
+        database ask for both.
         """
-        return await videos_list.asyncio(client=self.client, limit=limit, offset=offset, ordering="id")
+        return await videos_list.asyncio(
+            client=self.client,
+            limit=limit,
+            offset=offset,
+            ordering="id",
+            proper_import=proper_import,
+        )
 
     async def list_video_files_page(self, limit: int, offset: int):
         return await videofiles_list.asyncio(client=self.client, limit=limit, offset=offset, ordering="id")

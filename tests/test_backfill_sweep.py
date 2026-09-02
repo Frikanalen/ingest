@@ -18,15 +18,22 @@ from app.backfill.observe import IncompleteSnapshot
 from app.backfill.sweep import Sweep, TooMuchGarbage
 
 
-def video_row(video_id):
-    return SimpleNamespace(id=video_id, duration="00:10:00", framerate=25000)
+def video_row(video_id, proper_import=True):
+    return SimpleNamespace(id=video_id, duration="00:10:00", framerate=25000, proper_import=proper_import)
 
 
 def pager(rows, count=None):
-    total = len(rows) if count is None else count
+    """Pages like django-api, and filters on `proper_import` like it too.
 
-    async def fetch(limit: int, offset: int):
-        return SimpleNamespace(count=total, results=rows[offset : offset + limit])
+    The filter is the point: omitting it there returns only videos whose
+    ingest finished, so a mock that ignored it would let the sweep look
+    correct while production trashed every upload still in flight.
+    """
+
+    async def fetch(limit: int, offset: int, *, proper_import=None):
+        matching = rows if proper_import is None else [row for row in rows if row.proper_import is proper_import]
+        total = len(matching) if count is None else count
+        return SimpleNamespace(count=total, results=matching[offset : offset + limit])
 
     return fetch
 
@@ -184,3 +191,46 @@ async def test_the_archives_own_directories_are_never_swept(sweep, archive_root)
 
     assert report.orphans == []
     assert (archive_root / ".spool" / "2" / "original" / "partial.mp4").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_video_still_being_ingested_is_not_an_orphan(sweep, archive_root, catalogue):
+    """The archive holds the original before ingest finishes, and django-api's
+    video list omits unfinished videos unless asked for them. Read only that
+    list and a video part-way through ingest is indistinguishable from media
+    for a video somebody deleted -- so the sweep trashes the original out from
+    under the transcode that is still running."""
+    place(archive_root, "8842/original/source.mp4")
+    catalogue.list_videos_page = pager(
+        [video_row(i) for i in range(1, CATALOGUE_SIZE + 1)] + [video_row(8842, proper_import=False)]
+    )
+
+    report = await sweep.run(apply=True)
+
+    assert report.orphans == []
+    assert (archive_root / "8842" / "original" / "source.mp4").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_video_whose_ingest_failed_is_not_an_orphan(sweep, archive_root, catalogue):
+    """`proper_import` stays false for good once an ingest fails, so this is
+    not a narrow window -- such a video is gc-eligible forever."""
+    place(archive_root, "8842/original/source.mp4")
+    catalogue.list_videos_page = pager(
+        [video_row(i) for i in range(1, CATALOGUE_SIZE + 1)] + [video_row(8842, proper_import=False)]
+    )
+
+    await sweep.run(apply=True)
+
+    assert not (archive_root / TRASH_DIR).exists()
+
+
+@pytest.mark.asyncio
+async def test_a_video_the_catalogue_really_has_dropped_is_still_reclaimed(sweep, archive_root):
+    """The other half of the same change: widening what counts as "exists"
+    must not stop gc doing the job it is for."""
+    place(archive_root, "8842/original/orphan.mp4")
+
+    report = await sweep.run(apply=True)
+
+    assert report.trashed == ["8842"]

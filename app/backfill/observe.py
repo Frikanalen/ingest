@@ -1,11 +1,11 @@
 """Finding out what is actually there.
 
-Two sources, fetched differently. django-api is read in bulk -- one paginated
+Two sources, fetched differently. django-api is read in bulk -- a paginated
 pass over the videos and one over the videofiles gives the whole catalogue, and
-asking it per video would be thousands of round trips to learn what two queries
-already said. The archive is read per video, because there is no bulk form of
-"what is in this directory" and the answer is only wanted for videos something
-is going to be done to.
+asking it per video would be thousands of round trips to learn what a few
+queries already said. The archive is read per video, because there is no bulk
+form of "what is in this directory" and the answer is only wanted for videos
+something is going to be done to.
 
 Nothing here decides anything. What to do about what was found is chores' job.
 """
@@ -13,6 +13,7 @@ Nothing here decides anything. What to do about what was found is chores' job.
 import asyncio
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from functools import partial
 from logging import getLogger
 from pathlib import PurePosixPath
 
@@ -85,6 +86,10 @@ class CatalogueSnapshot:
     than a request that might fail for its own reasons.
     """
 
+    #: Every video django-api has, keyed by id, whether or not its ingest
+    #: finished -- deliberately not the public catalogue. Absence from this
+    #: mapping is what gc reads as "no such video, reclaim its media", so it
+    #: has to mean the video does not exist, not that it is not ready yet.
     videos: Mapping[str, CatalogueVideo] = field(default_factory=dict)
     files: Mapping[str, tuple[RegisteredFile, ...]] = field(default_factory=dict)
 
@@ -108,13 +113,33 @@ class Observer:
         return CatalogueSnapshot(videos=videos, files=files)
 
     async def _all_videos(self) -> dict[str, CatalogueVideo]:
+        """Every video django-api has, finished ingest or not.
+
+        Two passes, because `proper_import` is a boolean filter with no value
+        meaning "either" -- and because omitting it does not mean "either", it
+        means true. One unfiltered-looking call returns the public catalogue,
+        which is every video whose ingest finished. Everything mid-ingest and
+        everything whose ingest ever failed is missing from it, and a video
+        missing from here is a video gc trashes the archived media of.
+
+        The order of the two passes is the interesting part. They are separate
+        requests and so separate moments, and a video that changes state in
+        between is only seen if it lands in the pass that has not run yet. The
+        transition that actually happens is an ingest finishing, false -> true:
+        read unfinished first and such a video was already in hand before it
+        moved; read finished first and it is in neither page -- which is this
+        same bug, reintroduced as a race and far harder to see.
+        """
         videos: dict[str, CatalogueVideo] = {}
 
-        async for row in self._pages(self.django_api.list_videos_page, "videos"):
-            videos[str(row.id)] = CatalogueVideo(
-                duration=_optional(getattr(row, "duration", None)),
-                framerate=_optional(getattr(row, "framerate", None)),
-            )
+        for proper_import, what in ((False, "unfinished videos"), (True, "finished videos")):
+            fetch = partial(self.django_api.list_videos_page, proper_import=proper_import)
+
+            async for row in self._pages(fetch, what):
+                videos[str(row.id)] = CatalogueVideo(
+                    duration=_optional(getattr(row, "duration", None)),
+                    framerate=_optional(getattr(row, "framerate", None)),
+                )
         return videos
 
     async def _all_files(self) -> dict[str, tuple[RegisteredFile, ...]]:
