@@ -9,7 +9,13 @@ from watchdog.observers.polling import PollingObserver as Observer
 
 from app.api.debug.watch_folder.server_sent_event import ServerSentEvent
 
+logger = logging.getLogger(__name__)
+
 _change_event = asyncio.Event()
+
+# One observer for the process, created on start rather than at import so that
+# nothing is scheduled unless FK_DEBUG asked for it.
+_observer: Observer | None = None
 
 
 class ChangeHandler(FileSystemEventHandler):
@@ -22,22 +28,36 @@ class ChangeHandler(FileSystemEventHandler):
         self.loop.call_soon_threadsafe(_change_event.set)
 
 
-_observer = Observer(timeout=1.0)
+def start_watchfolder(watchdir: Path) -> None:
+    """Watch `watchdir` recursively, waking `watch_directory` on any change.
 
-
-def start_watchfolder(watchdir: Path | None = None):
-    print(f"Starting directory watcher for {watchdir}")
-    _observer.schedule(ChangeHandler(asyncio.get_running_loop()), path=watchdir, recursive=True)
-    _observer.start()
-
-
-def stop_watch_folder():
+    This is a debug facility and is expensive enough that it must stay one.
+    `PollingObserver` does not use inotify -- it walks the tree and stats every
+    entry, and `timeout=1.0` means it does that once a second, forever, in a
+    thread. Recursively, over what in production is a 200 GiB volume shared
+    with tusd, inside the pod serving tusd's hooks. Only `FK_DEBUG` turns it on.
     """
-    Stop the directory watcher observer cleanly.
-    """
-    print("Stopping directory watcher")
+    global _observer
+    if _observer is not None:
+        return
+
+    logger.info("Starting directory watcher for %s", watchdir)
+    observer = Observer(timeout=1.0)
+    observer.schedule(ChangeHandler(asyncio.get_running_loop()), path=watchdir, recursive=True)
+    observer.start()
+    _observer = observer
+
+
+def stop_watch_folder() -> None:
+    """Stop the directory watcher, if one was ever started."""
+    global _observer
+    if _observer is None:
+        return
+
+    logger.info("Stopping directory watcher")
     _observer.stop()
     _observer.join()
+    _observer = None
 
 
 class DirectoryEntry(BaseModel):
@@ -64,7 +84,7 @@ def _list_directory_recursive(path: Path) -> DirectoryEntryList:
 async def watch_directory(directory: Path) -> AsyncGenerator[str]:
     yield ServerSentEvent(event="path", data=str(directory.absolute())).encode()
     yield ServerSentEvent(event="status", data="Watching directory...").encode()
-    print(f"Watching directory: {directory}")
+    logger.debug("Watching directory: %s", directory)
     files = _list_directory_recursive(directory).model_dump_json()
     yield ServerSentEvent(event="directoryUpdate", data=files).encode()
 

@@ -108,6 +108,17 @@ class IngestAppSettings(BaseSettings):
     port: int = Field(default=8000, description="Port for the FastAPI server")
     host: str = Field(default="0.0.0.0", description="Host for the FastAPI server")
 
+    # Everything gated on this is a developer's convenience, not part of
+    # serving tusd, and at least two of them are actively unwanted in a
+    # deployment: FastAPI's debug mode returns tracebacks to the caller, and
+    # the watch-folder observer recursively stats the whole upload volume once
+    # a second. Off by default, so a deployment has to ask for them.
+    debug: bool = Field(
+        default=False,
+        description="Enable the /watchFolder debug endpoints, the directory observer behind them, "
+        "FastAPI's debug mode and DEBUG-level logging. Leave off in deployments.",
+    )
+
     tusd_dir: Path = Field(
         default=Path("./upload"), description="Directory where ingest should look for uploads from tusd"
     )
