@@ -303,18 +303,52 @@ def test_missing_video_metadata_is_refreshed_from_the_original(override, expecte
     assert refresh.original_file_id == 1
 
 
-def test_a_missing_loudness_measurement_is_refreshed():
-    state = video(
+def unmeasured(**overrides) -> VideoState:
+    """A video whose original carries no loudness figure."""
+    return video(
         files=(
             registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", lufs=None, file_id=1),
             registered(VideoFileVariantEnum.DASH, "manifest.mpd", revision=2, file_id=2),
             registered(VideoFileVariantEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
-        )
+        ),
+        **overrides,
     )
 
-    [refresh] = [a for a in actions_of(state) if isinstance(a, RefreshMetadata)]
 
-    assert refresh.fields == ("loudness",)
+def test_a_missing_loudness_is_measured_alongside_a_refresh_that_fetches_anyway():
+    """The fresh-upload path: the hook records a duration and nothing else, so
+    every new video arrives needing its framerate, and the loudness costs a
+    decode of audio that is local by then rather than a transfer of its own."""
+    [refresh] = [a for a in actions_of(unmeasured(framerate=None)) if isinstance(a, RefreshMetadata)]
+
+    assert refresh.fields == ("framerate", "loudness")
+    assert refresh.original_file_id == 1
+
+
+def test_a_missing_loudness_on_its_own_is_reported_rather_than_planned():
+    """A silent original yields no measurement, so the column stays NULL and an
+    action keyed on the column would be planned again on the run after this
+    one, and the one after that -- each time fetching the whole original."""
+    result = plan(unmeasured(), DESIRED)
+
+    assert not result.actions
+    assert any("no recorded loudness" in note for note in result.notes)
+
+
+def test_an_unmeasurable_loudness_converges_after_one_pass():
+    """The loop this closes: refreshing an original that turns out to be silent
+    writes nothing, so the state it was keyed on comes back unchanged. The
+    second pass has to stop asking, or it never will."""
+    first = plan(unmeasured(framerate=None), DESIRED)
+    assert first.needs_original
+
+    # What the archive and the catalogue look like once that has been carried
+    # out against a source with nothing to measure: framerate written, loudness
+    # exactly as it was.
+    second = plan(unmeasured(), DESIRED)
+
+    assert not second.actions
+    assert not second.needs_original
 
 
 # --- the plan itself -------------------------------------------------------

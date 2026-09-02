@@ -5,6 +5,7 @@ where the plan will have put it, not from where it started, and a plan that
 only tidies directories must never fetch it at all.
 """
 
+import logging
 import shutil
 from pathlib import Path, PurePosixPath
 from unittest.mock import AsyncMock
@@ -133,13 +134,20 @@ async def test_refreshing_records_duration_and_framerate(applier, archive_root, 
 
 
 @pytest.mark.asyncio
-async def test_a_silent_source_records_no_loudness(applier, archive_root, django_api, color_bars_video):
-    """A measurement of nothing would be worse than the absence of one."""
+async def test_a_silent_source_records_no_loudness(applier, archive_root, django_api, color_bars_video, caplog):
+    """A measurement of nothing would be worse than the absence of one.
+
+    Said out loud, though: the column is left as it was found, which is
+    indistinguishable from never having measured, so the one round trip that
+    established there is nothing to measure has to leave a trace of itself.
+    """
     place(archive_root, ORIGINAL, color_bars_video.read_bytes())
 
-    await applier.apply(plan_of(RefreshMetadata(fields=("loudness",), original_file_id=7)))
+    with caplog.at_level(logging.WARNING, logger="app.backfill.apply"):
+        await applier.apply(plan_of(RefreshMetadata(fields=("loudness",), original_file_id=7)))
 
     django_api.set_video_file_loudness.assert_not_awaited()
+    assert any("no measurable loudness" in record.message for record in caplog.records)
 
 
 @pytest.mark.asyncio
