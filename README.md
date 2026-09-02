@@ -78,12 +78,14 @@ That matters because "this video has DASH" and "this video has *current* DASH" a
 
 ### Chores
 
-| Chore | What it settles |
-| --- | --- |
-| `gc` | Media in the archive for a video the catalogue no longer has |
-| `legacy-broadcast-directories` | Whether the source lives in `original/` or the legacy `broadcast/` |
-| `metadata` | `duration`, `framerate` and R.128 loudness, re-derived from the original |
-| `formats` | Derivatives that are missing, or built by a superseded profile |
+| Chore | What it settles | Run by |
+| --- | --- | --- |
+| `gc` | Media in the archive for a video the catalogue no longer has | the `gc` subcommand |
+| `legacy-broadcast-directories` | Whether the source lives in `original/` or the legacy `broadcast/` | a worker |
+| `metadata` | `duration`, `framerate` and R.128 loudness, re-derived from the original | a worker |
+| `formats` | Derivatives that are missing, or built by a superseded profile | a worker |
+
+The last three are `CONVERGENCE_CHORES`: what it means to converge one video that still exists, and therefore what a worker does with any job it claims. `gc` is about videos that no longer exist, so it has neither a job to be claimed under nor a worker to run it — see [What is not on the queue](#what-is-not-on-the-queue).
 
 `legacy-broadcast-directories` is named at length because it is not permanent. `broadcast/` is what the system before this one called the source file, and nothing has written one for years — the chore exists to walk the catalogue once and leave every video with its source under `original/`. Once a sweep finds none left, it should be deleted along with its tests and the `MovePath`, `RetagFile` and `UnregisterFile` actions, which exist for it and nothing else. A migration left in the code after it has finished migrating reads like a rule about how the archive works.
 
@@ -111,7 +113,9 @@ uv run python -m app.backfill apply --limit 50
 uv run python -m app.backfill apply            # the whole catalogue
 ```
 
-It refuses without `--yes` if any of the plans move media out of the published tree, and it leaves alone any video ingest is working on right now — overwriting that job would reset somebody's upload under them.
+The two do not consider the same chores, and the difference is worth knowing. `plan` runs all four, because reporting a `gc` finding changes nothing. `apply` runs `CONVERGENCE_CHORES` — the same list a worker runs, so what goes in the queue and what comes out of it cannot drift — and rejects `--chore gc` outright, pointing at the subcommand instead.
+
+It refuses without `--yes` if any of the plans move media out of the published tree, which for `apply` means the legacy `broadcast/` migration. And it leaves alone any video ingest is working on right now — overwriting that job would reset somebody's upload under them.
 
 Then scale the pool and let it drain. It is safe to close the terminal: the queue is the state, and a worker re-plans each video when it claims it.
 
