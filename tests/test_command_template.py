@@ -1,9 +1,17 @@
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 from frikanalen_django_api_client.models import VideoFileVariantEnum
 
-from app.media.comand_template import ProfileMetadata, ProfileTemplateArguments, TemplatedCommandGenerator
+from app.media.comand_template import (
+    TEMPLATE_DIR,
+    ProfileMetadata,
+    ProfileTemplateArguments,
+    TemplatedCommandGenerator,
+    TemplateNotFound,
+)
 from app.media.loudness.loudness_measurement import LoudnessMeasurement
 
 MEASURED = LoudnessMeasurement(
@@ -251,3 +259,55 @@ def test_revision_is_read_from_the_header():
 )
 def test_shipped_templates_declare_a_usable_revision(format_name):
     assert TemplatedCommandGenerator(format_name).metadata.revision >= 1
+
+
+def test_templates_are_found_with_no_git_and_from_somewhere_else_entirely(tmp_path):
+    """Neither a git checkout nor any particular working directory is something
+    the templates should depend on.
+
+    They were previously located by forking `git rev-parse --show-toplevel`
+    and falling back, silently, to a hardcoded `/app`. In the image that came
+    out right whichever branch ran -- `/app` is equally the WORKDIR and the
+    root of the checkout copied in with the source -- so neither the fork nor
+    the fallback was ever the part being relied on, and a wrong answer would
+    have surfaced as a missing template rather than as a broken lookup.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    read_a_template = (
+        "from app.media.comand_template import TemplatedCommandGenerator as G; print(G('dash').metadata.revision)"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", read_a_template],
+        cwd=tmp_path,
+        env={"PATH": "", "PYTHONPATH": str(repo_root)},
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().isdigit(), result.stdout
+
+
+def test_a_format_with_no_template_says_where_it_looked():
+    """Loudly, rather than resolving to a directory that happens to exist: the
+    templates decide what `current_revision` reports, and so what the
+    reconciler thinks is stale."""
+    with pytest.raises(TemplateNotFound) as raised:
+        TemplatedCommandGenerator("no_such_format")
+
+    assert "no_such_format.j2" in str(raised.value)
+    assert str(TEMPLATE_DIR) in str(raised.value)
+
+
+def test_a_template_is_read_and_compiled_once_however_many_generators_want_it():
+    """`FormatProducer.produce` builds a generator per format per video, and a
+    catalogue-wide backfill runs that thousands of times on the event loop.
+    Sharing the compiled template is what keeps that from being thousands of
+    blocking reads."""
+    first = TemplatedCommandGenerator(VideoFileVariantEnum.DASH)
+    second = TemplatedCommandGenerator(VideoFileVariantEnum.DASH)
+
+    assert second.template is first.template
+    # The enum member and its value must not be two cache entries.
+    assert TemplatedCommandGenerator("dash").template is first.template

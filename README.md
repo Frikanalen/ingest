@@ -45,7 +45,7 @@ volume is now a large share of everything it does.
 
 ## Formats
 
-Each format in `templates/` is a command with a YAML header, and each gets a scratch directory of its own. Whatever the command leaves in that directory is archived; anything that must not be archived, like a two-pass log, goes in `scratch_dir` instead. The header names the format's primary output — the one file registered with the Django API, and the last one published — either as an extension applied to the source file's stem (`output_file_extension`) or as a fixed name (`output_file_name`).
+Each format in `app/templates/` is a command with a YAML header, and each gets a scratch directory of its own. Whatever the command leaves in that directory is archived; anything that must not be archived, like a two-pass log, goes in `scratch_dir` instead. The header names the format's primary output — the one file registered with the Django API, and the last one published — either as an extension applied to the source file's stem (`output_file_extension`) or as a fixed name (`output_file_name`).
 
 Publishing order matters because the archive is exported read-only to the playout hosts: the primary output goes last, so a manifest is never readable before the media it references has arrived.
 
@@ -87,7 +87,7 @@ Both SSH credentials must be given explicitly — ingest will not reach for the 
 
 ## Reconciling the catalogue
 
-Ingest is not only a hook handler. What a video is *supposed* to have is declared in one place — `DESIRED_FORMATS` in `app/formats.py`, and the revision each template in `templates/` declares — and both paths that produce media converge on it: a fresh upload, and a video that has been in the archive for years.
+Ingest is not only a hook handler. What a video is *supposed* to have is declared in one place — `DESIRED_FORMATS` in `app/formats.py`, and the revision each template in `app/templates/` declares — and both paths that produce media converge on it: a fresh upload, and a video that has been in the archive for years.
 
 They converge on it by running the same code. Once the hook has archived the original, an upload is a video like any other: ingest observes it, plans the difference against the desired state, and applies the plan — the same `CONVERGENCE_CHORES` a worker runs when it claims one. The upload path holds no list of formats of its own, so a format added to `DESIRED_FORMATS` or a template whose revision moves reaches both paths or neither. It is also how a freshly uploaded video gets its `framerate`, which the hook works out anyway for DASH segmentation and previously had nowhere to put.
 
