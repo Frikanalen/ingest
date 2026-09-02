@@ -57,10 +57,21 @@ class Applier:
         self.work_dir = work_dir
         self.producer = FormatProducer(archive, django_api)
 
-    async def apply(self, plan: Plan, on_progress: ProgressCallback | None = None) -> None:
-        with TemporaryDirectory(dir=self.work_dir, prefix=f"backfill-{plan.video_id}-") as scratch:
-            source: SourceMedia | None = None
+    async def apply(
+        self,
+        plan: Plan,
+        on_progress: ProgressCallback | None = None,
+        source: SourceMedia | None = None,
+    ) -> None:
+        """Carry out `plan`, fetching the original only if something needs it.
 
+        `source` is for the caller that already has the original locally: an
+        upload still sitting where tusd left it, probed and measured on the way
+        in. Passing it is what keeps that path from pulling back off the
+        archive the gigabytes it has just finished putting there -- and from
+        measuring the same file's loudness twice.
+        """
+        with TemporaryDirectory(dir=self.work_dir, prefix=f"apply-{plan.video_id}-") as scratch:
             for action in plan.actions:
                 if action.needs_original and source is None:
                     source = await self._fetch_source(plan.video_id, Path(scratch))

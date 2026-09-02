@@ -8,7 +8,6 @@ that now carry that news back.
 
 import shutil
 from pathlib import PurePosixPath
-from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -19,6 +18,7 @@ from app.archive_store import FileAlreadyArchived, SshArchiveStore
 from app.ingest import Ingester
 from app.ingest_reporting import IngestErrorCode, IngestReporter
 from app.util.settings import SshArchiveSettings
+from tests.utils.catalogue import recording_django_api
 from tests.utils.ssh_server import run_ssh_server
 
 VIDEO_ID = "12345"
@@ -28,7 +28,7 @@ pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg m
 
 @pytest.fixture
 def django_api():
-    return AsyncMock()
+    return recording_django_api(VIDEO_ID)
 
 
 @pytest.fixture

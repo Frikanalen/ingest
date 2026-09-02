@@ -2,34 +2,46 @@ from dataclasses import replace
 from datetime import datetime
 from logging import Logger, getLogger
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from frikanalen_django_api_client.models import IngestStateEnum, VideoFileVariantEnum
 
+from app.backfill.apply import Applier, SourceUnavailable
+from app.backfill.chores import CONVERGENCE_CHORES, DesiredState, plan
+from app.backfill.observe import Observer
 from app.django_client.service import DjangoApiService
-from app.formats import DESIRED_FORMATS
 from app.ingest_reporting import IngestErrorCode, IngestReporter, transcode_progress_reporter
-from app.media.produce import FormatProducer, PublishFailed, SourceMedia, TranscodeFailed
+from app.media.produce import PublishFailed, SourceMedia, TranscodeFailed
 from app.util.file_name_utils import original_file_location
 from app.util.logging import VideoIdFilter
 
-from .archive_store import ArchiveSession, ArchiveStore
+from .archive_store import ArchiveError, ArchiveSession, ArchiveStore
 from .media.ffprobe_schema import FfprobeOutput
 from .media.loudness.loudness_measurement import LoudnessMeasurement
 from .media.loudness.measure import measure_loudness
 
 
 class Ingester:
-    """Archives an upload and the derivatives generated from it.
+    """Archives an upload, then converges the video on the desired state.
 
     Transcoding always reads the uploaded file where tusd left it and writes to
     local scratch space; only finished files are handed to the archive. That
     keeps ffmpeg off the archive entirely, so the archive can live on another
     host.
 
-    Producing each format is FormatProducer's job, not this class's: a backfill
-    runs exactly the same code against a source it fetched from the archive
-    instead of one tusd left behind.
+    What gets built is not this class's decision. Once the original is in the
+    archive, an upload is a video like any other, and the same observe-plan-
+    apply a worker runs decides what it is missing -- so the two paths cannot
+    disagree about what a video is supposed to have, which is the drift this
+    whole arrangement exists to prevent. It also gets the upload path metadata
+    it had no way to record: framerate is derived from the source and, until
+    the plan started asking for it, was written by nothing.
+
+    Note what this does not yet fix. A plan will skip a format that is already
+    there at the current revision, but a second attempt at the same upload does
+    not reach the planner: `_archive_original` asserts the original is absent
+    and raises first. Re-entering this video is `fk-backfill apply <id>`, and
+    making the hook itself idempotent is a separate question about what a
+    re-upload should mean.
     """
 
     django_api: DjangoApiService
@@ -71,17 +83,7 @@ class Ingester:
 
         async with self.archive.open() as archive:
             await self._archive_original(archive, source, reporter)
-
-            producer = FormatProducer(archive, self.django_api)
-
-            with TemporaryDirectory(dir=self.work_dir, prefix=f"ingest-{video_id}-") as scratch:
-                # No percentage yet: thumbnails are over before ffmpeg would
-                # have anything to report, and DASH -- the only other format,
-                # and the only one worth timing -- reports its own via
-                # _transcode_progress_reporter once it starts.
-                await reporter.state(IngestStateEnum.TRANSCODING)
-                for file_format in DESIRED_FORMATS:
-                    await self._produce(producer, source, file_format, Path(scratch), reporter)
+            await self._converge(archive, source, reporter)
 
         await self.django_api.set_video_proper_import(video_id, True)
         await reporter.state(IngestStateEnum.DONE, percentage_done=100)
@@ -91,31 +93,55 @@ class Ingester:
         self.logger.info("Removing uploaded file %s", original_file)
         original_file.unlink()
 
-    async def _produce(
+    async def _converge(
         self,
-        producer: FormatProducer,
+        archive: ArchiveSession,
         source: SourceMedia,
-        file_format: VideoFileVariantEnum,
-        scratch: Path,
         reporter: IngestReporter,
     ) -> None:
-        """Run one format, and say what went wrong in the uploader's terms.
+        """Build whatever the video turns out to be missing.
 
-        The producer reports failures as what they were rather than as an error
-        code, because a backfill has no uploader to answer to and would
-        classify the same failure differently.
+        Deliberately a plan rather than a loop over DESIRED_FORMATS. The
+        difference is not what a fresh upload gets -- for a video with nothing
+        archived the plan is every format, which is what the loop did -- but
+        that the answer now comes from the same place the worker's does. A
+        format added to DESIRED_FORMATS, or a template whose revision moves,
+        reaches both paths or neither.
+
+        The plan is carried out against the upload rather than the archived
+        copy. They are the same bytes, and fetching them back would be
+        gigabytes over SFTP plus a second loudness pass to learn what probing
+        already told us.
         """
+        observed = await Observer(archive, self.django_api).observe_one(source.video_id)
+        work = plan(observed, DesiredState.from_templates(), chores=CONVERGENCE_CHORES)
+
+        # Reported, never acted on -- media nothing claims, a row whose file is
+        # missing. Worth a line in the log even when there is nothing to do.
+        for note in work.notes:
+            self.logger.warning("video %s: %s", source.video_id, note)
+
+        if not work:
+            self.logger.info("Nothing to do for video %s", source.video_id)
+            return
+
+        self.logger.info("Plan for video %s:\n%s", source.video_id, work.describe())
+
+        # No percentage yet: thumbnails are over before ffmpeg would have
+        # anything to report, and DASH -- the only format worth timing --
+        # reports its own via transcode_progress_reporter once it starts.
+        await reporter.state(IngestStateEnum.TRANSCODING)
+
         try:
-            await producer.produce(
-                source,
-                file_format,
-                scratch,
+            await Applier(archive, self.django_api, self.work_dir).apply(
+                work,
                 on_progress=transcode_progress_reporter(reporter),
+                source=source,
             )
         except TranscodeFailed as e:
             await reporter.failed(IngestErrorCode.TRANSCODE_FAILED, str(e))
             raise
-        except PublishFailed as e:
+        except (PublishFailed, SourceUnavailable, ArchiveError) as e:
             await reporter.failed(IngestErrorCode.ARCHIVE_FAILED, str(e))
             raise
 

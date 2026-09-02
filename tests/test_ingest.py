@@ -9,7 +9,6 @@ import re
 import shutil
 import subprocess
 from pathlib import PurePosixPath
-from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -17,9 +16,11 @@ from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.api.hooks.metadata import MetadataExtractor
 from app.archive_store import FileAlreadyArchived, SshArchiveStore
+from app.formats import current_revision
 from app.ingest import Ingester
 from app.media.loudness.measure import measure_loudness
 from app.util.settings import SshArchiveSettings
+from tests.utils.catalogue import recording_django_api, registered_file
 from tests.utils.ssh_server import run_ssh_server
 
 VIDEO_ID = "12345"
@@ -81,7 +82,24 @@ def archive(ssh_server, archive_root) -> SshArchiveStore:
 
 @pytest.fixture
 def django_api():
-    return AsyncMock()
+    return recording_django_api(VIDEO_ID)
+
+
+@pytest.fixture
+def django_api_with_dash():
+    """A catalogue that already has this video's DASH, at the current revision."""
+    return recording_django_api(
+        VIDEO_ID,
+        files=[
+            registered_file(
+                1,
+                VIDEO_ID,
+                VideoFileVariantEnum.DASH,
+                f"{VIDEO_ID}/dash/manifest.mpd",
+                revision=current_revision(VideoFileVariantEnum.DASH),
+            )
+        ],
+    )
 
 
 @pytest_asyncio.fixture
@@ -235,6 +253,36 @@ async def test_registers_archive_relative_paths_with_django(ingested, django_api
 @pytest.mark.asyncio
 async def test_marks_the_import_complete(ingested, django_api):
     django_api.set_video_proper_import.assert_awaited_once_with(VIDEO_ID, True)
+
+
+@pytest.mark.asyncio
+async def test_records_the_frame_rate_it_worked_out_anyway(ingested, django_api):
+    """Ingest has to know the exact rate -- DASH segments fall on whole frames
+    -- and until this path planned its work like a backfill it had nowhere to
+    put it. A loop over DESIRED_FORMATS could not have written this, so it is
+    also what proves the plan is what drives the upload now."""
+    django_api.set_video_framerate.assert_awaited_once()
+
+    video_id, framerate_milli = django_api.set_video_framerate.await_args.args
+    assert video_id == VIDEO_ID
+    # The fixture is 25fps, recorded in thousandths of a frame per second.
+    assert framerate_milli == 25000
+
+
+@pytest.mark.asyncio
+async def test_builds_only_what_is_missing(archive, django_api_with_dash, work_dir, uploaded_file, metadata):
+    """The point of planning rather than looping: a format the catalogue
+    already has at the current revision is not built a second time, so a video
+    that comes back through here does not collide with its own output --
+    put() refuses to overwrite, by design."""
+    await Ingester(archive=archive, django_api=django_api_with_dash, work_dir=work_dir).ingest(
+        VIDEO_ID, uploaded_file, metadata
+    )
+
+    built = [call.kwargs["file_format"] for call in django_api_with_dash.create_video_file.await_args_list]
+
+    assert VideoFileVariantEnum.DASH not in built
+    assert VideoFileVariantEnum.LARGE_THUMB in built
 
 
 @pytest.mark.asyncio
