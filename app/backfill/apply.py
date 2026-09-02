@@ -147,5 +147,18 @@ class Applier:
             rate = segmentation_for(source.metadata).frame_rate
             await self.django_api.set_video_framerate(video_id, round(rate * FRAME_RATE_SCALE))
 
-        if "loudness" in fields and source.loudness is not None:
-            await self.django_api.set_video_file_loudness(file_id, source.loudness)
+        if "loudness" in fields:
+            if source.loudness is None:
+                # Nothing to write: the track is silent, or loudnorm reported a
+                # figure that is not finite. Said out loud because the column is
+                # left exactly as it was found, and NULL there cannot be told
+                # apart from never having measured at all -- which is why
+                # refresh_metadata will not ask for the original again on that
+                # basis alone. Without this line the whole round trip -- fetch,
+                # probe, decode -- looks like it succeeded.
+                logger.warning(
+                    "video %s: the original has no measurable loudness; leaving it unrecorded",
+                    video_id,
+                )
+            else:
+                await self.django_api.set_video_file_loudness(file_id, source.loudness)

@@ -201,6 +201,26 @@ def refresh_metadata(state: VideoState, desired: DesiredState) -> Fragment:
     Anything uploaded before ingest knew to record these has them empty, and
     framerate is empty everywhere because nothing has ever been able to write
     it.
+
+    Duration and framerate fall out of a probe, so asking for them is asking
+    for something that will definitely be written. Loudness is not like that.
+    A silent track, or one loudnorm reports as -inf, has no measurement to
+    record, and `integrated_lufs` stays NULL however many times it is measured
+    -- the column cannot say "measured, and there was nothing to measure".
+
+    So loudness is not on its own a reason to fetch anything. Keyed on the
+    column alone this chore would plan a full original transfer, a probe and a
+    decode of the audio, per affected video, on every single run, for ever,
+    and write nothing each time. Instead loudness rides along with a refresh
+    that was going to fetch the original anyway, and is otherwise reported.
+
+    That costs the measurement only where the video needs nothing else, which
+    in practice is the set that has already been through one backfill: the
+    hook records a duration and nothing else, so every video arrives missing
+    its framerate and is measured on its first pass. What is left over
+    afterwards is very nearly exactly the videos that cannot be measured.
+    Distinguishing the remainder properly needs django-api to record that a
+    measurement was attempted; there is no field for it today.
     """
     if not state.in_catalogue:
         return Fragment(state)
@@ -210,20 +230,41 @@ def refresh_metadata(state: VideoState, desired: DesiredState) -> Fragment:
         return Fragment(state)
 
     original = originals[0]
-    missing = tuple(
+    probed = tuple(
         name
         for name, absent in (
             ("duration", not state.duration),
             ("framerate", not state.framerate),
-            ("loudness", original.integrated_lufs is None),
         )
         if absent
     )
+    unmeasured = original.integrated_lufs is None
 
-    if not missing:
-        return Fragment(state)
+    if probed:
+        # The original is coming down for the probe regardless, and measuring
+        # it is a decode of audio that is already local by then, so asking for
+        # the loudness here is free.
+        return Fragment(
+            state,
+            actions=(
+                RefreshMetadata(
+                    fields=probed + (("loudness",) if unmeasured else ()),
+                    original_file_id=original.id,
+                ),
+            ),
+        )
 
-    return Fragment(state, actions=(RefreshMetadata(fields=missing, original_file_id=original.id),))
+    if unmeasured:
+        return Fragment(
+            state,
+            notes=(
+                "the original has no recorded loudness; measuring it would mean fetching a file "
+                "nothing else needs, and a track with nothing to measure would leave the column "
+                "as it found it and be asked for again on every run",
+            ),
+        )
+
+    return Fragment(state)
 
 
 def produce_formats(state: VideoState, desired: DesiredState) -> Fragment:
