@@ -119,6 +119,44 @@ async def test_image_is_archived_before_django_records_it(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_an_upload_that_can_never_be_valid_is_cleared(tmp_path):
+    """The upload volume is ReadWriteOnce and is why this pod is a single
+    replica. A file no retry could ever use has no business staying in it."""
+    archive_root = tmp_path / "archive"
+    archive_root.mkdir()
+    uploaded = tmp_path / "not-really.png"
+    uploaded.write_text("plain text")
+
+    ingester = ProgramImageIngester(archive=LocalArchiveStore(archive_root), django_api=AsyncMock())
+    with pytest.raises(ImageComplianceError):
+        await ingester.ingest(
+            video_id="1234",
+            image_id="8b2a1c9d4e6f47a1b0c3d5e7f9a1b3c5",
+            role=RoleEnum.KEY_ART_TITLED,
+            uploaded_file=uploaded,
+        )
+
+    assert not uploaded.exists()
+
+
+@pytest.mark.asyncio
+async def test_a_retry_of_a_cleared_upload_gets_the_same_answer(tmp_path):
+    """Not compliant, as the first attempt said -- rather than an OSError that
+    would read as ingest having broken."""
+    archive_root = tmp_path / "archive"
+    archive_root.mkdir()
+    ingester = ProgramImageIngester(archive=LocalArchiveStore(archive_root), django_api=AsyncMock())
+
+    with pytest.raises(ImageComplianceError):
+        await ingester.ingest(
+            video_id="1234",
+            image_id="8b2a1c9d4e6f47a1b0c3d5e7f9a1b3c5",
+            role=RoleEnum.KEY_ART_TITLED,
+            uploaded_file=tmp_path / "gone.png",
+        )
+
+
+@pytest.mark.asyncio
 async def test_retry_registers_an_already_published_image_without_overwriting_it(tmp_path):
     archive_root = tmp_path / "archive"
     archive_root.mkdir()

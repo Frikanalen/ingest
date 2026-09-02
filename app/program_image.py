@@ -33,10 +33,17 @@ class ProgramImageMetadata:
 
 
 def inspect_program_image(path: Path) -> ProgramImageMetadata:
-    if path.stat().st_size > MAX_IMAGE_BYTES:
-        raise ImageComplianceError("Image files may not exceed 10 MB")
+    """What the archive needs to know about an upload, read from the bytes.
 
+    The size check is inside the try so that an upload which is no longer there
+    -- because a previous attempt found it non-compliant and cleared it -- gets
+    the same answer a retry deserves: not compliant, rather than an unhandled
+    OSError that reads as ingest having broken.
+    """
     try:
+        if path.stat().st_size > MAX_IMAGE_BYTES:
+            raise ImageComplianceError("Image files may not exceed 10 MB")
+
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(path) as image:
@@ -78,7 +85,18 @@ class ProgramImageIngester:
         role: RoleEnum,
         uploaded_file: Path,
     ) -> None:
-        metadata = await asyncio.to_thread(inspect_program_image, uploaded_file)
+        try:
+            metadata = await asyncio.to_thread(inspect_program_image, uploaded_file)
+        except ImageComplianceError:
+            # The one failure that is final. Every other way this can go wrong
+            # -- the archive unreachable, Django refusing the registration --
+            # leaves work a retry can finish, which is why the file survives
+            # them; nothing will ever make these bytes a valid image, so
+            # keeping them only fills the upload volume that pins this pod to
+            # one replica.
+            uploaded_file.unlink(missing_ok=True)
+            raise
+
         destination = program_image_location(video_id, image_id, metadata.extension)
 
         async with self.archive.open() as archive:

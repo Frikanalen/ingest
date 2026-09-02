@@ -16,6 +16,7 @@ from app.api.hooks.metadata import (
 )
 from app.api.hooks.schema.request import HookRequest
 from app.api.hooks.schema.response import FileInfoChanges, HookResponse
+from app.api.hooks.spool import IMAGE_UPLOAD_DIR, clear_abandoned_image_uploads
 from app.archive_store import ArchiveStore
 from app.django_client.service import DjangoApiError, DjangoApiService
 from app.ingest import Ingester
@@ -50,7 +51,11 @@ async def prepare_upload(
         if upload_size is not None and upload_size > MAX_IMAGE_BYTES:
             raise HTTPException(status_code=413, detail="Image files may not exceed 10 MB")
         upload_id = f"{IMAGE_UPLOAD_ID_PREFIX}{uuid4().hex}"
-        new_file = Path(metadata.video_id, "image_uploads", upload_id, sanitized_filename)
+        new_file = Path(metadata.video_id, IMAGE_UPLOAD_DIR, upload_id, sanitized_filename)
+        # This upload gets a path of its own, so nothing will ever overwrite an
+        # earlier one -- which is why the earlier ones that came to nothing are
+        # collected here instead.
+        clear_abandoned_image_uploads(settings.tusd_dir, metadata.video_id)
     else:
         upload_id = metadata.video_id
         new_file = Path(upload_id, sanitized_filename)
