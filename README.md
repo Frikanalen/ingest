@@ -178,7 +178,7 @@ kubectl scale deployment/ingest-workers --replicas=6
 
 That is reverted by the next `helm upgrade`, which sets it back to `workers.replicaCount`; set it there for anything you want to keep. Overshooting is safe — the scheduler leaves the surplus Pending rather than overcommitting the nodes.
 
-`workers.kind` says what the pool can reach rather than what it prefers. `backfill` means its sources are in the archive; an upload's source is in the upload volume, which no worker mounts, so it must not be handed one.
+`workers.kind` says which queue the pool serves. Every job's source is the archive — the hook archives the original before it queues anything — so this is about who is waiting rather than what a worker can reach. Empty serves both, which is the normal deployment; setting it to `upload` on a second, small pool is how you keep a member's upload out of a lane busy with a catalogue-wide re-encode.
 
 Scaling down mid-encode costs the encode. `SIGTERM` makes a worker stop claiming and finish the job it holds, but only within `terminationGracePeriodSeconds`; anything still running when that elapses is killed, and its lease expires so another worker picks the video up later. The default is an hour, which is also how long a node drain will wait for a worker.
 
