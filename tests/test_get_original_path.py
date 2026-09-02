@@ -15,7 +15,7 @@ def test_valid_input():
 def test_invalid_video_id_non_digit():
     video_id = "abcd"
     original_file_name = Path("example_video.mp4")
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError, match="video_id must be a number"):
         original_file_location(video_id, original_file_name)
 
 
@@ -52,5 +52,5 @@ def test_derived_file_location_discards_leading_path():
 
 
 def test_derived_file_location_rejects_non_numeric_video_id():
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError, match="video_id must be a number"):
         derived_file_location("abcd", "webm_med", Path("example_video.webm"))
