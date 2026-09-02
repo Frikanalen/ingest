@@ -23,8 +23,8 @@ from app.worker import Worker
 VIDEO_ID = "12345"
 
 
-def job(video=int(VIDEO_ID)):
-    return SimpleNamespace(video=video)
+def job(video=int(VIDEO_ID), kind="backfill"):
+    return SimpleNamespace(video=video, kind=kind)
 
 
 def video_row(duration="00:10:00", framerate=25000):
@@ -250,3 +250,27 @@ async def test_the_source_is_left_where_the_archive_has_it(worker, django_api, a
 
     assert original.exists()
     assert PurePosixPath(f"{VIDEO_ID}/original/source.mp4")
+
+
+@pytest.mark.asyncio
+async def test_work_it_cannot_do_is_failed_rather_than_reported_done(worker, django_api):
+    """An upload's source is in the upload volume, which no worker mounts, and
+    no chore archives one. Claiming it and reporting success would record the
+    video as ingested having had nothing done to it."""
+    django_api.claim_ingest_job.side_effect = [SimpleNamespace(video=int(VIDEO_ID), kind="upload"), None]
+
+    assert await worker.run_once() is True
+
+    [failure] = [c for c in django_api.report_ingest_state.await_args_list if c.args[1] == IngestStateEnum.FAILED]
+    assert "cannot service" in failure.kwargs["status_text"]
+    assert IngestStateEnum.DONE not in reported_states(django_api)
+
+
+@pytest.mark.asyncio
+async def test_refused_work_does_not_come_straight_back(worker, django_api):
+    """Releasing it to pending would put it in front of the same worker again."""
+    django_api.claim_ingest_job.side_effect = [SimpleNamespace(video=int(VIDEO_ID), kind="upload"), None]
+
+    await worker.run_once()
+
+    assert reported_states(django_api)[-1] == IngestStateEnum.FAILED

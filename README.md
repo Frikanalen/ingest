@@ -75,9 +75,11 @@ That matters because "this video has DASH" and "this video has *current* DASH" a
 | Chore | What it settles |
 | --- | --- |
 | `gc` | Media in the archive for a video the catalogue no longer has |
-| `sources` | Whether the source lives in `original/` or the legacy `broadcast/` |
+| `legacy-broadcast-directories` | Whether the source lives in `original/` or the legacy `broadcast/` |
 | `metadata` | `duration`, `framerate` and R.128 loudness, re-derived from the original |
 | `formats` | Derivatives that are missing, or built by a superseded profile |
+
+`legacy-broadcast-directories` is named at length because it is not permanent. `broadcast/` is what the system before this one called the source file, and nothing has written one for years — the chore exists to walk the catalogue once and leave every video with its source under `original/`. Once a sweep finds none left, it should be deleted along with its tests and the `MovePath`, `RetagFile` and `UnregisterFile` actions, which exist for it and nothing else. A migration left in the code after it has finished migrating reads like a rule about how the archive works.
 
 Each is a pure function from an observed `VideoState` to the actions that would close the gap, so the awkward cases — a video whose source is still called `broadcast`, a format registered twice, media nothing claims — are unit tests rather than fixtures.
 
@@ -112,6 +114,12 @@ kubectl scale deployment/ingest-workers --replicas=6
 ```
 
 Re-running `apply` is how you resume. The plan is derived from what is actually there, so anything already done is simply not planned again.
+
+### What the queue is not
+
+Uploads do not go through it. tusd's `post-finish` hook still calls the ingest pipeline inline, exactly as it always has, so a member's upload is probed, archived and transcoded inside that request and never becomes a job. The queue exists for the backfill.
+
+`IngestKind` has an `upload` value because django-api models both, but no worker can service one: an upload's source is a file in the upload volume that nothing has archived yet, and no chore knows how to archive one. A worker handed such a job fails it rather than reporting it done, since reporting success would record the video as ingested having had nothing done to it.
 
 ### Reclaiming deleted videos
 

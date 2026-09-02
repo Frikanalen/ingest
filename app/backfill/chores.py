@@ -105,8 +105,21 @@ def collect_garbage(state: VideoState, desired: DesiredState) -> Fragment:
     )
 
 
-def reconcile_sources(state: VideoState, desired: DesiredState) -> Fragment:
-    """Settle which directory holds the source, original/ or broadcast/."""
+def reconcile_legacy_broadcast_directories(state: VideoState, desired: DesiredState) -> Fragment:
+    """Settle which directory holds the source, original/ or broadcast/.
+
+    Named at length because it is not a permanent part of how ingest works.
+    `broadcast/` is what the system before this one called the source file, and
+    nothing has written one for years; this exists only to walk the catalogue
+    once and leave every video with its source under `original/`, where
+    everything else expects it.
+
+    When a sweep finds no `broadcast/` directories left, the honest thing is to
+    delete this function, its entry in CHORES, its tests, and the MovePath,
+    RetagFile and UnregisterFile actions -- which exist for this and nothing
+    else. A migration that stays in the code after it has finished migrating
+    reads like a rule about how the archive works, which it is not.
+    """
     if not state.in_catalogue:
         return Fragment(state)
 
@@ -262,11 +275,11 @@ def produce_formats(state: VideoState, desired: DesiredState) -> Fragment:
 Chore = Callable[[VideoState, DesiredState], Fragment]
 
 #: In order. Garbage first so nothing downstream spends an hour of CPU on a
-#: video that is about to go; sources next, because it is what guarantees an
-#: original exists for the last two to work from.
+#: video that is about to go; the legacy broadcast migration next, because it
+#: is what guarantees an original exists for the last two to work from.
 CHORES: Mapping[str, Chore] = {
     "gc": collect_garbage,
-    "sources": reconcile_sources,
+    "legacy-broadcast-directories": reconcile_legacy_broadcast_directories,
     "metadata": refresh_metadata,
     "formats": produce_formats,
 }
