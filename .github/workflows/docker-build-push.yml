@@ -22,10 +22,9 @@ jobs:
       - name: Release PR or GitHub Release (main only)
         id: release
         if: ${{ github.ref == 'refs/heads/main' }}
-        uses: googleapis/release-please-action@v4
+        uses: googleapis/release-please-action@v5
         with:
           release-type: python
-          package-name: ingest
 
   build:
     name: Build and push Docker image to GHCR
@@ -34,25 +33,27 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
+      # Pinned to an exact tag on purpose: setup-uv stopped publishing the
+      # floating `v10`/`v10.0` tags in v8, so a major-only ref does not resolve.
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v10.0.1
 
       - name: Generate API client
         run: ./scripts/generate-client.sh
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Extract Docker metadata (tags, labels)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/frikanalen/ingest
           tags: |
@@ -62,14 +63,14 @@ jobs:
             type=raw,value=${{ needs.release.outputs.tag }},enable=${{ github.ref == 'refs/heads/main' && needs.release.outputs.created == 'true' }}
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and (if not PR) push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           # Use the checkout so the generated, gitignored API client is included
           # in the build context.

@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # The runner image does not ship ffmpeg, and the suite shells out to
       # ffmpeg/ffprobe to build its fixture videos and to probe them.
@@ -28,8 +28,10 @@ jobs:
           ffmpeg -version | head -1
           ffprobe -version | head -1
 
+      # Pinned to an exact tag on purpose: setup-uv stopped publishing the
+      # floating `v10`/`v10.0` tags in v8, so a major-only ref does not resolve.
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
 
