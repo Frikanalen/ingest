@@ -21,8 +21,8 @@ from app.formats import UNTRACKED_REVISION
 VIDEO_ID = "12345"
 
 
-def video_row(video_id: int, duration="00:10:00", framerate=25000):
-    return SimpleNamespace(id=video_id, duration=duration, framerate=framerate)
+def video_row(video_id: int, duration="00:10:00", framerate=25000, proper_import=True):
+    return SimpleNamespace(id=video_id, duration=duration, framerate=framerate, proper_import=proper_import)
 
 
 def file_row(file_id, video, variant, filename, revision=UNTRACKED_REVISION, lufs=-23.0):
@@ -43,11 +43,18 @@ def file_row(file_id, video, variant, filename, revision=UNTRACKED_REVISION, luf
 
 
 def pager(rows, count=None):
-    """A paginated endpoint that hands back `rows`, honouring limit/offset."""
-    total = len(rows) if count is None else count
+    """A paginated endpoint that hands back `rows`, honouring limit/offset.
 
-    async def fetch(limit: int, offset: int):
-        return SimpleNamespace(count=total, results=rows[offset : offset + limit])
+    The video list filters on `proper_import` the way django-api does, so a
+    caller that asks for only one half of the catalogue gets only one half
+    here too. A mock that ignored the filter would answer every question
+    correctly and hide the one bug this endpoint has ever had.
+    """
+
+    async def fetch(limit: int, offset: int, *, proper_import=None):
+        matching = rows if proper_import is None else [row for row in rows if row.proper_import is proper_import]
+        total = len(matching) if count is None else count
+        return SimpleNamespace(count=total, results=matching[offset : offset + limit])
 
     return fetch
 
@@ -195,3 +202,26 @@ async def test_a_video_with_nothing_archived_observes_as_empty(observer):
 
     assert state.directories == {}
     assert state.in_catalogue
+
+
+@pytest.mark.asyncio
+async def test_the_snapshot_holds_videos_whose_ingest_has_not_finished(observer, django_api):
+    """django-api's video list defaults to the public catalogue -- finished
+    ingests only. The snapshot has to be wider than that, because gc reads
+    absence from it as permission to reclaim a video's archived media."""
+    django_api.list_videos_page = pager([video_row(1), video_row(2, proper_import=False)])
+
+    snapshot = await observer.snapshot()
+
+    assert set(snapshot.videos) == {"1", "2"}
+    assert "2" in snapshot
+
+
+@pytest.mark.asyncio
+async def test_a_short_read_of_the_unfinished_videos_is_refused_too(observer, django_api):
+    """Both passes carry the same weight. A shortfall in the unfinished half
+    hides exactly the videos this change exists to protect."""
+    django_api.list_videos_page = pager([video_row(1, proper_import=False)], count=900)
+
+    with pytest.raises(IncompleteSnapshot, match="unfinished videos"):
+        await observer.snapshot()
