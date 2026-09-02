@@ -89,6 +89,17 @@ across a network.
 {{- end }}
 
 {{/*
+The upload half's resource name.
+
+Everything belonging to the pod that owns tusd and the upload volume is named
+from this, so the Deployment, Service, Ingress and claim move together and none
+of them can be left behind describing the old shape.
+*/}}
+{{- define "ingest.uploadFullname" -}}
+{{ include "ingest.fullname" . }}-upload
+{{- end }}
+
+{{/*
 Selector labels for the worker pool.
 
 Deliberately not ingest.selectorLabels. A Service selects on a subset, so a

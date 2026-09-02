@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ include "ingest.fullname" . }}-uploads
+  name: {{ include "ingest.uploadFullname" . }}-data
   labels:
     {{- include "ingest.labels" . | nindent 4 }}
   annotations:

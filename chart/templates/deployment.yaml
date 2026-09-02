@@ -3,15 +3,16 @@ kind: Deployment
 metadata:
   # -upload, because this is the half that owns tusd and the upload volume
   # rather than the whole of ingest -- the worker pool does at least as much
-  # ingesting. The Service, Ingress and PVC keep the unsuffixed name: the
-  # Service is the address tusd is reached at, and renaming the PVC would
-  # orphan the volume holding uploads that have not been archived yet.
+  # ingesting. The Service, Ingress and claim are named from the same helper,
+  # so none of them can be left behind describing the old shape.
   #
   # Renaming a Deployment is a delete and a create, and this one owns a
   # ReadWriteOnce volume, so the replacement cannot attach until the old pod
   # has released it. Delete the old `ingest` Deployment and let it finish
   # terminating before upgrading, rather than trusting Helm to order the two.
-  name: {{ include "ingest.fullname" . }}-upload
+  # Renaming the claim abandons the old volume with whatever was on it; see
+  # the README on upgrading past this.
+  name: {{ include "ingest.uploadFullname" . }}
   labels:
     {{- include "ingest.labels" . | nindent 4 }}
     app.kubernetes.io/component: upload
@@ -107,7 +108,7 @@ spec:
             claimName: {{ .Values.uploads.existingClaim }}
           {{- else if .Values.uploads.persistence.enabled }}
           persistentVolumeClaim:
-            claimName: {{ include "ingest.fullname" . }}-uploads
+            claimName: {{ include "ingest.uploadFullname" . }}-data
           {{- else }}
           emptyDir: {}
           {{- end }}

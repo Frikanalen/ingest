@@ -138,16 +138,21 @@ tusd is served at `/upload` on the main site — `https://frikanalen.no/upload`,
 
 #### Upgrading past the rename
 
-The upload Deployment used to be named after the release alone; it is now suffixed `-upload`, because it is the half that owns tusd and the upload volume rather than the whole of ingest. The Service, Ingress and PersistentVolumeClaim keep the unsuffixed name — the Service is the address tusd is reached at, and renaming the claim would orphan the volume holding uploads that have not been archived yet.
+The upload half used to be named after the release alone. It is now suffixed `-upload` throughout — Deployment, Service, Ingress and claim — because it is the half that owns tusd and the upload volume rather than the whole of ingest, and a name that says so is worth more than the continuity of the old one.
 
-To Kubernetes a rename is a delete and a create, and this Deployment owns a `ReadWriteOnce` volume, so the replacement cannot attach it until the old pod has released it. Do the delete yourself rather than trusting Helm to order the two:
+To Kubernetes every one of those is a delete and a create. Two need care.
+
+The Deployment owns a `ReadWriteOnce` volume, so its replacement cannot attach until the old pod has released it. Delete it yourself rather than trusting Helm to order the two.
+
+**The claim is renamed, which means the old volume is abandoned with whatever is on it** — uploads still in flight, and anything ingest had not finished archiving. Helm will not remove it either way, since it carries `helm.sh/resource-policy: keep`, so it lingers until deleted by hand. Do this when nothing is uploading:
 
 ```bash
 kubectl delete deployment/ingest --wait
 helm upgrade ingest ./chart
+kubectl delete pvc/ingest-uploads
 ```
 
-In-progress uploads survive: the volume is untouched, and a tus client resumes from the offset it left off at once the new pod is serving.
+The old Service and Ingress go with the upgrade; Helm removes them itself, since they are in the previous release and no longer rendered. Only the claim survives to be deleted deliberately, which is the point of the policy.
 
 ### Queue workers
 
