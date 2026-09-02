@@ -1,0 +1,86 @@
+{{- if .Values.workers.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ingest.fullname" . }}-workers
+  labels:
+    {{- include "ingest.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  # Scaling this is the only capacity control there is: workers claim work
+  # when they are free, so nothing has to be told how many there are. It is
+  # also safe to overshoot -- the scheduler will leave the surplus Pending
+  # rather than overcommit the nodes.
+  replicas: {{ .Values.workers.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "ingest.workerSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- if and .Values.archive.ssh.enabled .Values.archive.ssh.secretChecksum }}
+        checksum/ssh-secret: {{ .Values.archive.ssh.secretChecksum | quote }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with .Values.workers.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "ingest.workerSelectorLabels" . | nindent 8 }}
+    spec:
+      # SIGTERM means "stop claiming"; the job in hand is seen out. That only
+      # helps if there is time for it: an encode abandoned partway is not lost
+      # data -- the lease expires and someone picks it up again -- but it is
+      # lost hours. Anything still running when this elapses is killed, so set
+      # it to something a job can realistically finish in, and know that node
+      # drains will wait that long.
+      terminationGracePeriodSeconds: {{ .Values.workers.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.workers.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.workers.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.Version }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # The queue is the only thing this listens to. There is no server, no
+          # Service and no ingress: it reaches out to django-api and to the
+          # archive, and nothing reaches in.
+          command: ["python", "-m", "app.worker"]
+          env:
+            {{- include "ingest.workerEnv" . | nindent 12 }}
+          # No probes. A worker serves nothing, so liveness would have to guess
+          # at what "wedged" means, and a wrong guess kills an encode that was
+          # merely slow. A claim that stops being renewed is what surfaces a
+          # stuck worker, and the lease is what recovers its job.
+          resources:
+            {{- toYaml .Values.workers.resources | nindent 12 }}
+          volumeMounts:
+            - name: work
+              mountPath: {{ .Values.workers.work.mountPath }}
+            {{- if .Values.archive.ssh.enabled }}
+            - name: archive-ssh
+              mountPath: {{ include "ingest.sshMountPath" . }}
+              readOnly: true
+            {{- end }}
+      volumes:
+        # Scratch for one video at a time: the original is fetched here, the
+        # derivatives are built here, and both are gone when the job ends.
+        - name: work
+          emptyDir:
+            {{- toYaml .Values.workers.work.emptyDir | nindent 12 }}
+        {{- if .Values.archive.ssh.enabled }}
+        - name: archive-ssh
+          secret:
+            secretName: {{ .Values.archive.ssh.secretName }}
+            defaultMode: {{ .Values.archive.ssh.defaultMode }}
+        {{- end }}
+{{- end }}

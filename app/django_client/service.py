@@ -2,18 +2,29 @@ from datetime import datetime
 from http import HTTPStatus
 
 from frikanalen_django_api_client import AuthenticatedClient
-from frikanalen_django_api_client.api.videofiles import videofiles_create, videofiles_list
+from frikanalen_django_api_client.api.ingest import ingest_claim
+from frikanalen_django_api_client.api.videofiles import (
+    videofiles_create,
+    videofiles_destroy,
+    videofiles_list,
+    videofiles_partial_update,
+)
 from frikanalen_django_api_client.api.videos import (
     videos_images_create,
     videos_ingest_report,
+    videos_ingest_retrieve,
     videos_list,
     videos_partial_update,
+    videos_retrieve,
     videos_upload_token_verify,
 )
 from frikanalen_django_api_client.models import (
+    IngestClaimRequest,
     IngestJobRequest,
+    IngestKindEnum,
     IngestStateEnum,
     MediaTypeEnum,
+    PatchedVideoFileRequest,
     PatchedVideoRequest,
     ProgramImageRegistrationRequest,
     RoleEnum,
@@ -100,6 +111,55 @@ class DjangoApiService:
             ),
         )
 
+    async def get_ingest_job(self, video_id: str):
+        """How far ingest has got with this video.
+
+        A video nothing has ever reported on answers `pending` from an unsaved
+        row: reading does not put anything in the queue.
+        """
+        return await videos_ingest_retrieve.asyncio(int(video_id), client=self.client)
+
+    async def enqueue_ingest_job(self, video_id: str, kind: str, priority: int):
+        """Put a video in the queue for a worker to pick up.
+
+        `kind` has to be sent explicitly: a video that has never been reported
+        on has no row yet, and the column it would default to says the source
+        is a fresh upload -- which for a backfill is the one thing it is not,
+        and would leave the job claimable only by the pod that cannot do it.
+        """
+        return await videos_ingest_report.asyncio(
+            video_id,
+            client=self.client,
+            body=IngestJobRequest(
+                state=IngestStateEnum.PENDING,
+                kind=IngestKindEnum(kind),
+                priority=priority,
+            ),
+        )
+
+    async def claim_ingest_job(self, worker: str, kind: str | None = None):
+        """Take the next job off the queue, or None if there is nothing to take.
+
+        The whole decision happens in one statement on django-api's side --
+        which job, and marking it taken -- so two workers asking at the same
+        moment cannot come away with the same video. Nothing here needs to
+        retry a lost race, because there is no race to lose.
+
+        `kind` is what a worker can reach rather than what it prefers: an
+        upload's source is in the tusd volume, which only one pod has. Omitting
+        it means "anything", which is right for a pool that can reach both.
+        """
+        return await ingest_claim.asyncio(
+            client=self.client,
+            body=IngestClaimRequest(
+                worker=worker,
+                kind=IngestKindEnum(kind) if kind else UNSET,
+            ),
+        )
+
+    async def get_video(self, video_id: str):
+        return await videos_retrieve.asyncio(int(video_id), client=self.client)
+
     async def get_files_for_video(self, video_id: str):
         return await videofiles_list.asyncio(client=self.client, video_id=int(video_id))
 
@@ -109,6 +169,7 @@ class DjangoApiService:
         video_id: str,
         file_format: VideoFileVariantEnum,
         loudness: LoudnessMeasurement | None = None,
+        profile_revision: int | None = None,
     ):
         """Register a file against a video, with its loudness if we have it.
 
@@ -116,6 +177,10 @@ class DjangoApiService:
         so they describe the file that was actually measured: the figures
         playout levels from belong to the original, not to a derivative
         that has already been normalized to something else.
+
+        `profile_revision` says which iteration of the template produced the
+        file, which is what lets a reconciler find output made by a profile we
+        have since moved past without inspecting the file itself.
         """
         req = VideoFileRequest(
             filename=str(filename),
@@ -123,6 +188,10 @@ class DjangoApiService:
             variant=file_format,
             integrated_lufs=loudness.integrated_lufs if loudness else UNSET,
             truepeak_lufs=loudness.truepeak_lufs if loudness else UNSET,
+            # Left unset rather than sent as 0 for a file no template produced,
+            # so the original keeps saying "no profile" instead of claiming to
+            # predate one.
+            profile_revision=profile_revision if profile_revision is not None else UNSET,
         )
         return await videofiles_create.asyncio(client=self.client, body=req)
 
@@ -150,6 +219,64 @@ class DjangoApiService:
             ),
         )
         _expect(response, HTTPStatus.CREATED)
+
+    async def retag_video_file(self, file_id: int, file_format: VideoFileVariantEnum, filename: str):
+        """Point an existing videofile row at a new path and variant.
+
+        Used when a legacy `broadcast/` directory turns out to be the original:
+        the record is updated rather than replaced, so the file keeps whatever
+        history and identity the row already carried.
+        """
+        return await videofiles_partial_update.asyncio(
+            file_id,
+            client=self.client,
+            body=PatchedVideoFileRequest(
+                variant=file_format,
+                filename=str(filename),
+            ),
+        )
+
+    async def set_video_file_loudness(self, file_id: int, loudness: LoudnessMeasurement):
+        return await videofiles_partial_update.asyncio(
+            file_id,
+            client=self.client,
+            body=PatchedVideoFileRequest(
+                integrated_lufs=loudness.integrated_lufs,
+                truepeak_lufs=loudness.truepeak_lufs,
+            ),
+        )
+
+    async def delete_video_file(self, file_id: int):
+        """Drop a videofile row whose file we are deliberately removing.
+
+        Never called because a file turned out to be missing: that is an
+        incident, and the row is the only remaining record that it existed.
+        """
+        return await videofiles_destroy.asyncio_detailed(file_id, client=self.client)
+
+    async def set_video_framerate(self, video_id: str, framerate_milli: int):
+        """Record the source's frame rate, in thousandths of a frame per second.
+
+        Ingest works the exact rate out anyway -- DASH segments have to fall on
+        whole frames, so it has to -- and until recently had nowhere to put it.
+        """
+        return await videos_partial_update.asyncio(
+            video_id,
+            client=self.client,
+            body=PatchedVideoRequest(framerate=framerate_milli),
+        )
+
+    async def list_videos_page(self, limit: int, offset: int):
+        """One page of the catalogue, ordered so paging is stable.
+
+        Ordered by id rather than by upload time: a backfill pages through the
+        whole catalogue while uploads are still arriving, and paging by
+        anything that new rows sort into shifts rows between pages under you.
+        """
+        return await videos_list.asyncio(client=self.client, limit=limit, offset=offset, ordering="id")
+
+    async def list_video_files_page(self, limit: int, offset: int):
+        return await videofiles_list.asyncio(client=self.client, limit=limit, offset=offset, ordering="id")
 
     async def get_videos(self, limit=10):
         return (await videos_list.asyncio(client=self.client, limit=limit, ordering="-uploaded_time")).results or []

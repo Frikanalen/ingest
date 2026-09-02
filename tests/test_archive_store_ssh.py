@@ -95,13 +95,18 @@ async def test_assert_absent_rejects_an_occupied_destination(store, source_file)
 
 @pytest.mark.asyncio
 async def test_put_refuses_to_overwrite_a_file_that_appeared_mid_job(store, archive_root, source_file):
-    """The publishing rename must fail rather than clobber a racing writer."""
+    """The publishing rename must fail rather than clobber a racing writer.
+
+    Reported as FileAlreadyArchived rather than as whatever SFTP error the
+    server chose, so callers can tell an occupied destination apart from a full
+    disk without knowing anything about asyncssh.
+    """
     target = archive_root / DESTINATION
     target.parent.mkdir(parents=True)
     target.write_bytes(b"someone got here first")
 
     async with store.open() as archive:
-        with pytest.raises(asyncssh.SFTPError):
+        with pytest.raises(FileAlreadyArchived):
             await archive.put(source_file, DESTINATION)
 
     assert target.read_bytes() == b"someone got here first"
@@ -115,7 +120,7 @@ async def test_a_failed_publish_leaves_nothing_in_the_published_tree(store, arch
     target.write_bytes(b"someone got here first")
 
     async with store.open() as archive:
-        with pytest.raises(asyncssh.SFTPError):
+        with pytest.raises(FileAlreadyArchived):
             await archive.put(source_file, DESTINATION)
 
     assert (archive_root / staging_path(DESTINATION)).exists()

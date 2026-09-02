@@ -1,6 +1,6 @@
 # Ingest
 
-Ingest handles tusd uploads for Frikanalen by validating metadata, archiving source files, generating derivative media, and updating the Django API.
+Ingest handles tusd uploads for Frikanalen by validating metadata, archiving source files, generating derivative media, and updating the Django API. It also reconciles the existing catalogue against the same declaration of what a video should have — see [Reconciling the catalogue](#reconciling-the-catalogue).
 
 It exposes these application endpoints:
 
@@ -64,15 +64,121 @@ that later looks like a finished one.
 
 Both SSH credentials must be given explicitly — ingest will not reach for the running user's `~/.ssh`, and it never disables host key verification. If either is missing, ingest logs a warning and archives to `FK_ARCHIVE_FALLBACK_DIR` instead, so you can run it locally without setting up SSH at all. **Set `FK_ARCHIVE_REQUIRED=true` anywhere that actually archives over SSH**: otherwise a secret that fails to mount leaves ingest quietly writing to scratch space, where files are lost on restart.
 
+## Reconciling the catalogue
+
+Ingest is not only a hook handler. What a video is *supposed* to have is declared in one place — `DESIRED_FORMATS` in `app/formats.py`, and the revision each template in `templates/` declares — and both paths that produce media converge on it: a fresh upload, and a video that has been in the archive for years.
+
+That matters because "this video has DASH" and "this video has *current* DASH" are different statements. Each template carries a `revision`, and `profileRevision` on the videofile row records which one produced the file. Revisions number from 1, so 0 means "registered before any of this was recorded" — which is what every pre-existing row reads as, and therefore as stale. Changing a profile is then: edit the template, bump its revision, and everything built by the old one becomes due for a rebuild without anybody keeping a list.
+
+### Chores
+
+| Chore | What it settles |
+| --- | --- |
+| `gc` | Media in the archive for a video the catalogue no longer has |
+| `legacy-broadcast-directories` | Whether the source lives in `original/` or the legacy `broadcast/` |
+| `metadata` | `duration`, `framerate` and R.128 loudness, re-derived from the original |
+| `formats` | Derivatives that are missing, or built by a superseded profile |
+
+`legacy-broadcast-directories` is named at length because it is not permanent. `broadcast/` is what the system before this one called the source file, and nothing has written one for years — the chore exists to walk the catalogue once and leave every video with its source under `original/`. Once a sweep finds none left, it should be deleted along with its tests and the `MovePath`, `RetagFile` and `UnregisterFile` actions, which exist for it and nothing else. A migration left in the code after it has finished migrating reads like a rule about how the archive works.
+
+Each is a pure function from an observed `VideoState` to the actions that would close the gap, so the awkward cases — a video whose source is still called `broadcast`, a format registered twice, media nothing claims — are unit tests rather than fixtures.
+
+**The database decides.** No chore invents a videofile row from a file it found, and none deletes a row because a file is missing. The first lets the archive overrule the catalogue; the second destroys the only remaining evidence of an incident. Both are reported instead, as notes nothing acts on.
+
+**Nothing here deletes.** `ArchiveSession` has no way to destroy archived media: removing something is a rename into `.trash/<timestamp>/<original path>`, so putting it back is the reverse rename. Purging is a separate act, and is not built yet.
+
+### Running one
+
+`fk-backfill` needs an API token **and access to the archive**, since planning reads both. That means running it from somewhere holding the SSH key — a `kubectl exec` into a worker pod is the easy answer.
+
+Look before you leap. `plan` changes nothing:
+
+```bash
+uv run python -m app.backfill plan --limit 50
+uv run python -m app.backfill plan 12345
+```
+
+`apply` plans the same way and then puts those videos in the queue, at priority 0 so a member's upload is always claimed ahead of the backfill:
+
+```bash
+uv run python -m app.backfill apply --limit 50
+uv run python -m app.backfill apply            # the whole catalogue
+```
+
+It refuses without `--yes` if any of the plans move media out of the published tree, and it leaves alone any video ingest is working on right now — overwriting that job would reset somebody's upload under them.
+
+Then scale the pool and let it drain. It is safe to close the terminal: the queue is the state, and a worker re-plans each video when it claims it.
+
+```bash
+kubectl scale deployment/ingest-workers --replicas=6
+```
+
+Re-running `apply` is how you resume. The plan is derived from what is actually there, so anything already done is simply not planned again.
+
+### What the queue is not
+
+Uploads do not go through it. tusd's `post-finish` hook still calls the ingest pipeline inline, exactly as it always has, so a member's upload is probed, archived and transcoded inside that request and never becomes a job. The queue exists for the backfill.
+
+`IngestKind` has an `upload` value because django-api models both, but no worker can service one: an upload's source is a file in the upload volume that nothing has archived yet, and no chore knows how to archive one. A worker handed such a job fails it rather than reporting it done, since reporting success would record the video as ingested having had nothing done to it.
+
+### Reclaiming deleted videos
+
+`gc` is separate, and cannot use the queue: an ingest job belongs to a video, so a video the catalogue has deleted has no job to enqueue and none to claim. The sweep compares the whole archive against the whole catalogue and does the work itself.
+
+```bash
+uv run python -m app.backfill gc            # says what it would reclaim
+uv run python -m app.backfill gc --yes      # moves it into .trash/
+```
+
+Two guards, because this is the one operation whose blast radius is the whole archive. The catalogue read refuses to hand back a partial answer, since a short read would make the archive look like garbage in exactly the proportion it fell short by. And the sweep stops if more than `--max-delete-fraction` of the archive turns out to be unaccounted for — 2% by default.
+
+That second one is aimed at a specific mistake: pointing `FK_API_URL` at one environment and `FK_ARCHIVE_DIR` at another. Every individual decision is then locally correct — that video really is not in that catalogue — and only the total is alarming, so the total is what gets checked. If you cross it legitimately, raise it deliberately.
+
 ## Deployment
 
-`chart/` holds the Helm chart. It deploys tusd alongside ingest in the same pod, so tusd reaches the hook endpoint over the pod's loopback and the two share the upload volume rather than passing files across a network. Only tusd is exposed, through an ingress on the upload hostname; ingest's own endpoints stay cluster-internal.
+`chart/` holds the Helm chart. It deploys two things: the `-upload` Deployment, which runs tusd alongside ingest in the same pod so tusd reaches the hook endpoint over the pod's loopback and the two share the upload volume rather than passing files across a network; and the `-workers` Deployment, which drains the ingest queue and is described under [Queue workers](#queue-workers). Only tusd is exposed, through an ingress on the upload hostname; ingest's own endpoints stay cluster-internal.
 
-Because one pod owns the upload volume, the chart runs a single replica with the `Recreate` strategy. Going multi-replica would need `ReadWriteMany` storage and session affinity, since a resumed upload has to reach the pod holding its partial file.
+Because one pod owns the upload volume, the upload Deployment runs a single replica with the `Recreate` strategy. Going multi-replica would need `ReadWriteMany` storage and session affinity, since a resumed upload has to reach the pod holding its partial file.
 
 tusd is served at `/upload` on the main site — `https://frikanalen.no/upload`, `https://staging.frikanalen.no/upload` — sharing the host with the frontend at `/` and the API at `/api`, so no upload subdomain is needed per environment. The ingress path is tusd's own `basePath` and is passed through unstripped, so tusd sees the URLs it advertises.
 
 `FK_UPLOAD_URL` in the Django settings must point at that same URL, since it is handed to the frontend as a video's `uploadUrl`.
+
+#### Upgrading past the rename
+
+The upload half used to be named after the release alone. It is now suffixed `-upload` throughout — Deployment, Service, Ingress and claim — because it is the half that owns tusd and the upload volume rather than the whole of ingest, and a name that says so is worth more than the continuity of the old one.
+
+To Kubernetes every one of those is a delete and a create. Two need care.
+
+The Deployment owns a `ReadWriteOnce` volume, so its replacement cannot attach until the old pod has released it. Delete it yourself rather than trusting Helm to order the two.
+
+**The claim is renamed, which means the old volume is abandoned with whatever is on it** — uploads still in flight, and anything ingest had not finished archiving. Helm will not remove it either way, since it carries `helm.sh/resource-policy: keep`, so it lingers until deleted by hand. Do this when nothing is uploading:
+
+```bash
+kubectl delete deployment/ingest --wait
+helm upgrade ingest ./chart
+kubectl delete pvc/ingest-uploads
+```
+
+The old Service and Ingress go with the upgrade; Helm removes them itself, since they are in the previous release and no longer rendered. Only the claim survives to be deleted deliberately, which is the point of the policy.
+
+### Queue workers
+
+`workers` in the chart is a second Deployment of the same image running `python -m app.worker`, which claims jobs from django-api's ingest queue instead of serving tusd's hooks. It mounts no upload volume, and that is the point: the upload volume is `ReadWriteOnce` and therefore single-node, which is what pins the ingest pod to one replica. A worker needs only the archive, an API token and scratch space, so the pool scales freely.
+
+It has no Service and no ingress. Workers reach out to django-api and to the archive; nothing reaches in, so there is no endpoint to protect.
+
+Capacity is `replicas`, and nothing else — a worker asks for a job only when it is free, so no dispatcher has to know how many there are. It ships at zero, and a backfill is something you start deliberately:
+
+```bash
+kubectl scale deployment/ingest-workers --replicas=6
+```
+
+That is reverted by the next `helm upgrade`, which sets it back to `workers.replicaCount`; set it there for anything you want to keep. Overshooting is safe — the scheduler leaves the surplus Pending rather than overcommitting the nodes.
+
+`workers.kind` says what the pool can reach rather than what it prefers. `backfill` means its sources are in the archive; an upload's source is in the upload volume, which no worker mounts, so it must not be handed one.
+
+Scaling down mid-encode costs the encode. `SIGTERM` makes a worker stop claiming and finish the job it holds, but only within `terminationGracePeriodSeconds`; anything still running when that elapses is killed, and its lease expires so another worker picks the video up later. The default is an hour, which is also how long a node drain will wait for a worker.
 
 The SSH credentials come from a Kubernetes secret created outside the chart, by the `ingest_archive_account` role in the [infra](https://github.com/Frikanalen/infra) repository. The private key is generated on first run and stored only in that secret, so it never passes through Git or the vault. That role's README covers the `authorized_keys` restrictions on the archive host and rotation.
 

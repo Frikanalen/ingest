@@ -107,6 +107,57 @@ work:
   emptyDir:
     sizeLimit: 50Gi
 
+# A second pool of the same image that drains the ingest queue instead of
+# serving tusd's hooks. It mounts no upload volume, which is what frees it from
+# the single-node constraint the ingest pod has, and it needs no Service or
+# ingress because it only ever reaches out.
+workers:
+  enabled: true
+
+  # Zero by default: the pool costs nothing at rest, and a backfill is
+  # something you start deliberately. `kubectl scale` is the capacity control.
+  replicaCount: 0
+
+  # What this pool can reach. An upload's source is in the upload volume, which
+  # no worker mounts, so it must only claim work whose source is the archive.
+  # Leave empty to claim either, which is only right once workers can reach
+  # both.
+  kind: backfill
+
+  # How long to wait before asking again when the queue is empty.
+  pollIntervalSeconds: 30
+
+  # SIGTERM stops a worker claiming; it still finishes the job it holds. This
+  # is how long that is allowed to take. The default 30s is useless here -- a
+  # VP9 ladder is hours -- but a long value also means node drains and cluster
+  # upgrades wait this long for a worker to finish. An hour is a compromise;
+  # raise it if losing an encode to a drain matters more than the wait.
+  terminationGracePeriodSeconds: 3600
+
+  work:
+    mountPath: /work
+    # Holds one video's original plus its derivatives. Bigger than the ingest
+    # pod's, because a backfill fetches the source as well as writing outputs.
+    emptyDir:
+      sizeLimit: 100Gi
+
+  # Pure batch, so ask for real CPU: unlike the ingest pod there is nothing
+  # latency-sensitive here to protect, and a worker that gets the floor of CPU
+  # shares just makes the backfill take proportionally longer. Still no
+  # limits.cpu -- see the note on the ingest pod's resources below.
+  resources:
+    requests:
+      cpu: "4"
+      memory: "1Gi"
+    limits:
+      memory: "4Gi"
+
+  # Batch work is a reasonable thing to keep off the nodes serving the site.
+  nodeSelector: {}
+  tolerations: []
+
+  podAnnotations: {}
+
 service:
   type: ClusterIP
   # Ingest's own port: tusd hooks and the health check. Cluster-internal only.

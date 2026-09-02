@@ -89,14 +89,35 @@ across a network.
 {{- end }}
 
 {{/*
-Environment for the ingest container.
+The upload half's resource name.
 
-Only FK_ARCHIVE_HOST switches ingest from a local archive to SSH; without it
-the remaining archive settings are inert.
+Everything belonging to the pod that owns tusd and the upload volume is named
+from this, so the Deployment, Service, Ingress and claim move together and none
+of them can be left behind describing the old shape.
 */}}
-{{- define "ingest.env" -}}
-- name: FK_PORT
-  value: {{ .Values.service.port | quote }}
+{{- define "ingest.uploadFullname" -}}
+{{ include "ingest.fullname" . }}-upload
+{{- end }}
+
+{{/*
+Selector labels for the worker pool.
+
+Deliberately not ingest.selectorLabels. A Service selects on a subset, so a
+worker carrying the same three labels would be routed tusd hook traffic it has
+no server to answer with. Differing on `app` is what keeps them apart, and it
+has to be a difference rather than an addition for that reason.
+*/}}
+{{- define "ingest.workerSelectorLabels" -}}
+app.kubernetes.io/name: {{ include "ingest.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: worker
+app: {{ include "ingest.name" . }}-worker
+{{- end }}
+
+{{/*
+How ingest authenticates to django-api. Shared by everything that talks to it.
+*/}}
+{{- define "ingest.apiEnv" -}}
 - name: FK_API_URL
   value: {{ .Values.api.url | quote }}
 # A token, not a login: with a username and password ingest would exchange
@@ -106,14 +127,15 @@ the remaining archive settings are inert.
     secretKeyRef:
       name: {{ .Values.api.secretName }}
       key: {{ .Values.api.tokenKey }}
-- name: FK_TUSD_DIR
-  value: {{ .Values.uploads.mountPath | quote }}
-# Both containers mount the upload volume at the same path, so the paths tusd
-# reports are the paths ingest reads.
-- name: FK_TUSD_UPLOAD_DIR
-  value: {{ .Values.uploads.mountPath | quote }}
-- name: FK_WORK_DIR
-  value: {{ .Values.work.mountPath | quote }}
+{{- end }}
+
+{{/*
+Where finished files go, and anything else the deployment wants to set.
+
+Only FK_ARCHIVE_HOST switches ingest from a local archive to SSH; without it
+the remaining archive settings are inert.
+*/}}
+{{- define "ingest.archiveEnv" -}}
 {{- if .Values.archive.ssh.enabled }}
 - name: FK_ARCHIVE_HOST
   value: {{ .Values.archive.ssh.host | quote }}
@@ -134,4 +156,46 @@ the remaining archive settings are inert.
 - name: {{ $name }}
   value: {{ $value | quote }}
 {{- end }}
+{{- end }}
+
+{{/*
+Environment for the ingest container.
+
+The order is the order it has always been in, so that splitting these helpers
+out for the worker pool does not roll the upload pod for no reason.
+*/}}
+{{- define "ingest.env" -}}
+- name: FK_PORT
+  value: {{ .Values.service.port | quote }}
+{{ include "ingest.apiEnv" . }}
+- name: FK_TUSD_DIR
+  value: {{ .Values.uploads.mountPath | quote }}
+# Both containers mount the upload volume at the same path, so the paths tusd
+# reports are the paths ingest reads.
+- name: FK_TUSD_UPLOAD_DIR
+  value: {{ .Values.uploads.mountPath | quote }}
+- name: FK_WORK_DIR
+  value: {{ .Values.work.mountPath | quote }}
+{{ include "ingest.archiveEnv" . }}
+{{- end }}
+
+{{- define "ingest.workerEnv" -}}
+- name: FK_WORK_DIR
+  value: {{ .Values.workers.work.mountPath | quote }}
+# The pod name, so an operator reading claimed_by on a stuck job knows which
+# pod to go and look at.
+- name: FK_WORKER_NAME
+  valueFrom:
+    fieldRef:
+      fieldPath: metadata.name
+{{- with .Values.workers.kind }}
+# What this pool can reach, not what it prefers. An upload's source is in the
+# upload volume, which no worker mounts.
+- name: FK_WORKER_KIND
+  value: {{ . | quote }}
+{{- end }}
+- name: FK_WORKER_POLL_INTERVAL_S
+  value: {{ .Values.workers.pollIntervalSeconds | quote }}
+{{ include "ingest.apiEnv" . }}
+{{ include "ingest.archiveEnv" . }}
 {{- end }}

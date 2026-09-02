@@ -2,7 +2,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "ingest.fullname" . }}
+  name: {{ include "ingest.uploadFullname" . }}
   labels:
     {{- include "ingest.labels" . | nindent 4 }}
   annotations:
@@ -28,7 +28,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ include "ingest.fullname" . }}
+                name: {{ include "ingest.uploadFullname" . }}
                 port:
                   number: {{ .Values.tusd.port }}
   tls:

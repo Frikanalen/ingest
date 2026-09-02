@@ -1,9 +1,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "ingest.fullname" . }}
+  # -upload, because this is the half that owns tusd and the upload volume
+  # rather than the whole of ingest -- the worker pool does at least as much
+  # ingesting. The Service, Ingress and claim are named from the same helper,
+  # so none of them can be left behind describing the old shape.
+  #
+  # Renaming a Deployment is a delete and a create, and this one owns a
+  # ReadWriteOnce volume, so the replacement cannot attach until the old pod
+  # has released it. Delete the old `ingest` Deployment and let it finish
+  # terminating before upgrading, rather than trusting Helm to order the two.
+  # Renaming the claim abandons the old volume with whatever was on it; see
+  # the README on upgrading past this.
+  name: {{ include "ingest.uploadFullname" . }}
   labels:
     {{- include "ingest.labels" . | nindent 4 }}
+    app.kubernetes.io/component: upload
 spec:
   replicas: {{ .Values.replicaCount }}
   # Recreate, not RollingUpdate: one pod owns the upload volume, and a second
@@ -27,6 +39,9 @@ spec:
         {{- end }}
       labels:
         {{- include "ingest.selectorLabels" . | nindent 8 }}
+        # Not in the selector, which stays as it was: a label the Service does
+        # not select on can be added and removed freely, and a selector cannot.
+        app.kubernetes.io/component: upload
     spec:
       # The SSH credentials are mounted read-only for the group; fsGroup is what
       # lets the unprivileged ingest user read them, and what makes the work and
@@ -93,7 +108,7 @@ spec:
             claimName: {{ .Values.uploads.existingClaim }}
           {{- else if .Values.uploads.persistence.enabled }}
           persistentVolumeClaim:
-            claimName: {{ include "ingest.fullname" . }}-uploads
+            claimName: {{ include "ingest.uploadFullname" . }}-data
           {{- else }}
           emptyDir: {}
           {{- end }}
