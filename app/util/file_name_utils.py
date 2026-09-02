@@ -1,5 +1,11 @@
 from pathlib import Path, PurePosixPath
 
+#: Where a video's editorial stills live. Named because it is the one directory
+#: under <id>/ that is not derived from the original: the images are registered
+#: in a different table and describe the programme rather than its media, so an
+#: upload that supersedes the media has no business taking them with it.
+IMAGES_DIR = "images"
+
 
 def original_file_location(video_id: str, original_file_name: Path) -> PurePosixPath:
     """Returns the archive-relative path to the original file for video_id"""
@@ -29,4 +35,4 @@ def program_image_location(video_id: str, image_id: str, extension: str) -> Pure
         raise ValueError("image_id must be alphanumeric")
     if extension not in {".jpg", ".png", ".webp"}:
         raise ValueError(f"unsupported programme-image extension: {extension}")
-    return PurePosixPath(video_id) / "images" / f"{image_id}{extension}"
+    return PurePosixPath(video_id) / IMAGES_DIR / f"{image_id}{extension}"

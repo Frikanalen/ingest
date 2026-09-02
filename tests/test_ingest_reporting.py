@@ -14,7 +14,8 @@ import pytest_asyncio
 from frikanalen_django_api_client.models import IngestStateEnum
 
 from app.api.hooks.metadata import MetadataExtractor
-from app.archive_store import FileAlreadyArchived, SshArchiveStore
+from app.archive_store import SshArchiveStore
+from app.archive_store.ssh import SshArchiveSession
 from app.ingest import Ingester
 from app.ingest_reporting import IngestErrorCode, IngestReporter
 from app.util.settings import SshArchiveSettings
@@ -148,22 +149,25 @@ async def test_transcoding_progress_tracks_dashs_own_position(archive, django_ap
 
 @pytest.mark.asyncio
 async def test_a_failed_archive_is_reported_with_a_code(
-    archive, archive_root, django_api, work_dir, uploaded_file, metadata
+    archive, archive_root, django_api, work_dir, uploaded_file, metadata, monkeypatch
 ):
-    occupied = archive_root / VIDEO_ID / "original" / "example_video.mp4"
-    occupied.parent.mkdir(parents=True)
-    occupied.write_bytes(b"already archived")
+    """An occupied destination used to be how this failure was provoked. It is
+    a supported case now -- an upload supersedes what was there -- so the
+    archive is made to refuse outright instead."""
 
-    with pytest.raises(FileAlreadyArchived):
-        await Ingester(archive=archive, django_api=django_api).ingest(
-            VIDEO_ID, uploaded_file, metadata
-        )
+    async def refuse(self, source, destination):
+        raise RuntimeError("no space left on device")
+
+    monkeypatch.setattr(SshArchiveSession, "put", refuse)
+
+    with pytest.raises(RuntimeError, match="no space left on device"):
+        await Ingester(archive=archive, django_api=django_api).ingest(VIDEO_ID, uploaded_file, metadata)
 
     last = django_api.report_ingest_state.await_args_list[-1]
 
     assert last.args[1] == IngestStateEnum.FAILED
     assert last.kwargs["error_code"] == IngestErrorCode.ARCHIVE_FAILED
-    assert last.kwargs["status_text"], "the operator needs to know which file was in the way"
+    assert last.kwargs["status_text"], "the operator needs to know why the archive would not take it"
 
 
 @pytest.mark.asyncio

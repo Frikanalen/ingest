@@ -21,7 +21,8 @@ import pytest_asyncio
 from frikanalen_django_api_client.models import IngestKindEnum, VideoFileVariantEnum
 
 from app.api.hooks.metadata import MetadataExtractor
-from app.archive_store import FileAlreadyArchived, SshArchiveStore
+from app.archive_store import SshArchiveStore
+from app.archive_store.ssh import SshArchiveSession
 from app.formats import current_revision
 from app.ingest import Ingester
 from app.media.loudness.measure import measure_loudness
@@ -93,18 +94,33 @@ def django_api():
 
 
 @pytest.fixture
-def django_api_with_dash():
-    """A catalogue that already has this video's DASH, at the current revision."""
+def django_api_with_previous_upload(archive_root):
+    """A video that has already been through here once, archive and rows both.
+
+    Both halves matter: the point of superseding is that the archive and the
+    catalogue are brought forward together, and a fixture that seeded only one
+    of them could not tell a test that dropped the rows from one that trashed
+    the files.
+    """
+    original = archive_root / VIDEO_ID / "original"
+    original.mkdir(parents=True)
+    (original / "previous_cut.mp4").write_bytes(b"the previous upload")
+
+    dash = archive_root / VIDEO_ID / "dash"
+    dash.mkdir(parents=True)
+    (dash / "manifest.mpd").write_bytes(b"the previous ladder")
+
     return recording_django_api(
         VIDEO_ID,
         files=[
+            registered_file(1, VIDEO_ID, VideoFileVariantEnum.ORIGINAL, f"{VIDEO_ID}/original/previous_cut.mp4"),
             registered_file(
-                1,
+                2,
                 VIDEO_ID,
                 VideoFileVariantEnum.DASH,
                 f"{VIDEO_ID}/dash/manifest.mpd",
                 revision=current_revision(VideoFileVariantEnum.DASH),
-            )
+            ),
         ],
     )
 
@@ -325,36 +341,203 @@ async def test_records_the_frame_rate_it_worked_out_anyway(ingested, django_api)
 
 
 @pytest.mark.asyncio
-async def test_builds_only_what_is_missing(archive, django_api_with_dash, work_dir, uploaded_file, metadata):
-    """The point of planning rather than looping: a format the catalogue
-    already has at the current revision is not built a second time, so a video
-    that comes back through here does not collide with its own output --
-    put() refuses to overwrite, by design."""
-    await Ingester(archive=archive, django_api=django_api_with_dash).ingest(
+async def test_a_second_upload_supersedes_the_first(
+    archive, archive_root, django_api_with_previous_upload, work_dir, uploaded_file, metadata
+):
+    """The contract this file exists to pin: an upload to a video that already
+    has one replaces it.
+
+    The old behaviour had no way to say that. A same-named file was refused, so
+    a member could not correct their own video; a differently-named one was
+    accepted alongside, leaving `original/` with two files and the video
+    unprocessable by every job that would ever look at it."""
+    await Ingester(archive=archive, django_api=django_api_with_previous_upload).ingest(
         VIDEO_ID, uploaded_file, metadata
     )
-    await drain_one(archive, django_api_with_dash, work_dir)
 
-    built = [call.kwargs["file_format"] for call in django_api_with_dash.create_video_file.await_args_list]
+    original = archive_root / VIDEO_ID / "original"
+    assert [p.name for p in original.iterdir()] == ["example_video.mp4"]
 
-    assert VideoFileVariantEnum.DASH not in built
-    assert VideoFileVariantEnum.LARGE_THUMB in built
+
+@pytest.mark.asyncio
+async def test_a_second_upload_under_the_same_name_replaces_it(
+    archive, archive_root, django_api, work_dir, uploaded_file, metadata
+):
+    """The case that used to be a dead end: same video, same filename. It is
+    also the likeliest one, since a member correcting a video usually re-exports
+    from the same project under the same name."""
+    occupied = archive_root / VIDEO_ID / "original" / "example_video.mp4"
+    occupied.parent.mkdir(parents=True)
+    occupied.write_bytes(b"the previous upload")
+
+    await Ingester(archive=archive, django_api=django_api).ingest(VIDEO_ID, uploaded_file, metadata)
+
+    assert occupied.is_file()
+    assert occupied.read_bytes() != b"the previous upload"
+    django_api.enqueue_ingest_job.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_the_superseded_media_is_only_trashed_never_destroyed(
+    archive, archive_root, django_api_with_previous_upload, work_dir, uploaded_file, metadata
+):
+    """What makes replacing a member's video defensible at all: it is a rename
+    into `.trash/`, purged separately and deliberately, so an upload sent to
+    the wrong id costs someone a rename back rather than a restore from
+    backup."""
+    await Ingester(archive=archive, django_api=django_api_with_previous_upload).ingest(
+        VIDEO_ID, uploaded_file, metadata
+    )
+
+    trashed = list((archive_root / ".trash").rglob("previous_cut.mp4"))
+    assert len(trashed) == 1
+    assert trashed[0].read_bytes() == b"the previous upload"
+
+
+@pytest.mark.asyncio
+async def test_the_superseded_rows_are_unregistered(
+    archive, django_api_with_previous_upload, work_dir, uploaded_file, metadata
+):
+    """Trashing the file and dropping the row that names it are one act. A row
+    left behind would name a file that is no longer there, which is the one
+    thing the backfill refuses to manufacture -- it reads a missing file as an
+    incident worth keeping the evidence of, not as a row to tidy away."""
+    await Ingester(archive=archive, django_api=django_api_with_previous_upload).ingest(
+        VIDEO_ID, uploaded_file, metadata
+    )
+
+    unregistered = {call.args[0] for call in django_api_with_previous_upload.delete_video_file.await_args_list}
+    assert unregistered == {1, 2}
+
+    surviving = (await django_api_with_previous_upload.get_files_for_video(VIDEO_ID)).results
+    assert [row.filename for row in surviving] == [f"{VIDEO_ID}/original/example_video.mp4"]
+
+
+@pytest.mark.asyncio
+async def test_a_re_upload_rebuilds_every_derived_format(
+    archive, archive_root, django_api_with_previous_upload, work_dir, uploaded_file, metadata
+):
+    """Not an optimisation missed: a DASH ladder describes the file it was
+    built from, so keeping the old one beside a new original would leave the
+    catalogue serving the video the member has just replaced."""
+    await Ingester(archive=archive, django_api=django_api_with_previous_upload).ingest(
+        VIDEO_ID, uploaded_file, metadata
+    )
+    await drain_one(archive, django_api_with_previous_upload, work_dir)
+
+    built = [call.kwargs["file_format"] for call in django_api_with_previous_upload.create_video_file.await_args_list]
+    assert VideoFileVariantEnum.DASH in built
+
+    assert (archive_root / VIDEO_ID / "dash" / "manifest.mpd").is_file()
+    assert [p.name for p in (archive_root / VIDEO_ID / "original").iterdir()] == ["example_video.mp4"]
+
+
+@pytest.mark.asyncio
+async def test_an_original_directory_holding_two_files_is_recovered(
+    archive, archive_root, django_api, work_dir, uploaded_file, metadata
+):
+    """The unrecoverable state, recovered.
+
+    A video left in this state by the old behaviour could never be processed
+    again -- not by this upload and not by any future backfill, because the
+    plan's first act is to fetch a source it refuses to guess at. Superseding
+    clears the directory wholesale, so the video comes back rather than
+    needing someone to go in and delete a file by hand."""
+    original = archive_root / VIDEO_ID / "original"
+    original.mkdir(parents=True)
+    (original / "first_upload.mp4").write_bytes(b"one")
+    (original / "second_upload.mp4").write_bytes(b"two")
+
+    await Ingester(archive=archive, django_api=django_api).ingest(VIDEO_ID, uploaded_file, metadata)
+    await drain_one(archive, django_api, work_dir)
+
+    assert [p.name for p in original.iterdir()] == ["example_video.mp4"]
+    assert (archive_root / VIDEO_ID / "dash" / "manifest.mpd").is_file()
+    django_api.set_video_proper_import.assert_awaited_once_with(VIDEO_ID, True)
+
+
+@pytest.mark.asyncio
+async def test_programme_images_survive_a_re_upload(
+    archive, archive_root, django_api_with_previous_upload, work_dir, uploaded_file, metadata
+):
+    """`images/` is the one directory under <id>/ that is not derived from the
+    original. The stills are registered in another table this knows nothing
+    about, so taking them along would leave rows naming files that are gone --
+    and a member replacing their video did not ask to lose the poster they
+    chose for it."""
+    image = archive_root / VIDEO_ID / "images" / "abc123.jpg"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"a poster frame")
+
+    await Ingester(archive=archive, django_api=django_api_with_previous_upload).ingest(
+        VIDEO_ID, uploaded_file, metadata
+    )
+
+    assert image.read_bytes() == b"a poster frame"
+
+
+def _break_the_archive(monkeypatch):
+    """Make every put() fail, so the failure is the archive rather than a
+    destination that happens to be occupied."""
+
+    async def refuse(self, source, destination):
+        raise RuntimeError("archive is down")
+
+    monkeypatch.setattr(SshArchiveSession, "put", refuse)
+
+
+@pytest.mark.asyncio
+async def test_superseding_is_finished_by_a_retry_rather_than_left_half_done(
+    archive, archive_root, django_api_with_previous_upload, work_dir, uploaded_file, metadata
+):
+    """A run that dies between trashing the media and dropping the rows leaves
+    rows naming trashed files, which is the state nothing else in the system is
+    allowed to create. The step is entered when *either* the archive or the
+    catalogue still holds something, so the retry finishes the job rather than
+    stepping over it because the archive already looks clean."""
+    dropping = django_api_with_previous_upload.delete_video_file.side_effect
+    attempts = []
+
+    async def fail_the_first_drop(file_id):
+        attempts.append(file_id)
+        if len(attempts) == 1:
+            raise RuntimeError("django-api is down")
+        await dropping(file_id)
+
+    django_api_with_previous_upload.delete_video_file.side_effect = fail_the_first_drop
+
+    with pytest.raises(RuntimeError, match="django-api is down"):
+        await Ingester(archive=archive, django_api=django_api_with_previous_upload).ingest(
+            VIDEO_ID, uploaded_file, metadata
+        )
+
+    # Exactly the half-done state: the media is gone, the rows still name it.
+    assert not (archive_root / VIDEO_ID / "original").exists()
+    assert len((await django_api_with_previous_upload.get_files_for_video(VIDEO_ID)).results) == 2
+    assert uploaded_file.exists()
+
+    await Ingester(archive=archive, django_api=django_api_with_previous_upload).ingest(
+        VIDEO_ID, uploaded_file, metadata
+    )
+
+    surviving = (await django_api_with_previous_upload.get_files_for_video(VIDEO_ID)).results
+    assert [row.filename for row in surviving] == [f"{VIDEO_ID}/original/example_video.mp4"]
 
 
 @pytest.mark.asyncio
 async def test_keeps_the_upload_when_the_archive_rejects_it(
-    archive, archive_root, django_api, work_dir, uploaded_file, metadata
+    archive, django_api, work_dir, uploaded_file, metadata, monkeypatch
 ):
-    """A failed ingest must leave the upload behind so it can be retried."""
-    occupied = archive_root / VIDEO_ID / "original" / "example_video.mp4"
-    occupied.parent.mkdir(parents=True)
-    occupied.write_bytes(b"already archived")
+    """A failed ingest must leave the upload behind so it can be retried.
 
-    with pytest.raises(FileAlreadyArchived):
-        await Ingester(archive=archive, django_api=django_api).ingest(
-            VIDEO_ID, uploaded_file, metadata
-        )
+    It used to be an occupied destination that produced the failure. That is a
+    supported case now, so the archive is broken outright instead -- the
+    property being pinned was never about which failure, only that the bytes
+    tusd is holding are the last copy until the archive has the same ones."""
+    _break_the_archive(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="archive is down"):
+        await Ingester(archive=archive, django_api=django_api).ingest(VIDEO_ID, uploaded_file, metadata)
 
     assert uploaded_file.exists()
-    assert occupied.read_bytes() == b"already archived"
     django_api.enqueue_ingest_job.assert_not_awaited()

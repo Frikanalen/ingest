@@ -55,6 +55,10 @@ async def prepare_upload(
         upload_id = metadata.video_id
         new_file = Path(upload_id, sanitized_filename)
 
+    # A video's spool path is keyed on the video, so a second upload to the
+    # same video lands on the first one's leftovers. Dropping them is the same
+    # policy the archive applies a step later, where the new original
+    # supersedes the old: an upload replaces what it arrives on top of.
     if metadata.upload_kind == UploadKind.VIDEO and (settings.tusd_dir / new_file).exists():
         logger.warning("File already exists, deleting!: %s", settings.tusd_dir / new_file)
         (settings.tusd_dir / new_file).unlink()

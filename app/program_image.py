@@ -85,6 +85,14 @@ class ProgramImageIngester:
             # A post-finish hook may be retried after publication but before
             # Django acknowledged registration. Reuse that exact destination
             # rather than either overwriting it or creating a duplicate.
+            #
+            # Deliberately not what a video upload does, which supersedes what
+            # it finds. The difference is what the destination is keyed on: an
+            # image gets a fresh id per upload, so something already at this
+            # exact path can only be this same upload arriving twice. A video's
+            # path is keyed on the video, so what is there may equally be a
+            # different file the member is replacing -- and exists() cannot
+            # tell the two apart. See Ingester._supersede_previous_media.
             if not await archive.exists(destination):
                 await archive.put(uploaded_file, destination)
 
