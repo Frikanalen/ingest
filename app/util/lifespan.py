@@ -4,7 +4,6 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from fastapi import FastAPI
 from frikanalen_django_api_client import AuthenticatedClient
 
-from app.api.debug.watch_folder.watcher import stop_watch_folder
 from app.archive_store import create_archive_store
 from app.django_client.service import DjangoApiService
 from app.util.ingest_app_state import IngestAppState
@@ -52,13 +51,15 @@ async def lifespan(app: FastAPI):
 
         app.state.app_state = IngestAppState(django_api=django_api, archive=archive)  # type: ignore[attr-defined]
 
-        # fixme: should only happen in debug mode
-        from app.api.debug.watch_folder.watcher import start_watchfolder
+        # Debug only, and imported here so that a deployment does not even load
+        # watchdog: the observer polls the whole upload volume once a second.
+        watcher = None
+        if settings.debug:
+            from app.api.debug.watch_folder import watcher
 
-        logger.info("Starting directory watcher for %s", settings.tusd_dir)
-        start_watchfolder(settings.tusd_dir)
+            watcher.start_watchfolder(settings.tusd_dir)
 
         yield  # App runs here
 
-        # stop the watch folder observer if it was running
-        stop_watch_folder()
+        if watcher is not None:
+            watcher.stop_watch_folder()

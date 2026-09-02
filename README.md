@@ -6,7 +6,7 @@ It exposes these application endpoints:
 
 - `POST /tusdHooks/` handles tusd's `pre-create` and `post-finish` hooks. `pre-create` validates the upload metadata and assigns its storage path; `post-finish` starts the ingest job.
 - `GET /internal/isAlive` is the health check.
-- `GET /watchFolder/tusFiles` and `GET /watchFolder/archive` stream directory listings as server-sent events for debugging. Filesystem changes do not start ingest jobs.
+- `GET /watchFolder/tusFiles` and `GET /watchFolder/archive` stream directory listings as server-sent events for debugging. Filesystem changes do not start ingest jobs. **Only mounted when `FK_DEBUG` is set** — see [Debug mode](#debug-mode).
 
 For a completed upload the hook checks the media with FFprobe, copies the source file from `FK_TUSD_DIR` to `<archive>/<video-id>/original/<filename>`, registers it along with the video's duration and upload time, and queues an ingest job. Then it returns. The uploaded file is removed from `FK_TUSD_DIR` at that point, because the archive now holds the same bytes and the queued job reads from there; a failure before the file is archived leaves it in place for a retry.
 
@@ -25,6 +25,19 @@ of at most 10 MB, reads its real format and dimensions, and publishes it as
 `<video-id>/images/<upload-id>.<extension>`. It registers that archive-relative
 path with Django only after the archive rename succeeds. A failed registration
 leaves the tusd copy available for a retry; registration is idempotent.
+
+### Debug mode
+
+`FK_DEBUG=true` turns on three things a deployment should not have, and nothing else: the
+`/watchFolder` endpoints, the directory observer that feeds them, and FastAPI's own debug mode, which
+returns a traceback to whoever provoked the error. It also drops logging from `INFO` back to `DEBUG`.
+It defaults to off.
+
+The observer is the reason this is a switch rather than a comment. It is a `watchdog`
+`PollingObserver` — no inotify, so it walks the tree and stats every entry, once a second, forever, in
+a thread. In production that tree is the 200 GiB upload volume shared with tusd, inside the pod
+serving tusd's hooks. That pod no longer transcodes, so a permanent recursive stat of the whole
+volume is now a large share of everything it does.
 
 ## Formats
 
@@ -237,7 +250,7 @@ FK_ARCHIVE_DIR=./archive
 FK_PORT=8081
 ```
 
-This archives into `./archive` locally; no SSH setup is needed for development.
+This archives into `./archive` locally; no SSH setup is needed for development. Add `FK_DEBUG=true` if you want the `/watchFolder` endpoints — see [Debug mode](#debug-mode).
 
 Start ingest with:
 
