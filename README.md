@@ -68,6 +68,8 @@ Both SSH credentials must be given explicitly — ingest will not reach for the 
 
 Ingest is not only a hook handler. What a video is *supposed* to have is declared in one place — `DESIRED_FORMATS` in `app/formats.py`, and the revision each template in `templates/` declares — and both paths that produce media converge on it: a fresh upload, and a video that has been in the archive for years.
 
+They converge on it by running the same code. Once the hook has archived the original, an upload is a video like any other: ingest observes it, plans the difference against the desired state, and applies the plan — the same `CONVERGENCE_CHORES` a worker runs when it claims one. The upload path holds no list of formats of its own, so a format added to `DESIRED_FORMATS` or a template whose revision moves reaches both paths or neither. It is also how a freshly uploaded video gets its `framerate`, which the hook works out anyway for DASH segmentation and previously had nowhere to put.
+
 That matters because "this video has DASH" and "this video has *current* DASH" are different statements. Each template carries a `revision`, and `profileRevision` on the videofile row records which one produced the file. Revisions number from 1, so 0 means "registered before any of this was recorded" — which is what every pre-existing row reads as, and therefore as stale. Changing a profile is then: edit the template, bump its revision, and everything built by the old one becomes due for a rebuild without anybody keeping a list.
 
 ### Chores

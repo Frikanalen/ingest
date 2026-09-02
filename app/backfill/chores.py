@@ -284,6 +284,17 @@ CHORES: Mapping[str, Chore] = {
     "formats": produce_formats,
 }
 
+#: What it means to converge one video that still exists. Named here rather
+#: than spelled out at each call site because both of them -- a worker draining
+#: the queue and the hook handling a fresh upload -- have to agree on it, and a
+#: chore that reached one path and not the other is precisely the drift this
+#: whole arrangement exists to prevent.
+#:
+#: Garbage collection is left out for the same reason it exists: it is about
+#: videos the catalogue has dropped, which have neither a job to be claimed
+#: under nor an upload behind them.
+CONVERGENCE_CHORES: Sequence[str] = ("legacy-broadcast-directories", "metadata", "formats")
+
 
 def plan(state: VideoState, desired: DesiredState, chores: Sequence[str] = tuple(CHORES)) -> Plan:
     """Work out everything one video needs, running the chores in order."""
