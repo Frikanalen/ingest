@@ -71,9 +71,31 @@ def recording_django_api(video_id: str, files: list[SimpleNamespace] | None = No
     async def get_files_for_video(_video_id):
         return SimpleNamespace(count=len(rows), results=list(rows))
 
-    # The queue, such as it is: one job per video, which is what django-api
-    # holds too. Enough for a test to hand a worker the job the hook just
-    # queued and watch the two halves meet.
+    async def delete_video_file(file_id):
+        # Really removed, not just recorded: an ingest that supersedes the
+        # previous upload drops these rows and then observes the video again,
+        # so a mock that kept answering with them would have it plan around
+        # files it had just unregistered.
+        rows[:] = [row for row in rows if row.id != file_id]
+
+    api.create_video_file.side_effect = create_video_file
+    api.set_video_duration.side_effect = set_video_duration
+    api.set_video_framerate.side_effect = set_video_framerate
+    api.get_video.side_effect = get_video
+    api.get_files_for_video.side_effect = get_files_for_video
+    api.delete_video_file.side_effect = delete_video_file
+    _install_queue(api)
+
+    return api
+
+
+def _install_queue(api: AsyncMock) -> None:
+    """The queue, such as it is: one job per video, which is what django-api holds too.
+
+    Enough for a test to hand a worker the job the hook just queued and watch
+    the two halves meet. Kept apart from the catalogue above because it is a
+    separate little machine that happens to be reached through the same mock.
+    """
     queue: dict[str, SimpleNamespace] = {}
 
     async def enqueue_ingest_job(a_video_id, kind, priority):
@@ -90,9 +112,7 @@ def recording_django_api(video_id: str, files: list[SimpleNamespace] | None = No
     async def claim_ingest_job(worker, kind=None):
         """Hand out the highest-priority waiting job, as the real endpoint does."""
         waiting = [
-            job
-            for job in queue.values()
-            if job.state == IngestStateEnum.PENDING and (kind is None or job.kind == kind)
+            job for job in queue.values() if job.state == IngestStateEnum.PENDING and (kind is None or job.kind == kind)
         ]
         if not waiting:
             return None
@@ -101,13 +121,6 @@ def recording_django_api(video_id: str, files: list[SimpleNamespace] | None = No
         claimed.state = IngestStateEnum.PROBING
         return claimed
 
-    api.create_video_file.side_effect = create_video_file
-    api.set_video_duration.side_effect = set_video_duration
-    api.set_video_framerate.side_effect = set_video_framerate
-    api.get_video.side_effect = get_video
-    api.get_files_for_video.side_effect = get_files_for_video
     api.enqueue_ingest_job.side_effect = enqueue_ingest_job
     api.get_ingest_job.side_effect = get_ingest_job
     api.claim_ingest_job.side_effect = claim_ingest_job
-
-    return api

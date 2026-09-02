@@ -1,13 +1,13 @@
 from datetime import datetime
 from logging import Logger, getLogger
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from frikanalen_django_api_client.models import IngestKindEnum, IngestStateEnum, VideoFileVariantEnum
 
 from app.backfill.enqueue import UPLOAD_PRIORITY
 from app.django_client.service import DjangoApiService
 from app.ingest_reporting import IngestErrorCode, IngestReporter
-from app.util.file_name_utils import original_file_location
+from app.util.file_name_utils import IMAGES_DIR, original_file_location
 from app.util.logging import VideoIdFilter
 
 from .archive_store import ArchiveSession, ArchiveStore
@@ -18,12 +18,18 @@ class Ingester:
     """Gets an upload into the archive, then hands the rest to the queue.
 
     This does exactly what needs the file where tusd left it, and no more:
-    record that the upload happened, put the original in the archive, register
-    it, and queue a job. Everything after that -- loudness, duration, framerate
-    and every derived format -- is a worker's, because once the original is
-    archived there is nothing about an upload that distinguishes it from any
-    other video, and the observe-plan-apply that decides what a video needs
-    already exists.
+    record that the upload happened, supersede whatever the last upload to this
+    video left behind, put the original in the archive, register it, and queue
+    a job. Everything after that -- loudness, duration, framerate and every
+    derived format -- is a worker's, because once the original is archived
+    there is nothing about an upload that distinguishes it from any other
+    video, and the observe-plan-apply that decides what a video needs already
+    exists.
+
+    The supersede is the one step that has no counterpart in a backfill, and it
+    is why: an upload is the only event that says the *source* has changed. A
+    backfill must never touch the original, and reaches this video knowing only
+    that its derivatives may be stale. See _supersede_previous_media.
 
     That split is not arbitrary. The upload volume is ReadWriteOnce, which is
     what pins this pod to a single replica; a worker mounts no upload volume,
@@ -68,6 +74,13 @@ class Ingester:
             raise
 
         async with self.archive.open() as archive:
+            # Reported before the supersede rather than inside the put, because
+            # taking the previous media out of the published tree is already
+            # the archive being rearranged on this video's behalf, and a member
+            # watching should see that as archiving rather than as a probe that
+            # stopped responding.
+            await reporter.state(IngestStateEnum.ARCHIVING)
+            await self._supersede_previous_media(archive, video_id, reporter)
             await self._archive_original(archive, video_id, original_file, metadata, reporter)
 
         await self._enqueue(video_id, reporter)
@@ -79,6 +92,72 @@ class Ingester:
         # the only source; it no longer is.
         self.logger.info("Removing uploaded file %s", original_file)
         original_file.unlink()
+
+    async def _supersede_previous_media(self, archive: ArchiveSession, video_id: str, reporter: IngestReporter) -> None:
+        """Take out whatever a previous upload to this id left behind.
+
+        A second upload to a video replaces the first. That is the only reading
+        that serves the member -- they sent a new file because they want the
+        new file broadcast, and there is no other way to correct a video
+        without abandoning its id, its schedule slots and every link to it --
+        and it is the only one that leaves the archive in a state the rest of
+        the system can work with. `original/` has to hold exactly one file or
+        the video is unprocessable by every job that will ever look at it, and
+        a second upload under a different name is precisely what used to put
+        two there.
+
+        Nothing is destroyed. `trash()` is a rename into `.trash/`, purged
+        separately and deliberately, so an upload sent to the wrong video costs
+        someone a rename back rather than a restore from backup. This is not
+        gated on the video being unfinished: the mistake a member most often
+        needs to undo -- the wrong cut, the wrong language track -- is one they
+        only discover *after* the import completed, and refusing them there
+        would leave the case this exists for unserved.
+
+        Programme images are left where they are. They live under
+        `<id>/images/`, are registered in a different table, and describe the
+        programme rather than its media; taking them along would leave rows
+        naming files that are no longer there, which is exactly the incident
+        `UnregisterFile` refuses to manufacture.
+
+        The order is trash, then unregister, matching the plans the backfill
+        applies. Reversed, a failure between the two would have destroyed the
+        record of media it then failed to remove. This way a run interrupted
+        anywhere in here is finished by the retry: the step is entered when
+        *either* the archive or the catalogue still has something, so whatever
+        is still published is still trashed and whatever is still registered is
+        still dropped.
+        """
+        registered = await self.django_api.get_files_for_video(video_id)
+        rows = list(registered.results or [])
+        superseded = [
+            entry
+            for entry in await archive.list_dir(PurePosixPath(video_id))
+            if entry.is_dir and entry.name != IMAGES_DIR
+        ]
+
+        if not rows and not superseded:
+            return
+
+        self.logger.warning(
+            "Video %s already has media; this upload supersedes it (%d directories, %d registered files)",
+            video_id,
+            len(superseded),
+            len(rows),
+        )
+
+        try:
+            for entry in superseded:
+                trashed = await archive.trash(entry.path)
+                self.logger.info("Superseded by a new upload: %s is now at %s", entry.path, trashed)
+
+            for row in rows:
+                self.logger.info("Unregistering videofile %s (%s): its file has been trashed", row.id, row.filename)
+                await self.django_api.delete_video_file(row.id)
+        except Exception as e:
+            self.logger.error("Failed to supersede the previous media for video %s: %s", video_id, e)
+            await reporter.failed(IngestErrorCode.ARCHIVE_FAILED, str(e))
+            raise
 
     async def _enqueue(self, video_id: str, reporter: IngestReporter) -> None:
         """Queue the work that follows archiving.
@@ -116,10 +195,13 @@ class Ingester:
         reporter: IngestReporter,
     ):
         destination = original_file_location(video_id, Path(original_file.name))
-        await reporter.state(IngestStateEnum.ARCHIVING)
 
         try:
             self.logger.info("Storing original file at %s", destination)
+            # Kept as an assertion rather than dropped now that the supersede
+            # above has cleared the way: if anything is still at the
+            # destination, something wrote there between the two steps, and
+            # refusing is better than publishing over a file we never looked at.
             await archive.assert_absent(destination)
             await archive.put(original_file, destination)
         except Exception as e:

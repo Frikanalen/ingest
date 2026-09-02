@@ -12,6 +12,10 @@ For a completed upload the hook checks the media with FFprobe, copies the source
 
 Everything after that is a [queue worker](#queue-workers)'s: loudness, framerate, and every derived format — `<archive>/<video-id>/large_thumb/<stem>.jpg`, `<archive>/<video-id>/med_thumb/<stem>.jpg`, `<archive>/<video-id>/small_thumb/<stem>.jpg` and `<archive>/<video-id>/dash/`. **A member's upload therefore depends on the worker pool being scaled above zero.** Nothing in ingest notices a job nobody claims.
 
+An upload to a video that already has one **supersedes it**. Before the new original is archived, every directory under `<archive>/<video-id>/` except `images/` is trashed and every `videofile` row for the video is dropped, so the worker rebuilds the lot from the file that just arrived. Nothing is deleted — trashing is a rename into `.trash/`, purged separately — and programme images are left alone, because they are registered in another table and describe the programme rather than its media.
+
+This is what makes correcting a video possible at all: there is no other way to replace the file behind a video id without abandoning the id, its schedule slots and every link to it. It is deliberately not gated on the import having finished, since the mistake a member needs to undo — the wrong cut, the wrong language track — is usually one they discover after it did. It is also what keeps `original/` holding exactly one file, which every later job depends on: a second upload under a different name used to land beside the first and leave the video permanently unprocessable.
+
 The split is the upload volume. It is `ReadWriteOnce`, which pins the hook's pod to a single replica; a worker mounts no upload volume, which is why the pool scales. Archiving the original is the step that turns a file only one pod can see into a file every worker can, so it is the last thing that has to happen in the request.
 
 FFmpeg always reads a file from local disk and writes to local scratch space; only finished files are handed to the archive. That is what lets the archive live on another host.
