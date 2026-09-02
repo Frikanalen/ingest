@@ -31,8 +31,23 @@ LEGACY_BROADCAST = "200"
 ORPHAN = "300"
 
 
+def video_row(video_id, duration="00:01:00", framerate=25, proper_import=True):
+    return SimpleNamespace(id=int(video_id), duration=duration, framerate=framerate, proper_import=proper_import)
+
+
 def page(rows):
     return SimpleNamespace(count=len(rows), results=list(rows))
+
+
+def video_page(rows, limit, offset, proper_import):
+    """Pages like django-api, and filters on `proper_import` like it too.
+
+    Omitting the filter there returns only the videos whose ingest finished,
+    so a mock that ignored it would let these tests pass over a catalogue
+    production never sees the same way.
+    """
+    matching = [row for row in rows if row.proper_import is proper_import]
+    return page(matching[offset : offset + limit])
 
 
 def videofile(row_id, video_id, variant, filename):
@@ -71,11 +86,13 @@ def django_api() -> AsyncMock:
     quiet: what these tests are about is which videos get queued, and a chore
     firing on every one of them would make that indistinguishable.
     """
-    videos = [SimpleNamespace(id=int(NEEDS_FORMATS), duration="00:01:00", framerate=25)]
+    videos = [video_row(NEEDS_FORMATS)]
     files = [videofile(1, NEEDS_FORMATS, VideoFileVariantEnum.ORIGINAL, f"{NEEDS_FORMATS}/original/source.mp4")]
 
     api = AsyncMock()
-    api.list_videos_page.side_effect = lambda limit, offset: page(videos[offset : offset + limit])
+    api.list_videos_page.side_effect = lambda limit, offset, *, proper_import: video_page(
+        videos, limit, offset, proper_import
+    )
     api.list_video_files_page.side_effect = lambda limit, offset: page(files[offset : offset + limit])
     api.get_ingest_job.return_value = SimpleNamespace(state=IngestStateEnum.DONE)
     api.catalogue = SimpleNamespace(videos=videos, files=files)
@@ -90,7 +107,7 @@ def legacy_video(archive_root, django_api) -> str:
     tree, which is what keeps `--yes` from being decoration.
     """
     place(archive_root, f"{LEGACY_BROADCAST}/broadcast/source.mp4")
-    django_api.catalogue.videos.append(SimpleNamespace(id=int(LEGACY_BROADCAST), duration="00:01:00", framerate=25))
+    django_api.catalogue.videos.append(video_row(LEGACY_BROADCAST))
     django_api.catalogue.files.append(
         videofile(2, LEGACY_BROADCAST, VideoFileVariantEnum.BROADCAST, f"{LEGACY_BROADCAST}/broadcast/source.mp4")
     )
