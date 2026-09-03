@@ -1,9 +1,8 @@
 """What a chore proposes doing to one video.
 
 Actions are data, not closures: a plan can be printed, counted, diffed and
-reviewed before anything happens, and reviewing it is the point -- some of
-these move media around and one of them takes a whole video out of the
-published tree.
+reviewed before anything happens, and reviewing it is the point -- one of them
+takes a whole video out of the published tree.
 
 Nothing here executes. app.backfill.apply does that.
 """
@@ -49,51 +48,6 @@ class TrashPath(Action):
 
     def describe(self) -> str:
         return f"trash {self.path} ({self.reason})"
-
-
-@dataclass(frozen=True)
-class MovePath(Action):
-    """Relocate archived media without touching its bytes."""
-
-    source: PurePosixPath
-    destination: PurePosixPath
-
-    def describe(self) -> str:
-        return f"move {self.source} -> {self.destination}"
-
-
-@dataclass(frozen=True)
-class RetagFile(Action):
-    """Point an existing videofile row at where its file now is.
-
-    Updating a record we already have, rather than inventing one from a file we
-    happened to find. The row keeps its identity and its history.
-    """
-
-    file_id: int
-    variant: VideoFileVariantEnum
-    filename: PurePosixPath
-
-    def describe(self) -> str:
-        return f"retag videofile {self.file_id} as {self.variant} at {self.filename}"
-
-
-@dataclass(frozen=True)
-class UnregisterFile(Action):
-    """Drop a videofile row for a file we are deliberately removing.
-
-    Only ever paired with trashing the file it names. A row is never dropped
-    because its file turned out to be missing -- that is an incident, and the
-    row is the only remaining evidence of it.
-    """
-
-    file_id: int
-    reason: str
-
-    destructive: ClassVar[bool] = True
-
-    def describe(self) -> str:
-        return f"unregister videofile {self.file_id} ({self.reason})"
 
 
 @dataclass(frozen=True)

@@ -1,14 +1,20 @@
 """`fk-archive` -- the mutations the ingest engine is allowed to ask for.
 
-One command with three verbs, rather than three commands, because the sudoers
-rule that grants them is a single line and stays readable:
+One command with two verbs, rather than two commands, because the sudoers rule
+that grants them is a single line and stays readable:
 
     ingest ALL=(archive-manager) NOPASSWD: /usr/bin/fk-archive prod *
 
-Purging the trash is deliberately *not* one of the verbs. It is the one
-operation that destroys anything, it ships as `fk-archive-purge-trash`, and
-leaving it out of this command is what lets the rule above end in a wildcard
-without also handing the ingest account a way to empty the trash.
+Which is also why the two operations the ingest engine does *not* perform are
+not verbs here. The wildcard grants whatever this command can do, so what it
+cannot do is the whole of what the rule withholds:
+
+* purging the trash destroys things, and ships as `fk-archive-purge-trash`;
+* moving a file within a video exists only for the one-shot `broadcast/` ->
+  `original/` migration, and ships as `fk-archive-migrate-broadcast`.
+
+Both run as the archive account by hand or from a timer, and neither is
+reachable from an SSH session.
 
 Results go to stdout as one JSON object, so a caller reads a value rather than
 parsing prose. Failures go to stderr as a sentence, and the exit code says
@@ -49,10 +55,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--sha256",
         help="optional content hash, checked before anything is published",
     )
-
-    move = verbs.add_parser("move", help="rename a file within one video's directory")
-    move.add_argument("source")
-    move.add_argument("destination")
 
     trash = verbs.add_parser("trash", help="move a video, or one directory in one, into .trash/")
     trash.add_argument("path")
@@ -96,12 +98,6 @@ def _dispatch(args: argparse.Namespace, profile: Profile, stdin) -> operations.R
                 stdin,
                 expected_size=args.size,
                 expected_sha256=args.sha256,
-            )
-        case "move":
-            return operations.move(
-                profile,
-                parse_file_path(args.source, what="source"),
-                parse_file_path(args.destination, what="destination"),
             )
         case "trash":
             return operations.trash(profile, parse_removable_path(args.path, what="path"))

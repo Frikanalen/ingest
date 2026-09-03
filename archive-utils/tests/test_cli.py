@@ -37,15 +37,6 @@ def test_trash_reports_where_the_media_went(profile_dir: Path, archive_root: Pat
     assert (archive_root / json.loads(out)["destination"] / "manifest.mpd").exists()
 
 
-def test_move_reports_both_ends(profile_dir: Path, make_file):
-    make_file("12/broadcast/a.mov")
-
-    code, out = invoke(profile_dir, ["test", "move", "12/broadcast/a.mov", "12/original/a.mov"])
-
-    assert code == 0
-    assert json.loads(out) == {"operation": "move", "path": "12/broadcast/a.mov", "destination": "12/original/a.mov"}
-
-
 @pytest.mark.parametrize(
     ("argv", "stdin", "expected"),
     [
@@ -69,9 +60,20 @@ def test_publishing_over_something_is_distinguishable_from_every_other_failure(p
     assert code == AlreadyExists.exit_code
 
 
-def test_there_is_no_way_to_purge_the_trash_through_this_command(profile_dir: Path):
+@pytest.mark.parametrize(
+    "argv",
+    [
+        # The sudoers rule ends in a wildcard, so what this command cannot do
+        # is the whole of what the rule withholds. Both of these are operator
+        # tools with their own entry points, and neither may be reachable from
+        # an SSH session.
+        ["test", "purge-trash", "--older-than", "0"],
+        ["test", "move", "12/broadcast/a.mov", "12/original/a.mov"],
+    ],
+)
+def test_the_operator_only_tools_are_not_verbs_of_this_command(profile_dir: Path, argv):
     with pytest.raises(SystemExit):
-        cli.run(["test", "purge-trash", "--older-than", "0"], profile_dir=profile_dir)
+        cli.run(argv, profile_dir=profile_dir)
 
 
 def test_purge_needs_an_age_before_it_will_delete_anything(profile_dir: Path):

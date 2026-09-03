@@ -52,6 +52,23 @@ class TransferError(ArchiveUtilsError):
     exit_code = 5
 
 
+class CatalogueError(ArchiveUtilsError):
+    """django-api could not be reached, or would not say what was asked.
+
+    Only the one-shot broadcast migration talks to the catalogue at all, and
+    it is the one operation here that is not confined to this host -- so a
+    failure that came from the far end is worth telling apart from one that
+    came from the archive.
+    """
+
+    exit_code = 7
+
+    #: HTTP status, when the failure came back as one. Lets a caller tell a
+    #: 404 -- which for a video means "the catalogue has dropped it", an answer
+    #: rather than a fault -- apart from everything else.
+    status: int | None = None
+
+
 class ProfileError(ArchiveUtilsError):
     """The named archive profile is missing or unusable.
 

@@ -4,10 +4,11 @@ The plan says what; this says how. Kept apart from the chores because deciding
 and doing have very different testability: one is arithmetic over observed
 state, the other moves gigabytes between hosts.
 
-The source file is fetched lazily, on the first action that needs it. That is
-not just an optimisation -- a plan can rename `broadcast/` to `original/` and
-then derive formats from the result, so fetching up front would look in a
-directory that does not exist yet.
+The source file is fetched lazily, on the first action that needs it, which is
+worth several gigabytes a video: a plan that only tidies directories has no
+business pulling an original off the archive to do it. It is also read from
+the archive at that moment rather than from anything the plan carried, so a
+directory this same plan has already swapped out is reflected.
 """
 
 from dataclasses import replace
@@ -19,12 +20,9 @@ from app.api.hooks.metadata import MetadataExtractor
 from app.archive_store import ArchiveSession
 from app.backfill.actions import (
     Action,
-    MovePath,
     ProduceFormat,
     RefreshMetadata,
-    RetagFile,
     TrashPath,
-    UnregisterFile,
 )
 from app.backfill.chores import ORIGINAL_DIR, Plan
 from app.django_client.service import DjangoApiService
@@ -113,15 +111,6 @@ class Applier:
         match action:
             case TrashPath(path=path):
                 await self.archive.trash(path)
-
-            case MovePath(source=origin, destination=destination):
-                await self.archive.move(origin, destination)
-
-            case RetagFile(file_id=file_id, variant=variant, filename=filename):
-                await self.django_api.retag_video_file(file_id, variant, str(filename))
-
-            case UnregisterFile(file_id=file_id):
-                await self.django_api.delete_video_file(file_id)
 
             case ProduceFormat(file_format=file_format, replacing=replacing):
                 assert source is not None, "produce needs the original"

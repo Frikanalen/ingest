@@ -16,16 +16,23 @@ What the engine actually needs is much smaller than that. Every mutation it
 performs goes through one interface (`ArchiveSession` in the ingest
 repository), and there are only four of them:
 
-| Mutation | Who asks for it | What it does |
+| Mutation | Who asks for it | Reachable over SSH |
 | --- | --- | --- |
-| **publish** | the upload hook (`original/`), the format producer (`dash/`, `*_thumb/`), the programme-image ingest (`images/`) | put a file at `<video-id>/<category>/<filename>` |
-| **move** | the backfill's legacy `broadcast/` → `original/` migration | rename a file inside one video |
-| **trash** | superseding an upload, collecting a video the catalogue dropped, replacing a rebuilt format | rename a video or one of its directories into `.trash/` |
-| **purge-trash** | an operator, or a timer | delete trash entries past a given age |
+| **publish** | the upload hook (`original/`), the format producer (`dash/`, `*_thumb/`), the programme-image ingest (`images/`) | yes |
+| **trash** | superseding an upload, collecting a video the catalogue dropped, replacing a rebuilt format | yes |
+| **purge-trash** | an operator, or a timer | no |
+| **move** | the one-shot `broadcast/` → `original/` migration | no |
 
-So those four are what this package offers, and nothing else. There is no verb
-that overwrites, none that deletes from the published tree, and the one that
-deletes at all ships as a separate command the ingest account is not granted.
+So those four are what this package offers, and nothing else — and only the
+first two are things a running ingest engine ever asks for, so only those two
+are verbs of `fk-archive`. The sudoers rule ends in a wildcard, which means
+what that command *cannot* do is the whole of what the rule withholds.
+
+`move` is on the far side of that line because renaming a file inside a video
+happens exactly once per video, ever, as a migration off the directory layout
+the previous system used. That is not a reason to give a long-running service
+a standing permission to rename things; it is a reason to have an operator run
+a migration. See [the migration](#the-broadcast-migration) below.
 
 ## How the pieces fit
 
@@ -35,16 +42,21 @@ ingest pod  ──ssh──▶  ingest@file01
                         ├─ SFTP subsystem ──▶ sftp-server -R      (every read)
                         └─ "fk-archive …"  ──▶ sudo -u archive-manager
                                                   fk-archive prod … (every write)
+
+operator ───────────▶  sudo fk-archive-purge-trash prod --older-than 30
+                       sudo fk-archive-migrate-broadcast prod --apply
 ```
 
 * **`fk-archive-ssh <profile>`** is the account's forced command. It allows a
   read-only SFTP server and `fk-archive`, and refuses everything else — so a
   stolen key cannot run arbitrary code as the ingest account either.
-* **`fk-archive <profile> {publish,move,trash}`** performs one mutation and
-  prints a JSON object saying what it did. This is the command sudoers grants.
+* **`fk-archive <profile> {publish,trash}`** performs one mutation and prints a
+  JSON object saying what it did. This is the command sudoers grants.
 * **`fk-archive-purge-trash <profile> --older-than DAYS`** is the destructive
   one. Not in the ingest account's sudoers rule; run it from a timer or by
   hand, `--dry-run` first.
+* **`fk-archive-migrate-broadcast <profile>`** is the one-shot migration, and
+  is likewise not granted. `--apply` to act.
 
 The archive root is never an argument — it is looked up by profile name in
 `/etc/fk-archive-utils/profiles.d/<name>.toml`, and the name is the first
@@ -76,6 +88,59 @@ The staging is still real, just on the far side of the fence: bytes land in
 linked into the published tree only once all of them have arrived. `--size` is
 required because it is the only thing that tells a complete transfer apart from
 a connection that dropped — a truncated stream ends exactly like a whole one.
+
+## The broadcast migration
+
+`broadcast/` is what the system before this one called a video's source file.
+Nothing has written one for years, and everything since expects the source
+under `original/`.
+
+Settling that used to be a chore in the ingest engine's backfill, which meant
+the engine needed a standing permission to rename files in the archive in order
+to run a migration that happens once per video. It is now
+`fk-archive-migrate-broadcast`, here, and that permission does not exist.
+
+The migration is half an archive operation and half a database one — moving the
+file without retagging the row that names it would leave the catalogue pointing
+at nothing — so it talks to django-api, using the token `fk-cli` logged in with:
+
+```bash
+sudo fk-archive-migrate-broadcast prod            # plan only; changes nothing
+sudo fk-archive-migrate-broadcast prod --apply
+```
+
+Run it with plain `sudo`. Root is what can read the operator's
+`~/.frikanalen.yaml`; the tool reads the token, then permanently becomes the
+profile's manager account before it opens the archive, so the directories it
+creates are owned by the account that has to write into them afterwards.
+
+The fk-cli environment defaults to **the archive profile's name**, not to the
+`environment:` the config file currently selects. Migrating the production
+archive and recording it against whichever catalogue an operator last pointed
+fk-cli at is the one mistake here that a rename cannot undo, so the two are
+tied together unless `--environment` separates them. With no token for that
+environment, it says to log in with `fk-cli` and stops.
+
+It decides per video exactly what the chore decided, and prints a line for
+each:
+
+| What it finds | What it does |
+| --- | --- |
+| not in the catalogue | nothing — the backfill's `gc` takes the whole video |
+| no files in `broadcast/` | nothing |
+| `original/` already holds the source | trash `broadcast/`, drop the rows that named it |
+| `broadcast/` holds media no row claims | nothing, and says so — moving it would be guessing |
+| otherwise | move each file to `original/`, retag the rows, trash the emptied directory |
+
+Trash before unregister, so a failure between them leaves media removed but
+still recorded rather than the reverse. Move and retag before trashing the
+directory, so nothing is ever recorded at a path that does not yet hold it. One
+video failing does not stop the run.
+
+**Delete all of this when it has finished.** This module, `catalogue.py`,
+`operations.move`, the entry point and the `python3-yaml` dependency exist for
+it and nothing else, and a migration left in the code after it has finished
+migrating reads like a rule about how the archive works.
 
 ## What the tools refuse
 
@@ -112,6 +177,7 @@ each failure the caller acts on differently gets its own.
 | 4 | the path is not in the archive |
 | 5 | the bytes that arrived are not the bytes that were promised — retryable |
 | 6 | the profile is missing or unusable — a fault on this host |
+| 7 | django-api could not be reached or would not answer (migration only) |
 
 ## Installing
 
@@ -135,6 +201,8 @@ uv run pytest
 uv run ruff check
 ```
 
-No runtime dependencies, on purpose: this runs as the account that owns every
-video Frikanalen has, under sudo, on the storage host. The dependency list is
-part of the attack surface, and the standard library covers all of it.
+Every command an SSH session can reach imports the standard library and nothing
+else, on purpose: those run as the account that owns every video Frikanalen
+has, under sudo, and the dependency list is part of that attack surface. The
+single dependency, PyYAML, is imported inside the one function of the one-shot
+migration that reads `~/.frikanalen.yaml`, and goes when the migration does.

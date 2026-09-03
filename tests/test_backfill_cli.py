@@ -22,11 +22,11 @@ from frikanalen_django_api_client.models import IngestStateEnum, VideoFileVarian
 
 from app.archive_store import LocalArchiveStore
 from app.backfill import cli
+from app.backfill.actions import TrashPath
+from app.backfill.chores import Plan
 
 #: In the catalogue, source archived, no derivatives: needs every format.
 NEEDS_FORMATS = "100"
-#: In the catalogue, source still under the name the old system gave it.
-LEGACY_BROADCAST = "200"
 #: In the archive, gone from the catalogue. Only `gc` has anything to say.
 ORPHAN = "300"
 
@@ -100,21 +100,6 @@ def django_api() -> AsyncMock:
 
 
 @pytest.fixture
-def legacy_video(archive_root, django_api) -> str:
-    """A catalogue video whose source is still under the old `broadcast/` name.
-
-    The one thing an `apply` can plan that does move media out of the published
-    tree, which is what keeps `--yes` from being decoration.
-    """
-    place(archive_root, f"{LEGACY_BROADCAST}/broadcast/source.mp4")
-    django_api.catalogue.videos.append(video_row(LEGACY_BROADCAST))
-    django_api.catalogue.files.append(
-        videofile(2, LEGACY_BROADCAST, VideoFileVariantEnum.BROADCAST, f"{LEGACY_BROADCAST}/broadcast/source.mp4")
-    )
-    return LEGACY_BROADCAST
-
-
-@pytest.fixture
 def run(monkeypatch, archive_root, django_api):
     """`fk-backfill` against that archive and that catalogue."""
     store = LocalArchiveStore(archive_root)
@@ -162,19 +147,30 @@ def test_apply_refuses_gc(capsys):
     assert "fk-backfill gc" in capsys.readouterr().err
 
 
-def test_apply_still_confirms_work_that_moves_media(run, django_api, legacy_video, capsys):
-    """`--yes` is not decoration: the legacy migration trashes broadcast/.
+@pytest.mark.asyncio
+async def test_apply_confirms_a_plan_that_moves_media_out_of_the_published_tree(django_api, capsys):
+    """No convergence chore is destructive today.
 
-    That chore is one a worker runs, so the confirmation is being asked for
-    something that will actually happen -- unlike the `gc` findings it used to
-    be asked for.
+    The legacy `broadcast/` migration was the last one that was, and it is now
+    an operator tool on the storage host rather than a chore. The guard stays:
+    it costs two lines, and it is what makes adding a destructive chore later
+    safe rather than something that ships a whole-catalogue `apply` with no
+    confirmation at all. So it is tested on a plan built here, since no chore
+    will produce one.
     """
-    assert run(["apply", legacy_video]) == 1
+    destructive = Plan(
+        video_id=NEEDS_FORMATS,
+        actions=(TrashPath(path=PurePosixPath(f"{NEEDS_FORMATS}/dash"), reason="stale"),),
+    )
+    args = SimpleNamespace(yes=False, priority=0)
+
+    assert await cli._enqueue(args, django_api, [destructive]) == 1
     assert "move media out of the published tree" in capsys.readouterr().out
     django_api.enqueue_ingest_job.assert_not_awaited()
 
-    assert run(["apply", "--yes", legacy_video]) == 0
-    assert queued(django_api) == {legacy_video}
+    args.yes = True
+    assert await cli._enqueue(args, django_api, [destructive]) == 0
+    assert queued(django_api) == {NEEDS_FORMATS}
 
 
 def test_plan_still_reports_the_orphan(run, django_api, capsys):

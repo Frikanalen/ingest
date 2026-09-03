@@ -6,7 +6,7 @@ to do about it. Everything here is what was true when the video was looked at.
 """
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
 from frikanalen_django_api_client.models import VideoFileVariantEnum
@@ -71,10 +71,3 @@ class VideoState:
         """
         rows = self.rows_for(variant)
         return max((row.profile_revision for row in rows), default=UNTRACKED_REVISION)
-
-    def without_directory(self, directory: str) -> "VideoState":
-        """This video as it will be once `directory` has been trashed."""
-        return replace(self, directories={k: v for k, v in self.directories.items() if k != directory})
-
-    def with_directory(self, directory: str, contents: tuple[ArchiveEntry, ...]) -> "VideoState":
-        return replace(self, directories={**self.directories, directory: contents})

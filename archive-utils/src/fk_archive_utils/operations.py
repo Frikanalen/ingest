@@ -5,6 +5,10 @@ what has been in the trash long enough. That is the entire set: it is what the
 ingest engine's `ArchiveSession` actually calls, boiled down until each one is
 a single rename that either happens or does not.
 
+Only two of them are reachable over SSH. `fk-archive` offers publish and
+trash; move and purge are operator tools with their own entry points, because
+neither is something a running ingest engine has any reason to ask for.
+
 Two properties are load-bearing and are worth stating once here rather than
 per operation:
 
@@ -153,13 +157,15 @@ def _receive(stream, staged: str, spool: int, profile: Profile) -> tuple[int, st
 def move(profile: Profile, source: ArchivePath, destination: ArchivePath) -> Result:
     """Rename one file to another name inside the same video's directory.
 
-    Exists for exactly one caller: the migration that moves a video's source
-    out of the `broadcast/` directory the previous system used and into
-    `original/`, where everything since expects it. When the backfill stops
-    finding `broadcast/` directories, this and its sudoers line should go with
-    the chore that used it.
+    Exists for exactly one caller: `migrate_broadcast`, which moves a video's
+    source out of the `broadcast/` directory the previous system used and into
+    `original/`, where everything since expects it. Deliberately not a verb of
+    `fk-archive`, so no SSH session can reach it -- an ingest engine has no
+    reason to rename anything, and a one-shot migration is not a standing
+    permission. When the last `broadcast/` directory is gone, this function,
+    that module and its entry point go together.
 
-    Scoped to one video id because that is the only shape that migration has,
+    Scoped to one video id because that is the only shape the migration has,
     and because a move that could cross between videos is a way to detach a
     file from the row that names it -- which is the incident this package is
     supposed to make impossible rather than merely unlikely.

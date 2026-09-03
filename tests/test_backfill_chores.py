@@ -1,8 +1,8 @@
 """What each chore decides, given what was observed.
 
-Chores are pure, so the cases that matter -- a broadcast-only video, a format
-built by a profile we have moved past, media nothing claims -- are ordinary
-table tests. No archive, no API, no ffmpeg.
+Chores are pure, so the cases that matter -- a format built by a profile we
+have moved past, media nothing claims, a video the catalogue has dropped -- are
+ordinary table tests. No archive, no API, no ffmpeg.
 """
 
 from pathlib import PurePosixPath
@@ -11,14 +11,7 @@ import pytest
 from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.archive_store import ArchiveEntry
-from app.backfill.actions import (
-    MovePath,
-    ProduceFormat,
-    RefreshMetadata,
-    RetagFile,
-    TrashPath,
-    UnregisterFile,
-)
+from app.backfill.actions import ProduceFormat, RefreshMetadata, TrashPath
 from app.backfill.chores import DesiredState, plan
 from app.backfill.state import RegisteredFile, VideoState
 from app.formats import UNTRACKED_REVISION
@@ -134,7 +127,12 @@ def test_a_format_directory_with_no_row_is_not_garbage():
     assert [a.file_format for a in actions if isinstance(a, ProduceFormat)] == [VideoFileVariantEnum.DASH]
 
 
-# --- original / broadcast --------------------------------------------------
+# --- the legacy broadcast/ directory ---------------------------------------
+#
+# There is no chore for it any more. Settling which directory holds a video's
+# source is a one-shot migration, run on the storage host by an operator as
+# `fk-archive-migrate-broadcast` -- so what is tested here is that the backfill
+# leaves such a video alone and says why, rather than what it does to it.
 
 
 def broadcast_only(**overrides) -> VideoState:
@@ -154,72 +152,23 @@ def broadcast_only(**overrides) -> VideoState:
     return video(**{**defaults, **overrides})
 
 
-def test_broadcast_is_trashed_when_an_original_exists():
-    state = video(
-        files=(*video().files, registered(VideoFileVariantEnum.BROADCAST, "source.mp4", file_id=7)),
-        directories={**video().directories, "broadcast": (entry(f"{VIDEO_ID}/broadcast/source.mp4"),)},
-    )
-
-    actions = actions_of(state)
-
-    [trash] = [a for a in actions if isinstance(a, TrashPath)]
-    [unregister] = [a for a in actions if isinstance(a, UnregisterFile)]
-    assert trash.path == PurePosixPath(f"{VIDEO_ID}/broadcast")
-    assert unregister.file_id == 7
-
-
-def test_broadcast_becomes_the_original_when_there_is_no_other():
-    actions = actions_of(broadcast_only())
-
-    [move] = [a for a in actions if isinstance(a, MovePath)]
-    [retag] = [a for a in actions if isinstance(a, RetagFile)]
-    assert move.source == PurePosixPath(f"{VIDEO_ID}/broadcast/source.mp4")
-    assert move.destination == PurePosixPath(f"{VIDEO_ID}/original/source.mp4")
-    assert retag.file_id == 7
-    assert retag.variant == VideoFileVariantEnum.ORIGINAL
-    assert retag.filename == PurePosixPath(f"{VIDEO_ID}/original/source.mp4")
-
-
-def test_the_emptied_broadcast_directory_is_trashed_last():
-    actions = actions_of(broadcast_only())
-
-    trashes = [i for i, a in enumerate(actions) if isinstance(a, TrashPath)]
-    moves = [i for i, a in enumerate(actions) if isinstance(a, MovePath)]
-    assert min(trashes) > max(moves)
-
-
-def test_formats_are_planned_against_the_renamed_original():
-    """The rename has not happened yet, but the formats chore must see it as
-    though it had -- otherwise a broadcast-only video looks sourceless and
-    every derivative it needs goes unplanned."""
-    state = broadcast_only(
-        files=(registered(VideoFileVariantEnum.BROADCAST, "source.mp4", file_id=7),),
-    )
-
-    produced = [a.file_format for a in actions_of(state) if isinstance(a, ProduceFormat)]
-
-    assert set(produced) == {VideoFileVariantEnum.DASH, VideoFileVariantEnum.LARGE_THUMB}
-
-
-def test_unclaimed_broadcast_media_is_reported_not_moved():
-    """Moving it would guess it is the source; registering it would invent a
-    record from a file. Neither is ours to decide."""
-    state = broadcast_only(files=())
-
-    result = plan(state, DESIRED)
-
-    assert not any(isinstance(a, MovePath) for a in result.actions)
-    assert any("no videofile row" in note for note in result.notes)
-
-
-def test_a_video_with_no_source_at_all_is_reported():
-    state = video(files=(), directories={})
-
-    result = plan(state, DESIRED)
+def test_a_video_whose_source_is_still_called_broadcast_is_left_alone():
+    """Reported, not acted on. The backfill has no way to rename anything --
+    deliberately -- so the honest answer is to say what is in the way and stop,
+    rather than to derive formats from a source it cannot see."""
+    result = plan(broadcast_only(), DESIRED)
 
     assert not result.actions
-    assert any("nothing to derive from" in note for note in result.notes)
+    assert any("no original is registered" in note for note in result.notes)
 
+
+def test_a_video_with_no_source_at_all_is_silent():
+    """Nothing archived and nothing registered is a video nobody has uploaded
+    yet, not a ladder that went missing. There is nothing to report."""
+    result = plan(video(files=(), directories={}), DESIRED)
+
+    assert not result.actions
+    assert not result.notes
 
 # --- formats ---------------------------------------------------------------
 

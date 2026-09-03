@@ -117,8 +117,8 @@ class Ingester:
         Programme images are left where they are. They live under
         `<id>/images/`, are registered in a different table, and describe the
         programme rather than its media; taking them along would leave rows
-        naming files that are no longer there, which is exactly the incident
-        `UnregisterFile` refuses to manufacture.
+        naming files that are no longer there, which is an incident rather
+        than a tidy-up.
 
         The order is trash, then unregister, matching the plans the backfill
         applies. Reversed, a failure between the two would have destroyed the

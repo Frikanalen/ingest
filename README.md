@@ -104,6 +104,12 @@ does not speak it yet** — `SshArchiveSession` still writes over SFTP, and the
 cutover is gated on that changing. `archive-utils/README.md` has the design;
 the infra role's README has the order to deploy it in.
 
+One piece has already moved: the legacy `broadcast/` → `original/` migration
+used to be a backfill chore, and is now `fk-archive-migrate-broadcast` there.
+It is the only thing that ever needed to rename archived media, and it happens
+once per video — so the engine no longer has, or needs, a way to rename
+anything.
+
 ## Reconciling the catalogue
 
 Ingest is not only a hook handler. What a video is *supposed* to have is declared in one place — `DESIRED_FORMATS` in `app/formats.py`, and the revision each template in `app/templates/` declares — and both paths that produce media converge on it: a fresh upload, and a video that has been in the archive for years.
@@ -117,19 +123,18 @@ That matters because "this video has DASH" and "this video has *current* DASH" a
 | Chore | What it settles | Run by |
 | --- | --- | --- |
 | `gc` | Media in the archive for a video the catalogue no longer has | the `gc` subcommand |
-| `legacy-broadcast-directories` | Whether the source lives in `original/` or the legacy `broadcast/` | a worker |
 | `metadata` | `duration`, `framerate` and R.128 loudness, re-derived from the original | a worker |
 | `formats` | Derivatives that are missing, or built by a superseded profile | a worker |
 
-The last three are `CONVERGENCE_CHORES`: what it means to converge one video that still exists, and therefore what a worker does with any job it claims. `gc` is about videos that no longer exist, so it has neither a job to be claimed under nor a worker to run it — see [What is not on the queue](#what-is-not-on-the-queue).
+The last two are `CONVERGENCE_CHORES`: what it means to converge one video that still exists, and therefore what a worker does with any job it claims. `gc` is about videos that no longer exist, so it has neither a job to be claimed under nor a worker to run it — see [What is not on the queue](#what-is-not-on-the-queue).
 
-`legacy-broadcast-directories` is named at length because it is not permanent. `broadcast/` is what the system before this one called the source file, and nothing has written one for years — the chore exists to walk the catalogue once and leave every video with its source under `original/`. Once a sweep finds none left, it should be deleted along with its tests and the `MovePath`, `RetagFile` and `UnregisterFile` actions, which exist for it and nothing else. A migration left in the code after it has finished migrating reads like a rule about how the archive works.
+There used to be a third, `legacy-broadcast-directories`, which settled whether a video's source lived in `original/` or in the `broadcast/` directory the previous system used. It is now [`fk-archive-migrate-broadcast`](archive-utils/README.md#the-broadcast-migration), run on the storage host by an operator. Renaming a file inside a video happens once per video, ever; keeping it as a chore meant the engine needed a standing permission to rename archived media in order to run a migration, and it no longer has one. A video still in the old shape now reads as having no registered original — the `formats` chore says so in a note and derives nothing, which is the right answer until someone runs the migration.
 
-Each is a pure function from an observed `VideoState` to the actions that would close the gap, so the awkward cases — a video whose source is still called `broadcast`, a format registered twice, media nothing claims — are unit tests rather than fixtures.
+Each is a pure function from an observed `VideoState` to the actions that would close the gap, so the awkward cases — a format registered twice, media nothing claims, a video whose source is nowhere the catalogue says it is — are unit tests rather than fixtures.
 
 **The database decides.** No chore invents a videofile row from a file it found, and none deletes a row because a file is missing. The first lets the archive overrule the catalogue; the second destroys the only remaining evidence of an incident. Both are reported instead, as notes nothing acts on.
 
-**Nothing here deletes.** `ArchiveSession` has no way to destroy archived media: removing something is a rename into `.trash/<timestamp>/<original path>`, so putting it back is the reverse rename. Purging is a separate act, and is not built yet.
+**Nothing here deletes.** `ArchiveSession` has no way to destroy archived media: removing something is a rename into `.trash/<timestamp>/<original path>`, so putting it back is the reverse rename. Purging is a separate act, and lives on the storage host as `fk-archive-purge-trash`.
 
 ### Running one
 
@@ -149,9 +154,9 @@ uv run python -m app.backfill apply --limit 50
 uv run python -m app.backfill apply            # the whole catalogue
 ```
 
-The two do not consider the same chores, and the difference is worth knowing. `plan` runs all four, because reporting a `gc` finding changes nothing. `apply` runs `CONVERGENCE_CHORES` — the same list a worker runs, so what goes in the queue and what comes out of it cannot drift — and rejects `--chore gc` outright, pointing at the subcommand instead.
+The two do not consider the same chores, and the difference is worth knowing. `plan` runs all three, because reporting a `gc` finding changes nothing. `apply` runs `CONVERGENCE_CHORES` — the same list a worker runs, so what goes in the queue and what comes out of it cannot drift — and rejects `--chore gc` outright, pointing at the subcommand instead.
 
-It refuses without `--yes` if any of the plans move media out of the published tree, which for `apply` means the legacy `broadcast/` migration. And it leaves alone any video ingest is working on right now — overwriting that job would reset somebody's upload under them.
+It refuses without `--yes` if any of the plans move media out of the published tree. No convergence chore does today — the legacy migration was the last one that did — so the flag currently guards nothing; it stays because it costs two lines and is what keeps a future destructive chore from shipping a whole-catalogue `apply` with no confirmation at all. `apply` also leaves alone any video ingest is working on right now — overwriting that job would reset somebody's upload under them.
 
 Then scale the pool and let it drain. It is safe to close the terminal: the queue is the state, and a worker re-plans each video when it claims it.
 

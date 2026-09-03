@@ -1,8 +1,8 @@
 """Carrying out a plan against a real archive.
 
-The interesting behaviour is ordering and laziness: the source is fetched from
-where the plan will have put it, not from where it started, and a plan that
-only tidies directories must never fetch it at all.
+The interesting behaviour is ordering and laziness: a rebuild takes the stale
+directory out before it publishes over the path, and a plan that only tidies
+directories must never pull the original off the archive to do it.
 """
 
 import logging
@@ -16,13 +16,13 @@ from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.archive_store import LocalArchiveStore
 from app.archive_store.base import TRASH_DIR
-from app.backfill.actions import MovePath, ProduceFormat, RefreshMetadata, RetagFile, TrashPath, UnregisterFile
+from app.backfill.actions import ProduceFormat, RefreshMetadata, TrashPath
 from app.backfill.apply import Applier, SourceUnavailable
 from app.backfill.chores import Plan
 
 VIDEO_ID = "12345"
 ORIGINAL = PurePosixPath(f"{VIDEO_ID}/original/source.mp4")
-BROADCAST = PurePosixPath(f"{VIDEO_ID}/broadcast/source.mp4")
+DASH_DIR = PurePosixPath(f"{VIDEO_ID}/dash")
 
 
 @pytest.fixture
@@ -63,63 +63,24 @@ def plan_of(*actions) -> Plan:
 
 @pytest.mark.asyncio
 async def test_trashing_takes_a_directory_out_of_the_published_tree(applier, archive_root):
-    place(archive_root, BROADCAST)
+    place(archive_root, DASH_DIR / "manifest.mpd")
 
-    await applier.apply(plan_of(TrashPath(path=PurePosixPath(f"{VIDEO_ID}/broadcast"), reason="superseded")))
+    await applier.apply(plan_of(TrashPath(path=DASH_DIR, reason="superseded")))
 
-    assert not (archive_root / f"{VIDEO_ID}/broadcast").exists()
-    assert list((archive_root / TRASH_DIR).rglob("source.mp4"))
-
-
-@pytest.mark.asyncio
-async def test_moving_relocates_the_media(applier, archive_root):
-    place(archive_root, BROADCAST)
-
-    await applier.apply(plan_of(MovePath(source=BROADCAST, destination=ORIGINAL)))
-
-    assert (archive_root / ORIGINAL).read_bytes() == b"media"
-    assert not (archive_root / BROADCAST).exists()
-
-
-@pytest.mark.asyncio
-async def test_retagging_updates_the_row_rather_than_creating_one(applier, archive_root, django_api):
-    await applier.apply(plan_of(RetagFile(file_id=7, variant=VideoFileVariantEnum.ORIGINAL, filename=ORIGINAL)))
-
-    django_api.retag_video_file.assert_awaited_once_with(7, VideoFileVariantEnum.ORIGINAL, str(ORIGINAL))
-    django_api.create_video_file.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_unregistering_drops_the_named_row(applier, django_api):
-    await applier.apply(plan_of(UnregisterFile(file_id=7, reason="its file has been trashed")))
-
-    django_api.delete_video_file.assert_awaited_once_with(7)
+    assert not (archive_root / DASH_DIR).exists()
+    assert list((archive_root / TRASH_DIR).rglob("manifest.mpd"))
 
 
 @pytest.mark.asyncio
 async def test_a_directory_only_plan_never_fetches_the_original(applier, archive_root):
-    """There is no original to fetch, and the plan must still succeed."""
-    place(archive_root, BROADCAST)
+    """Worth several gigabytes a video: a run that only tidies directories has
+    no business pulling originals off the archive to do it. There is no
+    original here at all, and the plan must still succeed."""
+    place(archive_root, DASH_DIR / "manifest.mpd")
 
-    await applier.apply(plan_of(MovePath(source=BROADCAST, destination=ORIGINAL)))
+    await applier.apply(plan_of(TrashPath(path=DASH_DIR, reason="superseded")))
 
-    assert (archive_root / ORIGINAL).exists()
-
-
-@pytest.mark.asyncio
-async def test_the_source_is_fetched_from_where_the_plan_moved_it(applier, archive_root, color_bars_video):
-    """The rename happens first, so fetching up front would look in the wrong
-    directory. This is the whole reason the fetch is lazy."""
-    place(archive_root, BROADCAST, color_bars_video.read_bytes())
-
-    await applier.apply(
-        plan_of(
-            MovePath(source=BROADCAST, destination=ORIGINAL),
-            RefreshMetadata(fields=("duration",), original_file_id=7),
-        )
-    )
-
-    assert (archive_root / ORIGINAL).exists()
+    assert not (archive_root / DASH_DIR).exists()
 
 
 @pytest.mark.asyncio
