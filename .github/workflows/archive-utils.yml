@@ -61,9 +61,13 @@ jobs:
 
       # A build on a branch is a check that the packaging still works, so the
       # version is deliberately one nothing would install by accident.
+      #
+      # `cut` rather than ${GITHUB_SHA::8}: a job in a container gets whatever
+      # shell the runner finds there, which for this image is sh, and substring
+      # expansion is a bashism.
       - name: Build
         working-directory: archive-utils
-        run: ./build-deb.sh "0.0.0~${GITHUB_SHA::8}"
+        run: ./build-deb.sh "0.0.0~$(echo "$GITHUB_SHA" | cut -c1-8)"
 
       - name: Check the package for policy violations
         working-directory: archive-utils
@@ -76,6 +80,18 @@ jobs:
       - name: Install it and run the tools it installed
         working-directory: archive-utils
         run: |
+          # `set -e` is ignored for a command whose status is inverted with !,
+          # so a bare `! cmd` asserts nothing but the step's last line. This
+          # does, which matters: every assertion below is that something is
+          # refused, and a package that had stopped refusing would otherwise
+          # sail through.
+          refuse() {
+            if "$@"; then
+              echo "expected a refusal from: $*" >&2
+              exit 1
+            fi
+          }
+
           apt-get install -y --no-install-recommends ./dist/*_all.deb
           mkdir -p /archive/media
           printf 'root = "/archive/media"\nmanager = "root"\n' \
@@ -85,16 +101,19 @@ jobs:
           fk-archive-purge-trash ci --older-than 0
           fk-archive-migrate-broadcast --help > /dev/null
           fk-archive-gc --help > /dev/null
+
           # The sudoers rule ends in a wildcard, so what fk-archive cannot do
-          # is the whole of what the rule withholds. Both of these belong to
-          # an operator, and neither may be reachable from an SSH session.
-          ! fk-archive ci move 12/broadcast/a.mov 12/original/a.mov
-          ! fk-archive ci purge-trash --older-than 0
-          ! fk-archive ci gc
-          # A packaging mistake that leaves a command unable to refuse would
-          # pass every unit test, because the unit tests import the module
-          # rather than running what the package installed.
-          ! fk-archive ci trash ../../etc
+          # is the whole of what the rule withholds. These belong to an
+          # operator, and none may be reachable from an SSH session.
+          refuse fk-archive ci move 12/broadcast/a.mov 12/original/a.mov
+          refuse fk-archive ci purge-trash --older-than 0
+          refuse fk-archive ci gc
+
+          # A packaging mistake that left a command unable to refuse a path
+          # would pass every unit test, because the unit tests import the
+          # module rather than running what the package installed.
+          refuse fk-archive ci trash ../../etc
+          refuse fk-archive ci publish /etc/passwd --size 0
 
       - uses: actions/upload-artifact@v5
         with:
