@@ -35,10 +35,10 @@ PAGE_SIZE = 500
 class IncompleteSnapshot(RuntimeError):
     """The catalogue could not be read in full.
 
-    Raised rather than returning what did arrive, because the most destructive
-    thing here -- deciding a video no longer exists and reclaiming its media --
-    reads absence as permission. A partial answer must never be mistaken for a
-    complete one.
+    Raised rather than returning what did arrive. A backfill over half a
+    catalogue looks exactly like one over all of it -- it reports a total, it
+    queues work, it exits 0 -- and the videos it silently skipped are the ones
+    somebody then believes have been converged.
     """
 
 
@@ -87,14 +87,10 @@ class CatalogueSnapshot:
     """
 
     #: Every video django-api has, keyed by id, whether or not its ingest
-    #: finished -- deliberately not the public catalogue. Absence from this
-    #: mapping is what gc reads as "no such video, reclaim its media", so it
-    #: has to mean the video does not exist, not that it is not ready yet.
+    #: finished -- deliberately not the public catalogue, which would leave a
+    #: video mid-ingest, or one whose ingest failed, out of every backfill.
     videos: Mapping[str, CatalogueVideo] = field(default_factory=dict)
     files: Mapping[str, tuple[RegisteredFile, ...]] = field(default_factory=dict)
-
-    def __contains__(self, video_id: str) -> bool:
-        return video_id in self.videos
 
     def files_for(self, video_id: str) -> tuple[RegisteredFile, ...]:
         return self.files.get(video_id, ())
@@ -118,17 +114,16 @@ class Observer:
         Two passes, because `proper_import` is a boolean filter with no value
         meaning "either" -- and because omitting it does not mean "either", it
         means true. One unfiltered-looking call returns the public catalogue,
-        which is every video whose ingest finished. Everything mid-ingest and
-        everything whose ingest ever failed is missing from it, and a video
-        missing from here is a video gc trashes the archived media of.
+        which is every video whose ingest finished, leaving out everything
+        mid-ingest and everything whose ingest ever failed. Those are exactly
+        the videos a backfill exists to reach.
 
         The order of the two passes is the interesting part. They are separate
         requests and so separate moments, and a video that changes state in
         between is only seen if it lands in the pass that has not run yet. The
         transition that actually happens is an ingest finishing, false -> true:
         read unfinished first and such a video was already in hand before it
-        moved; read finished first and it is in neither page -- which is this
-        same bug, reintroduced as a race and far harder to see.
+        moved; read finished first and it is in neither page.
         """
         videos: dict[str, CatalogueVideo] = {}
 
@@ -179,21 +174,12 @@ class Observer:
         if seen != expected:
             raise IncompleteSnapshot(f"{what} reported {expected} rows but returned {seen}")
 
-    async def archived_video_ids(self) -> list[str]:
-        """The video directories in the archive, ignoring its own bookkeeping."""
-        entries = await self.archive.list_dir(PurePosixPath("."))
-        return sorted(
-            (entry.name for entry in entries if entry.is_dir and entry.name.isdigit()),
-            key=int,
-        )
-
     async def observe(self, video_id: str, snapshot: CatalogueSnapshot) -> VideoState:
         """Assemble everything the chores need to decide about one video."""
         catalogue = snapshot.videos.get(video_id)
 
         return VideoState(
             video_id=video_id,
-            in_catalogue=catalogue is not None,
             files=snapshot.files_for(video_id),
             directories=await self._archived_directories(video_id),
             duration=catalogue.duration if catalogue else None,
@@ -216,10 +202,6 @@ class Observer:
 
         return VideoState(
             video_id=video_id,
-            # A video handed to a worker exists by construction -- the job is
-            # attached to it -- so this is about the row having been readable,
-            # not about the video having been deleted under us.
-            in_catalogue=video is not None,
             files=tuple(_registered(row) for row in (files.results or [])),
             directories=directories,
             duration=_optional(getattr(video, "duration", None)) if video else None,

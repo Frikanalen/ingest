@@ -1,16 +1,14 @@
 """What a chore proposes doing to one video.
 
 Actions are data, not closures: a plan can be printed, counted, diffed and
-reviewed before anything happens, and reviewing it is the point -- some of
-these move media around and one of them takes a whole video out of the
-published tree.
+reviewed before anything happens, and reviewing a whole-catalogue run before
+it is queued is the point.
 
 Nothing here executes. app.backfill.apply does that.
 """
 
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import ClassVar
 
 from frikanalen_django_api_client.models import VideoFileVariantEnum
 
@@ -20,80 +18,13 @@ from app.formats import UNTRACKED_REVISION
 class Action:
     """One step toward the desired state.
 
-    The two flags are class-level rather than fields: they describe what a kind
-    of action is, not what a particular one happens to be, and keeping them off
-    the dataclass lets each action declare its own arguments as required.
+    Every one of them derives something from the video's source file, which is
+    why `Applier` simply fetches it once for any plan that has work in it. An
+    action that did not need the original would want that decision back.
     """
-
-    #: Whether carrying this out means having the source file locally. The
-    #: distinction is worth several gigabytes a video: a run that only tidies
-    #: directories should never pull originals off the archive to do it.
-    needs_original: ClassVar[bool] = False
-    #: Whether it takes something out of the published tree. Nothing here
-    #: deletes -- destructive means "moves to .trash" -- but it is still the
-    #: set a person should read before saying yes.
-    destructive: ClassVar[bool] = False
 
     def describe(self) -> str:
         raise NotImplementedError
-
-
-@dataclass(frozen=True)
-class TrashPath(Action):
-    """Take a path out of the published tree, recoverably."""
-
-    path: PurePosixPath
-    reason: str
-
-    destructive: ClassVar[bool] = True
-
-    def describe(self) -> str:
-        return f"trash {self.path} ({self.reason})"
-
-
-@dataclass(frozen=True)
-class MovePath(Action):
-    """Relocate archived media without touching its bytes."""
-
-    source: PurePosixPath
-    destination: PurePosixPath
-
-    def describe(self) -> str:
-        return f"move {self.source} -> {self.destination}"
-
-
-@dataclass(frozen=True)
-class RetagFile(Action):
-    """Point an existing videofile row at where its file now is.
-
-    Updating a record we already have, rather than inventing one from a file we
-    happened to find. The row keeps its identity and its history.
-    """
-
-    file_id: int
-    variant: VideoFileVariantEnum
-    filename: PurePosixPath
-
-    def describe(self) -> str:
-        return f"retag videofile {self.file_id} as {self.variant} at {self.filename}"
-
-
-@dataclass(frozen=True)
-class UnregisterFile(Action):
-    """Drop a videofile row for a file we are deliberately removing.
-
-    Only ever paired with trashing the file it names. A row is never dropped
-    because its file turned out to be missing -- that is an incident, and the
-    row is the only remaining evidence of it.
-    """
-
-    file_id: int
-    reason: str
-
-    destructive: ClassVar[bool] = True
-
-    def describe(self) -> str:
-        return f"unregister videofile {self.file_id} ({self.reason})"
 
 
 @dataclass(frozen=True)
@@ -111,8 +42,6 @@ class ProduceFormat(Action):
     #: the new output forever.
     replacing: PurePosixPath | None = None
 
-    needs_original: ClassVar[bool] = True
-
     def describe(self) -> str:
         if self.from_revision != UNTRACKED_REVISION:
             return f"produce {self.file_format} (revision {self.from_revision} -> {self.to_revision})"
@@ -129,8 +58,6 @@ class RefreshMetadata(Action):
     #: inferred so a plan says what it is going to fill in.
     fields: tuple[str, ...]
     original_file_id: int
-
-    needs_original: ClassVar[bool] = True
 
     def describe(self) -> str:
         return f"refresh {', '.join(self.fields)} from the original"

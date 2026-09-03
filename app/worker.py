@@ -20,7 +20,7 @@ from frikanalen_django_api_client.models import IngestKindEnum, IngestStateEnum
 
 from app.archive_store import ArchiveError, ArchiveStore
 from app.backfill.apply import Applier, SourceUnavailable
-from app.backfill.chores import CONVERGENCE_CHORES, DesiredState, plan
+from app.backfill.chores import DesiredState, plan
 from app.backfill.observe import Observer
 from app.django_client.service import DjangoApiService
 from app.ingest_reporting import IngestErrorCode, IngestReporter, transcode_progress_reporter
@@ -107,7 +107,7 @@ class Worker:
         try:
             async with self.archive.open() as archive:
                 state = await Observer(archive, self.django_api).observe_one(video_id)
-                work = plan(state, DesiredState.from_templates(), chores=CONVERGENCE_CHORES)
+                work = plan(state, DesiredState.from_templates())
 
                 if not work:
                     logger.info("Nothing to do for video %s", video_id)

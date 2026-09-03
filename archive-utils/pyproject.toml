@@ -1,0 +1,50 @@
+[project]
+name = "fk-archive-utils"
+version = "0.1.0"
+description = "Privileged, well-defined mutations of a Frikanalen media archive"
+readme = "README.md"
+# Debian 13 ships 3.13. Nothing here needs anything newer than tomllib, which
+# arrived in 3.11, so the floor is set where the oldest interesting host is.
+requires-python = ">=3.11"
+# PyYAML, and only for the one-shot broadcast migration, which reads the API
+# token fk-cli logged in with out of ~/.frikanalen.yaml. Every command an SSH
+# session can reach imports the standard library and nothing else -- those run
+# as the account that owns every video Frikanalen has, under sudo, and the
+# dependency list is part of that attack surface. The import is inside the
+# function that needs it, so that stays true and stays checkable.
+#
+# It goes when the migration does.
+dependencies = ["PyYAML>=6"]
+
+[project.scripts]
+# The path sudoers pins. Keep these names stable: changing one silently voids
+# the rule that grants it, and the failure looks like the archive refusing
+# every write.
+fk-archive = "fk_archive_utils.cli:main"
+fk-archive-purge-trash = "fk_archive_utils.purge_cli:main"
+fk-archive-gc = "fk_archive_utils.gc:main"
+# One-shot, and deliberately its own command rather than a verb of fk-archive:
+# see fk_archive_utils/migrate_broadcast.py. Delete it when it has finished.
+fk-archive-migrate-broadcast = "fk_archive_utils.migrate_broadcast:main"
+fk-archive-ssh = "fk_archive_utils.ssh_command:main"
+
+[dependency-groups]
+dev = ["pytest>=8.0", "ruff>=0.12"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+extend-select = ["I", "F", "E", "W", "C90", "UP", "B", "A", "SIM", "TID", "RUF"]

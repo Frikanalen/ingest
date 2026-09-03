@@ -1,16 +1,12 @@
-"""What `plan` and `apply` each decide to look at.
+"""What `plan` and `apply` decide to look at.
 
-The two subcommands share their selection arguments but not their chores, and
-that difference is the whole subject here. `apply` can only offer a video to
-the queue, so the only chores it may consider are the ones a worker will run
-when it claims one. `gc` is not among them and cannot be: an ingest job belongs
-to a video, and a video the catalogue has deleted has none.
+The catalogue, and only the catalogue. A directory in the archive that the
+catalogue has no video for is not this tool's subject: there is no job to queue
+for a video that does not exist, so nothing here would do anything about it,
+and reading it costs a directory listing per orphan over SFTP.
 
-Getting that wrong is not a cosmetic error. A whole-catalogue `apply` used to
-plan `gc` too, find a destructive action for every archived directory the
-catalogue had dropped, and refuse the entire run -- queueing nothing, including
-every legitimate format rebuild, and exiting 1 on what looked like a normal
-day. The documented way to resume a backfill did nothing at all.
+These tests are what keep such a directory from ever getting in the way of the
+videos that do need work.
 """
 
 from pathlib import Path, PurePosixPath
@@ -25,9 +21,7 @@ from app.backfill import cli
 
 #: In the catalogue, source archived, no derivatives: needs every format.
 NEEDS_FORMATS = "100"
-#: In the catalogue, source still under the name the old system gave it.
-LEGACY_BROADCAST = "200"
-#: In the archive, gone from the catalogue. Only `gc` has anything to say.
+#: In the archive, gone from the catalogue. Nothing here has anything to say.
 ORPHAN = "300"
 
 
@@ -100,21 +94,6 @@ def django_api() -> AsyncMock:
 
 
 @pytest.fixture
-def legacy_video(archive_root, django_api) -> str:
-    """A catalogue video whose source is still under the old `broadcast/` name.
-
-    The one thing an `apply` can plan that does move media out of the published
-    tree, which is what keeps `--yes` from being decoration.
-    """
-    place(archive_root, f"{LEGACY_BROADCAST}/broadcast/source.mp4")
-    django_api.catalogue.videos.append(video_row(LEGACY_BROADCAST))
-    django_api.catalogue.files.append(
-        videofile(2, LEGACY_BROADCAST, VideoFileVariantEnum.BROADCAST, f"{LEGACY_BROADCAST}/broadcast/source.mp4")
-    )
-    return LEGACY_BROADCAST
-
-
-@pytest.fixture
 def run(monkeypatch, archive_root, django_api):
     """`fk-backfill` against that archive and that catalogue."""
     store = LocalArchiveStore(archive_root)
@@ -131,11 +110,8 @@ def queued(django_api) -> set[str]:
 
 
 def test_apply_over_the_whole_catalogue_queues_the_work(run, django_api, capsys):
-    """The bug this file exists for: an orphan directory used to veto the run.
-
-    Nothing a worker can do about video 300 -- it has no catalogue row and so
-    no job -- but the format work video 100 needs is real and must still go in.
-    """
+    """Nothing a worker can do about video 300 -- it has no catalogue row and
+    so no job -- but the format work video 100 needs is real and must go in."""
     assert run(["apply"]) == 0
     assert NEEDS_FORMATS in queued(django_api)
     assert "1 videos queued" in capsys.readouterr().out
@@ -153,56 +129,29 @@ def test_apply_leaves_the_orphan_alone(run, django_api):
     assert queued(django_api) == {NEEDS_FORMATS}
 
 
-def test_apply_refuses_gc(capsys):
-    """Rejected at the parser, with somewhere to go rather than a list of letters."""
-    with pytest.raises(SystemExit) as exit_code:
-        cli.main(["apply", "--chore", "gc"])
-
-    assert exit_code.value.code == 2
-    assert "fk-backfill gc" in capsys.readouterr().err
-
-
-def test_apply_still_confirms_work_that_moves_media(run, django_api, legacy_video, capsys):
-    """`--yes` is not decoration: the legacy migration trashes broadcast/.
-
-    That chore is one a worker runs, so the confirmation is being asked for
-    something that will actually happen -- unlike the `gc` findings it used to
-    be asked for.
-    """
-    assert run(["apply", legacy_video]) == 1
-    assert "move media out of the published tree" in capsys.readouterr().out
-    django_api.enqueue_ingest_job.assert_not_awaited()
-
-    assert run(["apply", "--yes", legacy_video]) == 0
-    assert queued(django_api) == {legacy_video}
-
-
-def test_plan_still_reports_the_orphan(run, django_api, capsys):
-    """gc stays visible where it changes nothing, which is the point of `plan`."""
+def test_neither_subcommand_reports_the_orphan(run, django_api, capsys):
+    """It is not a finding here: nothing here has anything to say about it."""
     assert run(["plan"]) == 0
 
     output = capsys.readouterr().out
-    assert f"trash {ORPHAN}" in output
+    assert ORPHAN not in output
     django_api.enqueue_ingest_job.assert_not_awaited()
 
 
-def test_apply_does_not_read_the_archive_root(run, django_api, monkeypatch):
-    """Without gc there is nothing in an orphan directory worth a round trip.
+def test_neither_subcommand_reads_an_orphan_directory(run, monkeypatch):
+    """Read as a claim about cost, not tidiness: over SFTP this is one listing
+    per directory the catalogue has dropped, before every chore declines to
+    act on it. There are thousands of them."""
+    observed = []
+    original = cli.Observer._archived_directories
 
-    Read as a claim about cost, not tidiness: over SFTP this is one listing per
-    directory the catalogue has dropped, before every chore declines to act.
-    """
-    seen = []
-    original = cli.Observer.archived_video_ids
+    async def record(self, video_id):
+        observed.append(video_id)
+        return await original(self, video_id)
 
-    async def record(self):
-        seen.append(True)
-        return await original(self)
-
-    monkeypatch.setattr(cli.Observer, "archived_video_ids", record)
+    monkeypatch.setattr(cli.Observer, "_archived_directories", record)
 
     run(["apply"])
-    assert not seen
-
     run(["plan"])
-    assert seen
+
+    assert observed == [NEEDS_FORMATS, NEEDS_FORMATS]

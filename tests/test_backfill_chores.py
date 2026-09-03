@@ -1,8 +1,8 @@
 """What each chore decides, given what was observed.
 
-Chores are pure, so the cases that matter -- a broadcast-only video, a format
-built by a profile we have moved past, media nothing claims -- are ordinary
-table tests. No archive, no API, no ffmpeg.
+Chores are pure, so the cases that matter -- a format built by a profile we
+have moved past, media nothing claims, an original that is registered but
+missing -- are ordinary table tests. No archive, no API, no ffmpeg.
 """
 
 from pathlib import PurePosixPath
@@ -11,14 +11,7 @@ import pytest
 from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.archive_store import ArchiveEntry
-from app.backfill.actions import (
-    MovePath,
-    ProduceFormat,
-    RefreshMetadata,
-    RetagFile,
-    TrashPath,
-    UnregisterFile,
-)
+from app.backfill.actions import ProduceFormat, RefreshMetadata
 from app.backfill.chores import DesiredState, plan
 from app.backfill.state import RegisteredFile, VideoState
 from app.formats import UNTRACKED_REVISION
@@ -54,7 +47,6 @@ def video(**overrides) -> VideoState:
     """A healthy, fully-derived video. Tests break exactly one thing."""
     base = dict(
         video_id=VIDEO_ID,
-        in_catalogue=True,
         duration="00:10:00",
         framerate=25000,
         files=(
@@ -79,42 +71,7 @@ def test_a_healthy_video_needs_nothing():
     assert not plan(video(), DESIRED)
 
 
-# --- garbage collection ----------------------------------------------------
-
-
-def test_media_for_a_deleted_video_is_trashed():
-    [action] = actions_of(video(in_catalogue=False))
-
-    assert isinstance(action, TrashPath)
-    assert action.path == PurePosixPath(VIDEO_ID)
-    assert action.destructive
-
-
-def test_a_deleted_video_with_no_media_needs_nothing():
-    assert not plan(video(in_catalogue=False, directories={}), DESIRED)
-
-
-def test_nothing_is_derived_for_a_video_being_collected():
-    """Trashing it and then rebuilding its ladder would be an expensive loop."""
-    actions = actions_of(video(in_catalogue=False, files=()))
-
-    assert not any(isinstance(action, ProduceFormat) for action in actions)
-
-
-def test_a_deleted_videos_images_are_collected_with_everything_else():
-    """Their rows went with the video row, so the bytes are garbage too."""
-    state = video(
-        in_catalogue=False,
-        directories={
-            "original": (entry(f"{VIDEO_ID}/original/source.mp4"),),
-            "images": (entry(f"{VIDEO_ID}/images/2f92e90d.png"),),
-        },
-    )
-
-    [action] = plan(state, DESIRED, chores=("gc",)).actions
-
-    assert isinstance(action, TrashPath)
-    assert action.path == PurePosixPath(VIDEO_ID)
+# --- videos with nothing to derive from ------------------------------------
 
 
 def test_a_video_with_only_images_is_not_read_as_a_lost_ladder():
@@ -124,17 +81,13 @@ def test_a_video_with_only_images_is_not_read_as_a_lost_ladder():
     assert not plan(state, DESIRED, chores=("formats",)).notes
 
 
-def test_a_format_directory_with_no_row_is_not_garbage():
-    """It reads as missing to the formats chore, which rebuilds it."""
-    state = video(files=tuple(f for f in video().files if f.variant != VideoFileVariantEnum.DASH))
 
-    actions = actions_of(state)
-
-    assert not any(isinstance(action, TrashPath) for action in actions)
-    assert [a.file_format for a in actions if isinstance(a, ProduceFormat)] == [VideoFileVariantEnum.DASH]
-
-
-# --- original / broadcast --------------------------------------------------
+# --- the legacy broadcast/ directory ---------------------------------------
+#
+# There is no chore for it any more. Settling which directory holds a video's
+# source is a one-shot migration, run on the storage host by an operator as
+# `fk-archive-migrate-broadcast` -- so what is tested here is that the backfill
+# leaves such a video alone and says why, rather than what it does to it.
 
 
 def broadcast_only(**overrides) -> VideoState:
@@ -154,72 +107,23 @@ def broadcast_only(**overrides) -> VideoState:
     return video(**{**defaults, **overrides})
 
 
-def test_broadcast_is_trashed_when_an_original_exists():
-    state = video(
-        files=(*video().files, registered(VideoFileVariantEnum.BROADCAST, "source.mp4", file_id=7)),
-        directories={**video().directories, "broadcast": (entry(f"{VIDEO_ID}/broadcast/source.mp4"),)},
-    )
-
-    actions = actions_of(state)
-
-    [trash] = [a for a in actions if isinstance(a, TrashPath)]
-    [unregister] = [a for a in actions if isinstance(a, UnregisterFile)]
-    assert trash.path == PurePosixPath(f"{VIDEO_ID}/broadcast")
-    assert unregister.file_id == 7
-
-
-def test_broadcast_becomes_the_original_when_there_is_no_other():
-    actions = actions_of(broadcast_only())
-
-    [move] = [a for a in actions if isinstance(a, MovePath)]
-    [retag] = [a for a in actions if isinstance(a, RetagFile)]
-    assert move.source == PurePosixPath(f"{VIDEO_ID}/broadcast/source.mp4")
-    assert move.destination == PurePosixPath(f"{VIDEO_ID}/original/source.mp4")
-    assert retag.file_id == 7
-    assert retag.variant == VideoFileVariantEnum.ORIGINAL
-    assert retag.filename == PurePosixPath(f"{VIDEO_ID}/original/source.mp4")
-
-
-def test_the_emptied_broadcast_directory_is_trashed_last():
-    actions = actions_of(broadcast_only())
-
-    trashes = [i for i, a in enumerate(actions) if isinstance(a, TrashPath)]
-    moves = [i for i, a in enumerate(actions) if isinstance(a, MovePath)]
-    assert min(trashes) > max(moves)
-
-
-def test_formats_are_planned_against_the_renamed_original():
-    """The rename has not happened yet, but the formats chore must see it as
-    though it had -- otherwise a broadcast-only video looks sourceless and
-    every derivative it needs goes unplanned."""
-    state = broadcast_only(
-        files=(registered(VideoFileVariantEnum.BROADCAST, "source.mp4", file_id=7),),
-    )
-
-    produced = [a.file_format for a in actions_of(state) if isinstance(a, ProduceFormat)]
-
-    assert set(produced) == {VideoFileVariantEnum.DASH, VideoFileVariantEnum.LARGE_THUMB}
-
-
-def test_unclaimed_broadcast_media_is_reported_not_moved():
-    """Moving it would guess it is the source; registering it would invent a
-    record from a file. Neither is ours to decide."""
-    state = broadcast_only(files=())
-
-    result = plan(state, DESIRED)
-
-    assert not any(isinstance(a, MovePath) for a in result.actions)
-    assert any("no videofile row" in note for note in result.notes)
-
-
-def test_a_video_with_no_source_at_all_is_reported():
-    state = video(files=(), directories={})
-
-    result = plan(state, DESIRED)
+def test_a_video_whose_source_is_still_called_broadcast_is_left_alone():
+    """Reported, not acted on. The backfill has no way to rename anything --
+    deliberately -- so the honest answer is to say what is in the way and stop,
+    rather than to derive formats from a source it cannot see."""
+    result = plan(broadcast_only(), DESIRED)
 
     assert not result.actions
-    assert any("nothing to derive from" in note for note in result.notes)
+    assert any("no original is registered" in note for note in result.notes)
 
+
+def test_a_video_with_no_source_at_all_is_silent():
+    """Nothing archived and nothing registered is a video nobody has uploaded
+    yet, not a ladder that went missing. There is nothing to report."""
+    result = plan(video(files=(), directories={}), DESIRED)
+
+    assert not result.actions
+    assert not result.notes
 
 # --- formats ---------------------------------------------------------------
 
@@ -363,7 +267,7 @@ def test_an_unmeasurable_loudness_converges_after_one_pass():
     writes nothing, so the state it was keyed on comes back unchanged. The
     second pass has to stop asking, or it never will."""
     first = plan(unmeasured(framerate=None), DESIRED)
-    assert first.needs_original
+    assert first.actions
 
     # What the archive and the catalogue look like once that has been carried
     # out against a source with nothing to measure: framerate written, loudness
@@ -371,33 +275,18 @@ def test_an_unmeasurable_loudness_converges_after_one_pass():
     second = plan(unmeasured(), DESIRED)
 
     assert not second.actions
-    assert not second.needs_original
 
 
 # --- the plan itself -------------------------------------------------------
 
 
-def test_a_directory_only_plan_does_not_need_the_original():
-    """Several gigabytes a video rides on this being right."""
-    state = video(
-        files=(*video().files, registered(VideoFileVariantEnum.BROADCAST, "source.mp4", file_id=7)),
-        directories={**video().directories, "broadcast": (entry(f"{VIDEO_ID}/broadcast/source.mp4"),)},
-    )
-
-    assert not plan(state, DESIRED).needs_original
-
-
-def test_a_plan_that_transcodes_needs_the_original():
-    state = video(files=(registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", file_id=1),))
-
-    assert plan(state, DESIRED).needs_original
-
-
 def test_chores_can_be_selected():
-    state = video(in_catalogue=False)
+    """Which is about what a run *reports*, not about what a worker will do:
+    a worker that claims one of these re-plans it and runs everything."""
+    state = video(framerate=None)
 
+    assert plan(state, DESIRED, chores=("metadata",)).actions
     assert not plan(state, DESIRED, chores=("formats",)).actions
-    assert plan(state, DESIRED, chores=("gc",)).actions
 
 
 def test_a_plan_describes_itself():

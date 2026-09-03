@@ -4,10 +4,11 @@ The plan says what; this says how. Kept apart from the chores because deciding
 and doing have very different testability: one is arithmetic over observed
 state, the other moves gigabytes between hosts.
 
-The source file is fetched lazily, on the first action that needs it. That is
-not just an optimisation -- a plan can rename `broadcast/` to `original/` and
-then derive formats from the result, so fetching up front would look in a
-directory that does not exist yet.
+The source file is fetched once, for any plan that has work in it, and read
+from the archive rather than from anything the plan carried -- so a directory
+this same plan has already swapped out is reflected. A plan with no actions
+fetches nothing, which matters because that is exactly the case where there may
+be no original to fetch.
 """
 
 from dataclasses import replace
@@ -17,15 +18,7 @@ from tempfile import TemporaryDirectory
 
 from app.api.hooks.metadata import MetadataExtractor
 from app.archive_store import ArchiveSession
-from app.backfill.actions import (
-    Action,
-    MovePath,
-    ProduceFormat,
-    RefreshMetadata,
-    RetagFile,
-    TrashPath,
-    UnregisterFile,
-)
+from app.backfill.actions import Action, ProduceFormat, RefreshMetadata
 from app.backfill.chores import ORIGINAL_DIR, Plan
 from app.django_client.service import DjangoApiService
 from app.media.produce import FormatProducer, SourceMedia
@@ -72,10 +65,14 @@ class Applier:
         measuring the same file's loudness twice.
         """
         with TemporaryDirectory(dir=self.work_dir, prefix=f"apply-{plan.video_id}-") as scratch:
-            for action in plan.actions:
-                if action.needs_original and source is None:
-                    source = await self._fetch_source(plan.video_id, Path(scratch))
+            # Once, up front, for any plan that has work in it: every action
+            # there is derives something from the source file. A plan with no
+            # actions fetches nothing, which is the case where there may well
+            # be no original to fetch.
+            if plan.actions and source is None:
+                source = await self._fetch_source(plan.video_id, Path(scratch))
 
+            for action in plan.actions:
                 logger.info("video %s: %s", plan.video_id, action.describe())
                 await self._apply(action, plan.video_id, source, Path(scratch), on_progress)
 
@@ -111,18 +108,6 @@ class Applier:
         on_progress: ProgressCallback | None,
     ) -> None:
         match action:
-            case TrashPath(path=path):
-                await self.archive.trash(path)
-
-            case MovePath(source=origin, destination=destination):
-                await self.archive.move(origin, destination)
-
-            case RetagFile(file_id=file_id, variant=variant, filename=filename):
-                await self.django_api.retag_video_file(file_id, variant, str(filename))
-
-            case UnregisterFile(file_id=file_id):
-                await self.django_api.delete_video_file(file_id)
-
             case ProduceFormat(file_format=file_format, replacing=replacing):
                 assert source is not None, "produce needs the original"
                 if replacing is not None:

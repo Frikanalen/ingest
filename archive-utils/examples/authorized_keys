@@ -1,0 +1,12 @@
+# ~ingest/.ssh/authorized_keys on the storage host.
+#
+# `restrict` turns off port forwarding, agent forwarding, X11, PTY allocation
+# and user-rc; `command=` replaces whatever the client asked to run with the
+# wrapper, which then allows exactly two things: a read-only SFTP server, and
+# fk-archive by way of sudo. See fk_archive_utils/ssh_command.py.
+#
+# The account needs a real shell (/bin/sh is enough) for this to work: sshd
+# runs a forced command through the login shell, so /usr/sbin/nologin would
+# refuse it. The forced command is what keeps that shell from being reachable.
+
+restrict,command="/usr/bin/fk-archive-ssh prod" ssh-ed25519 AAAAC3Nz...  ingest@prod-kube-1

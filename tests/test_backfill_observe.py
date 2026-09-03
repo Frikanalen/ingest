@@ -155,16 +155,6 @@ async def test_a_row_that_omits_the_revision_reads_as_untracked(observer, django
 
 
 @pytest.mark.asyncio
-async def test_archived_video_ids_ignore_the_archives_own_directories(observer, archive_root):
-    place(archive_root, f"{VIDEO_ID}/original/source.mp4")
-    place(archive_root, "999/original/other.mp4")
-    place(archive_root, ".trash/20260101T000000Z/1/original/gone.mp4")
-    place(archive_root, ".spool/2/original/partial.mp4")
-
-    assert await observer.archived_video_ids() == ["999", "12345"]
-
-
-@pytest.mark.asyncio
 async def test_observing_reads_every_directory_and_its_contents(observer, archive_root):
     place(archive_root, f"{VIDEO_ID}/original/source.mp4")
     place(archive_root, f"{VIDEO_ID}/dash/manifest.mpd")
@@ -181,19 +171,8 @@ async def test_observing_reads_every_directory_and_its_contents(observer, archiv
 async def test_observing_carries_the_videos_own_fields(observer):
     state = await observer.observe(VIDEO_ID, await observer.snapshot())
 
-    assert state.in_catalogue
     assert state.duration == "00:10:00"
     assert state.framerate == 25000
-
-
-@pytest.mark.asyncio
-async def test_a_directory_the_catalogue_does_not_know_is_not_in_the_catalogue(observer, archive_root):
-    place(archive_root, "777/original/orphan.mp4")
-
-    state = await observer.observe("777", await observer.snapshot())
-
-    assert not state.in_catalogue
-    assert state.contents_of("original")
 
 
 @pytest.mark.asyncio
@@ -201,20 +180,18 @@ async def test_a_video_with_nothing_archived_observes_as_empty(observer):
     state = await observer.observe(VIDEO_ID, await observer.snapshot())
 
     assert state.directories == {}
-    assert state.in_catalogue
 
 
 @pytest.mark.asyncio
 async def test_the_snapshot_holds_videos_whose_ingest_has_not_finished(observer, django_api):
     """django-api's video list defaults to the public catalogue -- finished
-    ingests only. The snapshot has to be wider than that, because gc reads
-    absence from it as permission to reclaim a video's archived media."""
+    ingests only. The snapshot has to be wider than that: a video mid-ingest,
+    or one whose ingest failed, is exactly what a backfill exists to reach."""
     django_api.list_videos_page = pager([video_row(1), video_row(2, proper_import=False)])
 
     snapshot = await observer.snapshot()
 
     assert set(snapshot.videos) == {"1", "2"}
-    assert "2" in snapshot
 
 
 @pytest.mark.asyncio

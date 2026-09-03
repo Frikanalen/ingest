@@ -1,0 +1,38 @@
+Source: fk-archive-utils
+Section: utils
+Priority: optional
+Maintainer: Frikanalen <post@frikanalen.no>
+Build-Depends:
+ debhelper-compat (= 13),
+ dh-python,
+ pybuild-plugin-pyproject,
+ python3-all,
+ python3-setuptools,
+Standards-Version: 4.7.0
+Homepage: https://github.com/Frikanalen/ingest
+Rules-Requires-Root: no
+
+Package: fk-archive-utils
+Architecture: all
+Depends:
+ ${misc:Depends},
+ ${python3:Depends},
+ openssh-sftp-server,
+ python3-yaml,
+ sudo,
+Description: privileged mutations of a Frikanalen media archive
+ The ingest engine writes into the media archive over SSH. Rather than giving
+ the account it logs in as write access to the archive, this package installs
+ the two mutations it actually performs -- publish a file, trash a directory --
+ as commands that run as the account owning the archive, reached through a
+ single sudoers rule.
+ .
+ Two more ship as operator tools with their own entry points, deliberately
+ outside what that rule grants: fk-archive-purge-trash, which is the only thing
+ here that deletes anything, and fk-archive-migrate-broadcast, a one-shot
+ migration of a video's source out of the directory the previous system kept it
+ in.
+ .
+ Every command validates the paths it is given against the archive's namespace,
+ traverses it without following symbolic links, and refuses to overwrite
+ anything. Removal is a rename into .trash/.

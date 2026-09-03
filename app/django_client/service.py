@@ -220,22 +220,6 @@ class DjangoApiService:
         )
         _expect(response, HTTPStatus.CREATED)
 
-    async def retag_video_file(self, file_id: int, file_format: VideoFileVariantEnum, filename: str):
-        """Point an existing videofile row at a new path and variant.
-
-        Used when a legacy `broadcast/` directory turns out to be the original:
-        the record is updated rather than replaced, so the file keeps whatever
-        history and identity the row already carried.
-        """
-        return await videofiles_partial_update.asyncio(
-            file_id,
-            client=self.client,
-            body=PatchedVideoFileRequest(
-                variant=file_format,
-                filename=str(filename),
-            ),
-        )
-
     async def set_video_file_loudness(self, file_id: int, loudness: LoudnessMeasurement):
         return await videofiles_partial_update.asyncio(
             file_id,

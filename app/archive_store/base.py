@@ -21,10 +21,6 @@ SPOOL_DIR = PurePosixPath(".spool")
 #: the report that produced it.
 TRASH_DIR = PurePosixPath(".trash")
 
-#: Directories the archive keeps for its own bookkeeping. Nothing that walks
-#: the archive looking for videos should mistake one of these for a video.
-RESERVED_DIRS = frozenset({SPOOL_DIR.name, TRASH_DIR.name})
-
 
 def staging_path(destination: PurePosixPath) -> PurePosixPath:
     """Where a file is transferred before it is published at `destination`.
@@ -123,6 +119,10 @@ class ArchiveSession(ABC):
 
         Missing parents are created. Raises FileAlreadyArchived rather than
         replacing anything at `destination`.
+
+        Not a general facility, despite the name: `trash()` is its only caller,
+        and nothing here should acquire a second one. Renaming archived media
+        is not something ingest has any reason to do.
         """
 
     async def assert_absent(self, destination: PurePosixPath) -> None:

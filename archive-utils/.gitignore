@@ -1,0 +1,10 @@
+# Written by build-deb.sh from the version it was given, so the packaging has
+# one source of truth for the version rather than a changelog that drifts from
+# the release it claims to describe.
+debian/changelog
+debian/files
+debian/.debhelper/
+debian/fk-archive-utils/
+debian/*.substvars
+debian/*.debhelper.log
+dist/

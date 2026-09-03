@@ -67,6 +67,11 @@ known-third-party = ["frikanalen_django_api_client"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+# archive-utils/ is a package of its own, with its own pyproject, its own
+# tests and no dependency on this one. Without this, a pytest run from the
+# repository root collects it too, under a rootdir where its imports do not
+# resolve.
+testpaths = ["tests"]
 log_cli = true
 log_cli_level = "INFO"
 

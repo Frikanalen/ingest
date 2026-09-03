@@ -1,0 +1,10 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: fk-archive-utils
+Source: https://github.com/Frikanalen/ingest
+
+Files: *
+Copyright: Frikanalen
+License: proprietary
+ The repository this package is built from declares no licence. Until it does,
+ this is distributed only within Frikanalen's own infrastructure, and no
+ permission to redistribute it is granted here by implication.

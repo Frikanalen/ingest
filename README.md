@@ -85,32 +85,57 @@ that later looks like a finished one.
 
 Both SSH credentials must be given explicitly — ingest will not reach for the running user's `~/.ssh`, and it never disables host key verification. If either is missing, ingest logs a warning and archives to `FK_ARCHIVE_FALLBACK_DIR` instead, so you can run it locally without setting up SSH at all. **Set `FK_ARCHIVE_REQUIRED=true` anywhere that actually archives over SSH**: otherwise a secret that fails to mount leaves ingest quietly writing to scratch space, where files are lost on restart.
 
+### Writing without write access
+
+The SSH account described above has write access to the whole archive, which is
+far more than ingest needs: `ArchiveSession` only ever performs four mutations,
+and two of them — purging the trash, and collecting a video the catalogue has dropped — are an operator's rather than the engine's.
+
+[`archive-utils/`](archive-utils/) is those four mutations packaged as
+`fk-archive-utils`, a Debian package installed on the storage host. Ingest asks
+it to publish a file, move a file within a video, or trash a directory, over
+SSH through a single sudoers rule, and the account it logs in as needs no write
+access to the archive at all. Reads stay on SFTP, read-only.
+
+It also holds the two whole-archive operations that are nobody's job to queue:
+`fk-archive-gc`, which reclaims media for videos the catalogue has dropped, and
+`fk-archive-migrate-broadcast`, the one-shot migration of a video's source out
+of the directory the previous system kept it in. Both compare the archive
+against the catalogue and are run by an operator on the storage host.
+
+The package is built and released by
+[`.github/workflows/archive-utils.yml`](.github/workflows/archive-utils.yml)
+and installed by `roles/fk_archive_utils` in the infra repository. **The engine
+does not speak it yet** — `SshArchiveSession` still writes over SFTP, and the
+cutover is gated on that changing. `archive-utils/README.md` has the design;
+the infra role's README has the order to deploy it in.
+
 ## Reconciling the catalogue
 
 Ingest is not only a hook handler. What a video is *supposed* to have is declared in one place — `DESIRED_FORMATS` in `app/formats.py`, and the revision each template in `app/templates/` declares — and both paths that produce media converge on it: a fresh upload, and a video that has been in the archive for years.
 
-They converge on it by running the same code. Once the hook has archived the original, an upload is a video like any other: ingest observes it, plans the difference against the desired state, and applies the plan — the same `CONVERGENCE_CHORES` a worker runs when it claims one. The upload path holds no list of formats of its own, so a format added to `DESIRED_FORMATS` or a template whose revision moves reaches both paths or neither. It is also how a freshly uploaded video gets its `framerate`, which the hook works out anyway for DASH segmentation and previously had nowhere to put.
+They converge on it by running the same code. Once the hook has archived the original, an upload is a video like any other: ingest observes it, plans the difference against the desired state, and applies the plan — the same `CHORES` a worker runs when it claims one. The upload path holds no list of formats of its own, so a format added to `DESIRED_FORMATS` or a template whose revision moves reaches both paths or neither. It is also how a freshly uploaded video gets its `framerate`, which the hook works out anyway for DASH segmentation and previously had nowhere to put.
 
 That matters because "this video has DASH" and "this video has *current* DASH" are different statements. Each template carries a `revision`, and `profileRevision` on the videofile row records which one produced the file. Revisions number from 1, so 0 means "registered before any of this was recorded" — which is what every pre-existing row reads as, and therefore as stale. Changing a profile is then: edit the template, bump its revision, and everything built by the old one becomes due for a rebuild without anybody keeping a list.
 
 ### Chores
 
-| Chore | What it settles | Run by |
-| --- | --- | --- |
-| `gc` | Media in the archive for a video the catalogue no longer has | the `gc` subcommand |
-| `legacy-broadcast-directories` | Whether the source lives in `original/` or the legacy `broadcast/` | a worker |
-| `metadata` | `duration`, `framerate` and R.128 loudness, re-derived from the original | a worker |
-| `formats` | Derivatives that are missing, or built by a superseded profile | a worker |
+| Chore | What it settles |
+| --- | --- |
+| `metadata` | `duration`, `framerate` and R.128 loudness, re-derived from the original |
+| `formats` | Derivatives that are missing, or built by a superseded profile |
 
-The last three are `CONVERGENCE_CHORES`: what it means to converge one video that still exists, and therefore what a worker does with any job it claims. `gc` is about videos that no longer exist, so it has neither a job to be claimed under nor a worker to run it — see [What is not on the queue](#what-is-not-on-the-queue).
+That is the whole set, and there is deliberately no second list for one caller to run instead: `CHORES` is what it means to converge a video, and both the worker draining the queue and the terminal deciding what to put on it read it. A chore that reached one path and not the other is precisely the drift this arrangement exists to prevent.
 
-`legacy-broadcast-directories` is named at length because it is not permanent. `broadcast/` is what the system before this one called the source file, and nothing has written one for years — the chore exists to walk the catalogue once and leave every video with its source under `original/`. Once a sweep finds none left, it should be deleted along with its tests and the `MovePath`, `RetagFile` and `UnregisterFile` actions, which exist for it and nothing else. A migration left in the code after it has finished migrating reads like a rule about how the archive works.
+Both are about a video that exists, which is the constraint that keeps every chore queueable: an ingest job belongs to a video, so anything a chore can decide is something a worker can be handed. Media belonging to a video the catalogue has *deleted* fits neither half of that, and is [`fk-archive-gc`](archive-utils/README.md#garbage-collection)'s on the storage host.
 
-Each is a pure function from an observed `VideoState` to the actions that would close the gap, so the awkward cases — a video whose source is still called `broadcast`, a format registered twice, media nothing claims — are unit tests rather than fixtures.
+Settling whether a video's source lives in `original/` or in the `broadcast/` directory the previous system used is not among them, and is not a chore: it happens once per video, ever, and is [`fk-archive-migrate-broadcast`](archive-utils/README.md#the-broadcast-migration) on the storage host. A video still in the old shape reads here as having no registered original — the `formats` chore says so in a note and derives nothing, which is the right answer until the migration has run.
+
+Each is a pure function from an observed `VideoState` to the actions that would close the gap, so the awkward cases — a format registered twice, media nothing claims, a video whose source is nowhere the catalogue says it is — are unit tests rather than fixtures.
 
 **The database decides.** No chore invents a videofile row from a file it found, and none deletes a row because a file is missing. The first lets the archive overrule the catalogue; the second destroys the only remaining evidence of an incident. Both are reported instead, as notes nothing acts on.
 
-**Nothing here deletes.** `ArchiveSession` has no way to destroy archived media: removing something is a rename into `.trash/<timestamp>/<original path>`, so putting it back is the reverse rename. Purging is a separate act, and is not built yet.
+**Nothing here deletes.** `ArchiveSession` has no way to destroy archived media: removing something is a rename into `.trash/<timestamp>/<original path>`, so putting it back is the reverse rename. Purging is a separate act, and lives on the storage host as `fk-archive-purge-trash`.
 
 ### Running one
 
@@ -130,9 +155,9 @@ uv run python -m app.backfill apply --limit 50
 uv run python -m app.backfill apply            # the whole catalogue
 ```
 
-The two do not consider the same chores, and the difference is worth knowing. `plan` runs all four, because reporting a `gc` finding changes nothing. `apply` runs `CONVERGENCE_CHORES` — the same list a worker runs, so what goes in the queue and what comes out of it cannot drift — and rejects `--chore gc` outright, pointing at the subcommand instead.
+Both consider the same chores, and look at the same videos: the catalogue's, and only the catalogue's. Nothing here reads the archive root, because an archived directory the catalogue has dropped is not this tool's subject — listing them would buy one directory listing per orphan, over SFTP, to learn that nothing will be done about any of them.
 
-It refuses without `--yes` if any of the plans move media out of the published tree, which for `apply` means the legacy `broadcast/` migration. And it leaves alone any video ingest is working on right now — overwriting that job would reset somebody's upload under them.
+`apply` leaves alone any video ingest is working on right now, since overwriting that job would reset somebody's upload under them. Nothing it can queue takes media out of the published tree, so there is no confirmation to give.
 
 Then scale the pool and let it drain. It is safe to close the terminal: the queue is the state, and a worker re-plans each video when it claims it.
 
@@ -148,22 +173,20 @@ Everything derived from a video's original goes through it, uploads included. Tw
 
 **Programme images.** An ingest job is keyed on its video — one row, no history — so two images with different roles would be two pieces of work sharing one row, colliding with that video's own ingest state. An image is a ≤10 MB validation with no transcode; it gains nothing from a queue and stays in the hook.
 
-**`gc`.** An ingest job belongs to a video, so a video the catalogue has deleted has no job to enqueue and none to claim. Note it is the same *model* even so: `Sweep` runs `plan(state, desired, chores=("gc",))` through the same `Applier` a worker uses, with the CLI as the executor instead of a worker. One model, two dispatchers.
+**Reclaiming deleted videos.** An ingest job belongs to a video, so a video the catalogue has deleted has no job to enqueue and none to claim. It is not on the queue because it is not in this repository at all — see below.
 
 `IngestKind` still has both values, but it no longer says where a job's source is — after the hook, every job's source is the archive. It says who is waiting: a member, or a reconciler. That distinction earns its keep twice. It lets a small pool serve uploads without ever queueing behind a catalogue-wide re-encode, and it gates the completion step — only an `upload` job sets `proper_import`, because only it promises the video ends importable. A backfill flipping that flag on a legacy video would publish something the catalogue is currently hiding.
 
 ### Reclaiming deleted videos
 
-`gc` is separate, and cannot use the queue: an ingest job belongs to a video, so a video the catalogue has deleted has no job to enqueue and none to claim. The sweep compares the whole archive against the whole catalogue and does the work itself.
+A video deleted from django-api leaves its directory in the archive behind. Collecting it is a comparison of two whole collections rather than work on a video — there is no job to queue and no worker to claim one — so it is [`fk-archive-gc`](archive-utils/README.md#garbage-collection), on the host holding the archive:
 
 ```bash
-uv run python -m app.backfill gc            # says what it would reclaim
-uv run python -m app.backfill gc --yes      # moves it into .trash/
+ssh file01 sudo fk-archive-gc prod            # says what it would reclaim
+ssh file01 sudo fk-archive-gc prod --apply    # moves it into .trash/
 ```
 
-Two guards, because this is the one operation whose blast radius is the whole archive. The catalogue read refuses to hand back a partial answer, since a short read would make the archive look like garbage in exactly the proportion it fell short by. And the sweep stops if more than `--max-delete-fraction` of the archive turns out to be unaccounted for — 2% by default.
-
-That second one is aimed at a specific mistake: pointing `FK_API_URL` at one environment and `FK_ARCHIVE_DIR` at another. Every individual decision is then locally correct — that video really is not in that catalogue — and only the total is alarming, so the total is what gets checked. If you cross it legitimately, raise it deliberately.
+It is guarded twice, because its subject is the entire archive: the catalogue read refuses to hand back a partial answer, and the sweep stops if more than `--max-delete-fraction` of the archive turns out to be unaccounted for.
 
 ## Deployment
 
