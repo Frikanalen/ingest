@@ -34,9 +34,6 @@ class VideoState:
     """One video, as the database and the archive each describe it."""
 
     video_id: str
-    #: Whether django-api has a video with this id at all. False is what makes
-    #: a directory in the archive garbage.
-    in_catalogue: bool
     files: tuple[RegisteredFile, ...] = ()
     #: Every directory directly under <id>/, and what is in it. Present even
     #: when empty, so "the directory exists but holds nothing" stays

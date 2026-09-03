@@ -47,7 +47,6 @@ def video(**overrides) -> VideoState:
     """A healthy, fully-derived video. Tests break exactly one thing."""
     base = dict(
         video_id=VIDEO_ID,
-        in_catalogue=True,
         duration="00:10:00",
         framerate=25000,
         files=(
@@ -72,17 +71,7 @@ def test_a_healthy_video_needs_nothing():
     assert not plan(video(), DESIRED)
 
 
-# --- videos the catalogue has dropped --------------------------------------
-
-
-def test_a_video_the_catalogue_has_dropped_is_left_entirely_alone():
-    """Reclaiming its media is `fk-archive-gc`'s, on the storage host.
-
-    Nothing here has anything to say about a video that does not exist, and
-    deriving formats for one would be an expensive way to say nothing.
-    """
-    assert not plan(video(in_catalogue=False), DESIRED)
-    assert not plan(video(in_catalogue=False, files=()), DESIRED)
+# --- videos with nothing to derive from ------------------------------------
 
 
 def test_a_video_with_only_images_is_not_read_as_a_lost_ladder():

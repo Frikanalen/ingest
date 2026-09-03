@@ -6,11 +6,10 @@ write access to the archive at all.
 
 ## Why
 
-Before this, ingest held an SFTP account with write access to `/archive/media`.
-That account could create, rename and delete anything anywhere under the
-archive root — which is to say, a stolen key or a bug in the engine could
-destroy every video Frikanalen has ever broadcast, and nothing between the two
-would have noticed.
+An SFTP account with write access to `/archive/media` can create, rename and
+delete anything anywhere under the archive root — which is to say, a stolen key
+or a bug in the engine could destroy every video Frikanalen has ever broadcast,
+with nothing between the two to notice.
 
 What the engine actually needs is much smaller than that. Every mutation it
 performs goes through one interface (`ArchiveSession` in the ingest
@@ -103,13 +102,8 @@ a connection that dropped — a truncated stream ends exactly like a whole one.
 A video deleted from django-api leaves its directory in the archive behind, and
 nothing else will ever collect it: everything else this system does is keyed on
 a video that exists, and an ingest job belongs to a video, so a deleted one has
-no job and never will.
-
-It was a subcommand of the ingest engine's backfill, and sat oddly there — the
-engine's whole job is converging videos that exist, it could not queue this
-work, and it did it in the terminal, while requiring the engine to hold a
-standing permission to remove any directory in the archive. It is a comparison
-of two whole collections, run where the archive is:
+no job and never will. What this needs is not a job but a comparison of two
+whole collections, run where both can be read:
 
 ```bash
 sudo fk-archive-gc prod            # lists the orphans and what they hold
@@ -132,9 +126,10 @@ whose subject is the entire archive:
   moves.** `--max-delete-fraction`, 2% by default. The failure it is really for
   is the archive and the catalogue being different environments: every
   individual decision is then locally correct — that video really is not in
-  that catalogue — and only the total is insane. Harder to cause now that the
-  environment defaults to the archive profile's own name, but `--environment`
-  still exists, and a genuine mass deletion should stop and ask regardless.
+  that catalogue — and only the total is insane. The environment defaulting to
+  the archive profile's own name makes that hard to arrange by accident, but
+  `--environment` exists, and a genuine mass deletion should stop and ask
+  anyway.
 
 Nothing is destroyed. Collecting a video is a rename into `.trash/`, so the
 window in which a wrong answer can still be undone is however long the trash is
@@ -146,10 +141,10 @@ kept before `fk-archive-purge-trash` runs.
 Nothing has written one for years, and everything since expects the source
 under `original/`.
 
-Settling that used to be a chore in the ingest engine's backfill, which meant
-the engine needed a standing permission to rename files in the archive in order
-to run a migration that happens once per video. It is now
-`fk-archive-migrate-broadcast`, here, and that permission does not exist.
+Renaming a file inside a video happens once per video, ever, which is why this
+is a command an operator runs rather than something the engine can do: a
+one-shot migration is not a reason to give a long-running service a standing
+permission to rename archived media.
 
 Like `gc`, the migration is half an archive operation and half a database one —
 moving the file without retagging the row that names it would leave the
@@ -174,8 +169,7 @@ mistake here that a rename cannot undo, so the two are tied together unless
 `--environment` separates them. With no token for that environment, they say to
 log in with `fk-cli` and stop.
 
-It decides per video exactly what the chore decided, and prints a line for
-each:
+It decides per video, and prints a line for each:
 
 | What it finds | What it does |
 | --- | --- |
@@ -190,7 +184,7 @@ still recorded rather than the reverse. Move and retag before trashing the
 directory, so nothing is ever recorded at a path that does not yet hold it. One
 video failing does not stop the run.
 
-**Delete all of this when it has finished.** This module, `catalogue.py`,
+**Delete all of this when it has finished.** `migrate_broadcast.py`,
 `operations.move`, the entry point and the `python3-yaml` dependency exist for
 it and nothing else, and a migration left in the code after it has finished
 migrating reads like a rule about how the archive works.

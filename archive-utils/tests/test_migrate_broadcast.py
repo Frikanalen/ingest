@@ -10,14 +10,17 @@ from pathlib import Path
 
 import pytest
 
-from fk_archive_utils import migrate_broadcast
+from fk_archive_utils import migrate_broadcast, operator
 from fk_archive_utils.catalogue import Credentials
 from fk_archive_utils.errors import CatalogueError, UsageError
 from fk_archive_utils.migrate_broadcast import find_candidates, migrate_video, run
 
 
-def _fake_credentials(environment, *, config_path=None, api_url=None) -> Credentials:
-    return Credentials(api_url="http://catalogue.invalid", token="unused", environment=environment)
+def _stub_credentials(monkeypatch) -> None:
+    def credentials(environment, *, config_path=None, api_url=None) -> Credentials:
+        return Credentials(api_url="http://catalogue.invalid", token="unused", environment=environment)
+
+    monkeypatch.setattr(operator, "load_credentials", credentials)
 
 
 class FakeCatalogue:
@@ -145,7 +148,7 @@ def test_one_video_failing_does_not_stop_the_run(profile_dir: Path, make_file, m
             raise CatalogueError("the catalogue said no")
         return migrate_broadcast.VideoReport(video_id, "left alone")
 
-    monkeypatch.setattr(migrate_broadcast, "load_credentials", _fake_credentials)
+    _stub_credentials(monkeypatch)
     monkeypatch.setattr(migrate_broadcast, "migrate_video", explode)
     out = io.StringIO()
 

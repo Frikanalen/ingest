@@ -21,10 +21,6 @@ SPOOL_DIR = PurePosixPath(".spool")
 #: the report that produced it.
 TRASH_DIR = PurePosixPath(".trash")
 
-#: Directories the archive keeps for its own bookkeeping. Nothing that walks
-#: the archive looking for videos should mistake one of these for a video.
-RESERVED_DIRS = frozenset({SPOOL_DIR.name, TRASH_DIR.name})
-
 
 def staging_path(destination: PurePosixPath) -> PurePosixPath:
     """Where a file is transferred before it is published at `destination`.
@@ -125,12 +121,8 @@ class ArchiveSession(ABC):
         replacing anything at `destination`.
 
         Not a general facility, despite the name: `trash()` is its only caller,
-        and nothing in this codebase should acquire a second one. Renaming
-        archived media is not something ingest has any reason to do -- the one
-        case that ever needed it, moving a video's source out of the legacy
-        `broadcast/` directory, is now a one-shot migration run on the storage
-        host by an operator, precisely so that this is not a standing
-        permission a long-running service holds.
+        and nothing here should acquire a second one. Renaming archived media
+        is not something ingest has any reason to do.
         """
 
     async def assert_absent(self, destination: PurePosixPath) -> None:

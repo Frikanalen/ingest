@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from fk_archive_utils import gc
+from fk_archive_utils import gc, operator
 from fk_archive_utils.errors import IncompleteCatalogue
 from fk_archive_utils.gc import TooMuchGarbage, archived_video_ids, human_bytes, sweep
 
@@ -138,8 +138,7 @@ def test_an_empty_archive_is_not_a_division_by_zero(profile):
 
 def test_the_run_reports_what_it_found(profile_dir: Path, make_file, monkeypatch):
     archive_videos(make_file, ("13", 1500))
-    monkeypatch.setattr(gc, "load_credentials", _fake_credentials)
-    monkeypatch.setattr(gc, "Catalogue", lambda credentials: FakeCatalogue(set()))
+    _stub_catalogue(monkeypatch, FakeCatalogue(set()))
     out = io.StringIO()
 
     assert gc.run(["test"], stdout=out, profile_dir=profile_dir) == 0
@@ -151,8 +150,7 @@ def test_the_run_reports_what_it_found(profile_dir: Path, make_file, monkeypatch
 
 def test_the_run_reports_a_refusal_as_its_own_exit_code(profile_dir: Path, make_file, monkeypatch):
     archive_videos(make_file, *((str(video_id), 10) for video_id in range(100, 200)))
-    monkeypatch.setattr(gc, "load_credentials", _fake_credentials)
-    monkeypatch.setattr(gc, "Catalogue", lambda credentials: FakeCatalogue(set()))
+    _stub_catalogue(monkeypatch, FakeCatalogue(set()))
 
     assert gc.run(["test", "--apply"], stdout=io.StringIO(), profile_dir=profile_dir) == TooMuchGarbage.exit_code
 
@@ -165,7 +163,17 @@ def test_sizes_are_reported_in_units_a_person_reads(count, expected):
     assert human_bytes(count) == expected
 
 
-def _fake_credentials(environment, *, config_path=None, api_url=None):
+def _stub_catalogue(monkeypatch, catalogue: FakeCatalogue) -> None:
+    """Stand in for the far end, at the seam the operator tools share.
+
+    Patched on `operator` rather than on `gc`, so the shared plumbing -- the
+    environment defaulting to the profile name, the credential read, the
+    privilege drop -- is exercised rather than stepped over.
+    """
     from fk_archive_utils.catalogue import Credentials
 
-    return Credentials(api_url="http://catalogue.invalid", token="unused", environment=environment)
+    def credentials(environment, *, config_path=None, api_url=None):
+        return Credentials(api_url="http://catalogue.invalid", token="unused", environment=environment)
+
+    monkeypatch.setattr(operator, "load_credentials", credentials)
+    monkeypatch.setattr(operator, "Catalogue", lambda credentials, dry_run=False: catalogue)

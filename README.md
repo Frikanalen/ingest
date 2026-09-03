@@ -97,18 +97,18 @@ it to publish a file, move a file within a video, or trash a directory, over
 SSH through a single sudoers rule, and the account it logs in as needs no write
 access to the archive at all. Reads stay on SFTP, read-only.
 
+It also holds the two whole-archive operations that are nobody's job to queue:
+`fk-archive-gc`, which reclaims media for videos the catalogue has dropped, and
+`fk-archive-migrate-broadcast`, the one-shot migration of a video's source out
+of the directory the previous system kept it in. Both compare the archive
+against the catalogue and are run by an operator on the storage host.
+
 The package is built and released by
 [`.github/workflows/archive-utils.yml`](.github/workflows/archive-utils.yml)
 and installed by `roles/fk_archive_utils` in the infra repository. **The engine
 does not speak it yet** — `SshArchiveSession` still writes over SFTP, and the
 cutover is gated on that changing. `archive-utils/README.md` has the design;
 the infra role's README has the order to deploy it in.
-
-One piece has already moved: the legacy `broadcast/` → `original/` migration
-used to be a backfill chore, and is now `fk-archive-migrate-broadcast` there.
-It is the only thing that ever needed to rename archived media, and it happens
-once per video — so the engine no longer has, or needs, a way to rename
-anything.
 
 ## Reconciling the catalogue
 
@@ -127,9 +127,9 @@ That matters because "this video has DASH" and "this video has *current* DASH" a
 
 That is the whole set, and there is deliberately no second list for one caller to run instead: `CHORES` is what it means to converge a video, and both the worker draining the queue and the terminal deciding what to put on it read it. A chore that reached one path and not the other is precisely the drift this arrangement exists to prevent.
 
-Both are about a video that exists. There used to be a third, `gc`, for media belonging to a video the catalogue had *deleted* — which fits neither half of the arrangement above, since there is no job to queue and no worker to claim one. It is [`fk-archive-gc`](archive-utils/README.md#garbage-collection) now, run on the storage host, and the engine has no way to remove a video at all.
+Both are about a video that exists, which is the constraint that keeps every chore queueable: an ingest job belongs to a video, so anything a chore can decide is something a worker can be handed. Media belonging to a video the catalogue has *deleted* fits neither half of that, and is [`fk-archive-gc`](archive-utils/README.md#garbage-collection)'s on the storage host.
 
-There used to be a third, `legacy-broadcast-directories`, which settled whether a video's source lived in `original/` or in the `broadcast/` directory the previous system used. It is now [`fk-archive-migrate-broadcast`](archive-utils/README.md#the-broadcast-migration), run on the storage host by an operator. Renaming a file inside a video happens once per video, ever; keeping it as a chore meant the engine needed a standing permission to rename archived media in order to run a migration, and it no longer has one. A video still in the old shape now reads as having no registered original — the `formats` chore says so in a note and derives nothing, which is the right answer until someone runs the migration.
+Settling whether a video's source lives in `original/` or in the `broadcast/` directory the previous system used is not among them, and is not a chore: it happens once per video, ever, and is [`fk-archive-migrate-broadcast`](archive-utils/README.md#the-broadcast-migration) on the storage host. A video still in the old shape reads here as having no registered original — the `formats` chore says so in a note and derives nothing, which is the right answer until the migration has run.
 
 Each is a pure function from an observed `VideoState` to the actions that would close the gap, so the awkward cases — a format registered twice, media nothing claims, a video whose source is nowhere the catalogue says it is — are unit tests rather than fixtures.
 
@@ -173,24 +173,20 @@ Everything derived from a video's original goes through it, uploads included. Tw
 
 **Programme images.** An ingest job is keyed on its video — one row, no history — so two images with different roles would be two pieces of work sharing one row, colliding with that video's own ingest state. An image is a ≤10 MB validation with no transcode; it gains nothing from a queue and stays in the hook.
 
-**Reclaiming deleted videos.** An ingest job belongs to a video, so a video the catalogue has deleted has no job to enqueue and none to claim. It is not on the queue because it is not here at all — see below.
+**Reclaiming deleted videos.** An ingest job belongs to a video, so a video the catalogue has deleted has no job to enqueue and none to claim. It is not on the queue because it is not in this repository at all — see below.
 
 `IngestKind` still has both values, but it no longer says where a job's source is — after the hook, every job's source is the archive. It says who is waiting: a member, or a reconciler. That distinction earns its keep twice. It lets a small pool serve uploads without ever queueing behind a catalogue-wide re-encode, and it gates the completion step — only an `upload` job sets `proper_import`, because only it promises the video ends importable. A backfill flipping that flag on a legacy video would publish something the catalogue is currently hiding.
 
 ### Reclaiming deleted videos
 
-Not here. A video deleted from django-api leaves its directory in the archive behind, and collecting it is a comparison of two whole collections rather than work on a video — there is no job to queue and no worker to claim one. It used to be `fk-backfill gc`, which meant the engine held a standing permission to remove any directory in the archive in order to run a comparison it could not queue.
-
-It is [`fk-archive-gc`](archive-utils/README.md#garbage-collection) now, on the host holding the archive:
+A video deleted from django-api leaves its directory in the archive behind. Collecting it is a comparison of two whole collections rather than work on a video — there is no job to queue and no worker to claim one — so it is [`fk-archive-gc`](archive-utils/README.md#garbage-collection), on the host holding the archive:
 
 ```bash
 ssh file01 sudo fk-archive-gc prod            # says what it would reclaim
 ssh file01 sudo fk-archive-gc prod --apply    # moves it into .trash/
 ```
 
-Typing the old command tells you that.
-
-Both guards moved with it: the catalogue read still refuses to hand back a partial answer, and the sweep still stops if more than `--max-delete-fraction` of the archive turns out to be unaccounted for. The mistake the second one is aimed at — the archive and the catalogue being different environments — is now much harder to make, since the environment defaults to the archive profile's own name rather than being configured separately.
+It is guarded twice, because its subject is the entire archive: the catalogue read refuses to hand back a partial answer, and the sweep stops if more than `--max-delete-fraction` of the archive turns out to be unaccounted for.
 
 ## Deployment
 

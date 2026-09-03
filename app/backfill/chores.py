@@ -93,9 +93,6 @@ def refresh_metadata(state: VideoState, desired: DesiredState) -> Fragment:
     Distinguishing the remainder properly needs django-api to record that a
     measurement was attempted; there is no field for it today.
     """
-    if not state.in_catalogue:
-        return Fragment(state)
-
     originals = state.rows_for(VideoFileVariantEnum.ORIGINAL)
     if not originals:
         return Fragment(state)
@@ -140,9 +137,6 @@ def refresh_metadata(state: VideoState, desired: DesiredState) -> Fragment:
 
 def produce_formats(state: VideoState, desired: DesiredState) -> Fragment:
     """Build every desired format that is absent or built by an older profile."""
-    if not state.in_catalogue:
-        return Fragment(state)
-
     if not state.rows_for(VideoFileVariantEnum.ORIGINAL):
         if state.has_archived_media:
             return Fragment(state, notes=("no original is registered; nothing can be derived",))

@@ -10,8 +10,8 @@ question and half a database one:
   files that are no longer there.
 
 Nothing an SSH session can reach touches any of this. `fk-archive` publishes
-and trashes what it is told to and asks the catalogue nothing, which is what
-keeps the far end out of the path an upload depends on.
+and trashes what it is told to and asks the catalogue nothing, which keeps the
+far end out of the path an upload depends on.
 
 urllib rather than requests or httpx, and PyYAML only in the one function that
 needs it: the commands an SSH session can reach import nothing outside the

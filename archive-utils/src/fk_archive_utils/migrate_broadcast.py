@@ -3,18 +3,16 @@
 `broadcast/` is what the system before this one called a video's source file.
 Nothing has written one for years, and everything since expects the source
 under `original/`. This walks the archive once and settles that, and then it
-should be deleted -- along with `catalogue`, `operations.move`, this entry
-point and the package's dependency on python3-yaml. A migration that stays in
-the code after it has finished migrating reads like a rule about how the
-archive works, which it is not.
+should be deleted -- along with `operations.move`, this entry point and the
+package's dependency on python3-yaml. A migration that stays in the code after
+it has finished migrating reads like a rule about how the archive works, which
+it is not.
 
-It used to be a chore in the ingest engine's backfill, which meant the engine
-needed a standing permission to rename files in the archive in order to run a
-migration that happens once. It does not any more: this is not a verb of
-`fk-archive`, so no SSH session can reach it, and the permission it would have
-required does not exist.
+Renaming a file inside a video happens once per video, ever, which is why it
+is not a verb of `fk-archive`: a one-shot migration is not a reason to give a
+long-running service a standing permission to rename archived media.
 
-The decision it makes per video is the chore's, unchanged:
+The decision it makes per video:
 
 * not in the catalogue -- leave it; the backfill's gc takes the whole video
 * no files in `broadcast/` -- nothing to do
@@ -38,12 +36,11 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
-from fk_archive_utils import operations
+from fk_archive_utils import operations, operator
 from fk_archive_utils.archive_path import parse_file_path, parse_removable_path
-from fk_archive_utils.catalogue import Catalogue, load_credentials
+from fk_archive_utils.catalogue import Catalogue
 from fk_archive_utils.errors import ArchiveUtilsError, UsageError
-from fk_archive_utils.privileges import drop_to_manager
-from fk_archive_utils.profile import PROFILE_DIR, Profile, load
+from fk_archive_utils.profile import PROFILE_DIR, Profile
 from fk_archive_utils.safe_root import SafeRoot
 
 BROADCAST_DIR = "broadcast"
@@ -193,15 +190,11 @@ def _files_in(profile: Profile, parts: tuple[str, ...]) -> list[str]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="fk-archive-migrate-broadcast",
-        description="Move every video's source out of the legacy broadcast/ directory. One-shot.",
-    )
-    parser.add_argument("profile", help=f"archive profile to act on, as named in {PROFILE_DIR}")
-    parser.add_argument(
-        "--apply",
-        action="store_true",
-        help="carry the migration out; without it nothing is changed and the plan is printed",
+    parser = operator.add_arguments(
+        argparse.ArgumentParser(
+            prog="fk-archive-migrate-broadcast",
+            description="Move every video's source out of the legacy broadcast/ directory. One-shot.",
+        )
     )
     parser.add_argument(
         "--video",
@@ -211,13 +204,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="only this video; repeatable. Without it, every video with a broadcast/ directory.",
     )
     parser.add_argument("--limit", type=int, help="stop after this many videos")
-    parser.add_argument(
-        "--environment",
-        help="fk-cli environment to authenticate as. Defaults to the profile name, which is what "
-        "keeps a migration of the production archive from being recorded against staging.",
-    )
-    parser.add_argument("--config", help="fk-cli configuration file (default ~/.frikanalen.yaml)")
-    parser.add_argument("--api-url", help="django-api base URL, if the configuration file has none")
     return parser
 
 
@@ -226,18 +212,14 @@ def run(argv: list[str], stdout=None, profile_dir=PROFILE_DIR) -> int:
     stdout = stdout if stdout is not None else sys.stdout
 
     try:
-        profile = load(args.profile, profile_dir=profile_dir)
         # Checked before anything is opened or any credential is read: a
         # mistyped --video should cost an error message, not a token lookup.
         for video_id in args.videos or ():
             if not video_id.isdigit():
                 raise UsageError(f"{video_id!r} is not a video id")
 
-        environment = args.environment or profile.name
-        # Before dropping privileges: the file belongs to whoever ran this.
-        credentials = load_credentials(environment, config_path=args.config, api_url=args.api_url)
-        drop_to_manager(profile)
-
+        context = operator.prepare(args, profile_dir=profile_dir)
+        profile, catalogue = context.profile, context.catalogue
         videos = args.videos or find_candidates(profile)
     except ArchiveUtilsError as error:
         print(f"fk-archive-migrate-broadcast: {error}", file=sys.stderr)
@@ -246,10 +228,9 @@ def run(argv: list[str], stdout=None, profile_dir=PROFILE_DIR) -> int:
     if args.limit is not None:
         videos = videos[: args.limit]
 
-    catalogue = Catalogue(credentials, dry_run=not args.apply)
     print(
         f"{len(videos)} videos with a {BROADCAST_DIR}/ directory in {profile.name} "
-        f"({profile.root}), against {credentials.api_url} as {environment}.",
+        f"({profile.root}), against {context.credentials.api_url} as {context.credentials.environment}.",
         file=stdout,
     )
     if not args.apply:

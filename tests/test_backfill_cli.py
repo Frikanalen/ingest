@@ -1,16 +1,12 @@
 """What `plan` and `apply` decide to look at.
 
-The catalogue, and only the catalogue. An archived directory the catalogue has
-dropped is not this tool's subject at all -- there is no job to queue for a
-video that does not exist -- and reclaiming it is `fk-archive-gc`, on the host
-holding the archive.
+The catalogue, and only the catalogue. A directory in the archive that the
+catalogue has no video for is not this tool's subject: there is no job to queue
+for a video that does not exist, so nothing here would do anything about it,
+and reading it costs a directory listing per orphan over SFTP.
 
-That is a stronger statement than it sounds. A whole-catalogue `apply` used to
-plan `gc` too, find a destructive action for every archived directory the
-catalogue had dropped, and refuse the entire run: queueing nothing, including
-every legitimate format rebuild, and exiting 1 on what looked like a normal
-day. The documented way to resume a backfill did nothing at all. These tests
-are what keep an orphan directory from ever being in the way again.
+These tests are what keep such a directory from ever getting in the way of the
+videos that do need work.
 """
 
 from pathlib import Path, PurePosixPath
@@ -114,11 +110,8 @@ def queued(django_api) -> set[str]:
 
 
 def test_apply_over_the_whole_catalogue_queues_the_work(run, django_api, capsys):
-    """The bug this file exists for: an orphan directory used to veto the run.
-
-    Nothing a worker can do about video 300 -- it has no catalogue row and so
-    no job -- but the format work video 100 needs is real and must still go in.
-    """
+    """Nothing a worker can do about video 300 -- it has no catalogue row and
+    so no job -- but the format work video 100 needs is real and must go in."""
     assert run(["apply"]) == 0
     assert NEEDS_FORMATS in queued(django_api)
     assert "1 videos queued" in capsys.readouterr().out
@@ -136,23 +129,8 @@ def test_apply_leaves_the_orphan_alone(run, django_api):
     assert queued(django_api) == {NEEDS_FORMATS}
 
 
-def test_gc_says_where_it_went(capsys):
-    """`fk-backfill gc` was documented, so it is in runbooks and shell
-    histories. Argparse would answer it with "invalid choice"."""
-    assert cli.main(["gc"]) == 2
-
-    printed = capsys.readouterr().err
-    assert "fk-archive-gc" in printed
-    assert "storage host" in printed
-
-
-def test_gc_says_where_it_went_however_it_was_invoked(capsys):
-    assert cli.main(["gc", "--yes", "--max-delete-fraction", "0.5"]) == 2
-    assert "fk-archive-gc" in capsys.readouterr().err
-
-
 def test_neither_subcommand_reports_the_orphan(run, django_api, capsys):
-    """It is not a finding here any more; it is a finding on the storage host."""
+    """It is not a finding here: nothing here has anything to say about it."""
     assert run(["plan"]) == 0
 
     output = capsys.readouterr().out

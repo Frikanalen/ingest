@@ -1,17 +1,10 @@
 """`fk-archive-gc` -- reclaim media for videos the catalogue no longer has.
 
-A video deleted from django-api leaves its directory in the archive behind.
-Nothing else will ever collect it: every other thing this system does is keyed
-on a video that exists, and an ingest job belongs to a video, so a deleted one
-has no job and never will. What garbage collection needs is not a job but a
-comparison of two whole collections, which is what this is.
-
-It used to be a subcommand of the ingest engine's backfill, and it sat oddly
-there: the engine's whole job is to converge videos that exist, it could not
-queue this work, and it did the work itself in the terminal -- while requiring
-the engine to hold a standing permission to remove any directory in the
-archive. It is a comparison run on the storage host by an operator, so that is
-what it is now, and the engine has no way to remove a video at all.
+A video deleted from django-api leaves its directory in the archive behind, and
+nothing else will ever collect it: everything else this system does is keyed on
+a video that exists, and an ingest job belongs to a video, so a deleted one has
+no job and never will. What this needs is not a job but a comparison of two
+whole collections, run where both can be read.
 
 Two guards, both about blast radius, because this is the one operation here
 whose subject is the entire archive:
@@ -34,13 +27,11 @@ import stat
 import sys
 from dataclasses import dataclass, field
 
-from fk_archive_utils import operations
+from fk_archive_utils import operations, operator
 from fk_archive_utils.archive_path import parse_removable_path
-from fk_archive_utils.catalogue import Catalogue, load_credentials
+from fk_archive_utils.catalogue import Catalogue
 from fk_archive_utils.errors import ArchiveUtilsError, UsageError
-from fk_archive_utils.privileges import drop_to_manager
 from fk_archive_utils.profile import PROFILE_DIR, Profile
-from fk_archive_utils.profile import load as load_profile
 from fk_archive_utils.safe_root import SafeRoot
 
 #: How much of the archive may turn out to be unaccounted for before this
@@ -125,10 +116,9 @@ def _refuse_if_too_much(report: Report, limit: float, profile: Profile, catalogu
     catalogue -- and only the total is insane, so the total is what has to be
     looked at.
 
-    Harder to cause than it used to be, since the environment defaults to the
-    archive profile's own name rather than being configured separately. Not
-    impossible: --environment still exists, and a genuine mass deletion in the
-    catalogue should stop and ask regardless.
+    The environment defaulting to the archive profile's own name makes that
+    hard to arrange by accident, but not impossible -- --environment exists --
+    and a genuine mass deletion in the catalogue should stop and ask anyway.
     """
     if report.share <= limit:
         return
@@ -167,15 +157,11 @@ def _walk(archive: SafeRoot, parts: tuple[str, ...]):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="fk-archive-gc",
-        description="Move media for videos the catalogue no longer has into .trash/.",
-    )
-    parser.add_argument("profile", help=f"archive profile to act on, as named in {PROFILE_DIR}")
-    parser.add_argument(
-        "--apply",
-        action="store_true",
-        help="carry it out; without it nothing is changed and the orphans are listed",
+    parser = operator.add_arguments(
+        argparse.ArgumentParser(
+            prog="fk-archive-gc",
+            description="Move media for videos the catalogue no longer has into .trash/.",
+        )
     )
     parser.add_argument(
         "--max-delete-fraction",
@@ -184,13 +170,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="refuse to sweep if more than this share of the archive is unaccounted for. "
         "Crossing it usually means the archive and the catalogue are different environments.",
     )
-    parser.add_argument(
-        "--environment",
-        help="fk-cli environment to authenticate as. Defaults to the profile name, which is what "
-        "keeps the production archive from being swept against staging's catalogue.",
-    )
-    parser.add_argument("--config", help="fk-cli configuration file (default ~/.frikanalen.yaml)")
-    parser.add_argument("--api-url", help="django-api base URL, if the configuration file has none")
     return parser
 
 
@@ -199,17 +178,12 @@ def run(argv: list[str], stdout=None, profile_dir=PROFILE_DIR) -> int:
     stdout = stdout if stdout is not None else sys.stdout
 
     try:
-        profile = load_profile(args.profile, profile_dir=profile_dir)
         if args.max_delete_fraction < 0:
             raise UsageError("--max-delete-fraction must not be negative")
 
-        environment = args.environment or profile.name
-        # Before dropping privileges: the file belongs to whoever ran this.
-        credentials = load_credentials(environment, config_path=args.config, api_url=args.api_url)
-        drop_to_manager(profile)
-
-        catalogue = Catalogue(credentials)
-        report = sweep(profile, catalogue, apply=args.apply, max_delete_fraction=args.max_delete_fraction)
+        context = operator.prepare(args, profile_dir=profile_dir)
+        profile = context.profile
+        report = sweep(profile, context.catalogue, apply=args.apply, max_delete_fraction=args.max_delete_fraction)
     except ArchiveUtilsError as error:
         print(f"fk-archive-gc: {error}", file=sys.stderr)
         return error.exit_code

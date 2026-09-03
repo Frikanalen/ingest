@@ -6,13 +6,9 @@ for the worker pool to drain. Neither does the work itself: what a video needs
 is decided again by whichever worker claims it, so nothing here can hand a
 worker a stale instruction, and closing the terminal stops nothing.
 
-That is the whole of it, and the constraint that keeps it that way is worth
-saying: everything either subcommand can decide is something an ingest job can
-carry out, because an ingest job belongs to a video and every chore is about a
-video that exists. Reclaiming media for a video the catalogue has *deleted*
-fits neither half -- there is no job to queue and no worker to claim it -- so
-it is not here at all. It is `fk-archive-gc`, run on the storage host, where
-the archive is.
+The constraint that keeps it that way is worth saying: everything either
+subcommand can decide is something an ingest job can carry out, because an
+ingest job belongs to a video and every chore is about a video that exists.
 """
 
 import argparse
@@ -89,14 +85,12 @@ async def _with_services(handler):
         return await handler(settings, archive_store, DjangoApiService(client))
 
 
-async def _selection(args, observer: Observer, snapshot: CatalogueSnapshot) -> Sequence[str]:
+def _selection(args, snapshot: CatalogueSnapshot) -> Sequence[str]:
     """Which videos to look at: the catalogue's, and only the catalogue's.
 
-    Never the archive's. Every chore is about a video that exists and returns
-    early on one that does not, so listing the archive would buy a directory
-    listing per orphan to learn that nothing will be done about it. What to do
-    about an archived video the catalogue has dropped is `fk-archive-gc`'s
-    question, and it is asked on the host holding the archive.
+    Never the archive's. Every chore is about a video that exists, so listing
+    the archive would buy a directory listing per video the catalogue has
+    dropped in order to learn that nothing will be done about any of them.
     """
     if args.video_id:
         return args.video_id
@@ -113,7 +107,7 @@ async def _run_plan(args: argparse.Namespace) -> int:
             logger.info("Reading the catalogue")
             snapshot = await observer.snapshot()
 
-            video_ids = await _selection(args, observer, snapshot)
+            video_ids = _selection(args, snapshot)
             logger.info("Planning %d videos", len(video_ids))
 
             summary = Summary()
@@ -151,11 +145,11 @@ async def _enqueue(args, django_api, wanted: list[Plan]) -> int:
 
 
 def _add_selection_arguments(parser: argparse.ArgumentParser) -> None:
-    """Arguments shared by `plan` and `apply`.
+    """Arguments shared by `plan` and `apply`, entire.
 
-    Shared entire, now that both subcommands consider the same chores: what a
-    worker will run when it claims a video is the only list there is, so there
-    is nothing for the two to disagree about.
+    Both consider the same chores: what a worker will run when it claims a
+    video is the only list there is, so there is nothing for the two to
+    disagree about.
     """
     parser.add_argument("video_id", nargs="*", help="videos to look at; omit for all of them")
     parser.add_argument("--limit", type=int, help="stop after this many videos")
@@ -202,35 +196,8 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _gc_moved() -> int:
-    """Say where garbage collection went, rather than what argparse would say.
-
-    A tombstone, intercepted ahead of the parser rather than declared as a
-    subcommand: `fk-backfill gc --yes` is what a runbook actually says, and a
-    subparser would answer that with "unrecognized arguments". Delete this
-    once typing it has stopped being a thing anyone does.
-    """
-    print(
-        "Garbage collection is `fk-archive-gc` now, and runs on the storage host.\n"
-        "\n"
-        "It never fitted here: an ingest job belongs to a video, so a video the\n"
-        "catalogue has deleted has no job to queue and no worker to claim it --\n"
-        "and doing it from here meant this holding a standing permission to\n"
-        "remove any directory in the archive.\n"
-        "\n"
-        "    ssh file01 sudo fk-archive-gc prod\n"
-        "    ssh file01 sudo fk-archive-gc prod --apply",
-        file=sys.stderr,
-    )
-    return 2
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
-
-    argv = list(sys.argv[1:] if argv is None else argv)
-    if argv[:1] == ["gc"]:
-        return _gc_moved()
 
     args = build_parser().parse_args(argv)
     if getattr(args, "chore", None) is None and hasattr(args, "default_chores"):

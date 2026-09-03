@@ -18,12 +18,9 @@ from app.formats import UNTRACKED_REVISION
 class Action:
     """One step toward the desired state.
 
-    There used to be a `needs_original` flag here, so that a plan which only
-    tidied directories did not pull gigabytes off the archive to do it. Every
-    remaining action derives something from the source file, so the flag was
-    true of all of them and decided nothing; `Applier` fetches once, for any
-    plan that has work in it. Reinstate the distinction if an action that does
-    not need the original ever comes back.
+    Every one of them derives something from the video's source file, which is
+    why `Applier` simply fetches it once for any plan that has work in it. An
+    action that did not need the original would want that decision back.
     """
 
     def describe(self) -> str:
