@@ -19,7 +19,7 @@ repository), and there are only four of them:
 | Mutation | Who asks for it | Reachable over SSH |
 | --- | --- | --- |
 | **publish** | the upload hook (`original/`), the format producer (`dash/`, `*_thumb/`), the programme-image ingest (`images/`) | yes |
-| **trash** | superseding an upload, collecting a video the catalogue dropped, replacing a rebuilt format | yes |
+| **trash** | superseding an upload, replacing a rebuilt format | yes |
 | **purge-trash** | an operator, or a timer | no |
 | **move** | the one-shot `broadcast/` → `original/` migration | no |
 
@@ -34,6 +34,12 @@ the previous system used. That is not a reason to give a long-running service
 a standing permission to rename things; it is a reason to have an operator run
 a migration. See [the migration](#the-broadcast-migration) below.
 
+Two whole-archive operations live here as their own commands rather than as
+mutations at all, because their subject is the archive rather than a video:
+[garbage collection](#garbage-collection), which reclaims media for videos the
+catalogue has dropped, and `fk-archive-purge-trash`, which is the only thing
+here that destroys anything.
+
 ## How the pieces fit
 
 ```
@@ -43,7 +49,8 @@ ingest pod  ──ssh──▶  ingest@file01
                         └─ "fk-archive …"  ──▶ sudo -u archive-manager
                                                   fk-archive prod … (every write)
 
-operator ───────────▶  sudo fk-archive-purge-trash prod --older-than 30
+operator ───────────▶  sudo fk-archive-gc prod --apply
+                       sudo fk-archive-purge-trash prod --older-than 30
                        sudo fk-archive-migrate-broadcast prod --apply
 ```
 
@@ -52,6 +59,8 @@ operator ───────────▶  sudo fk-archive-purge-trash prod 
   stolen key cannot run arbitrary code as the ingest account either.
 * **`fk-archive <profile> {publish,trash}`** performs one mutation and prints a
   JSON object saying what it did. This is the command sudoers grants.
+* **`fk-archive-gc <profile>`** reclaims media for videos the catalogue no
+  longer has. Not granted to the ingest account; `--apply` to act.
 * **`fk-archive-purge-trash <profile> --older-than DAYS`** is the destructive
   one. Not in the ingest account's sudoers rule; run it from a timer or by
   hand, `--dry-run` first.
@@ -89,6 +98,48 @@ linked into the published tree only once all of them have arrived. `--size` is
 required because it is the only thing that tells a complete transfer apart from
 a connection that dropped — a truncated stream ends exactly like a whole one.
 
+## Garbage collection
+
+A video deleted from django-api leaves its directory in the archive behind, and
+nothing else will ever collect it: everything else this system does is keyed on
+a video that exists, and an ingest job belongs to a video, so a deleted one has
+no job and never will.
+
+It was a subcommand of the ingest engine's backfill, and sat oddly there — the
+engine's whole job is converging videos that exist, it could not queue this
+work, and it did it in the terminal, while requiring the engine to hold a
+standing permission to remove any directory in the archive. It is a comparison
+of two whole collections, run where the archive is:
+
+```bash
+sudo fk-archive-gc prod            # lists the orphans and what they hold
+sudo fk-archive-gc prod --apply    # moves them into .trash/
+```
+
+Two guards, both about blast radius, because this is the one operation here
+whose subject is the entire archive:
+
+* **the catalogue read refuses to hand back a partial answer.** Absence from
+  the catalogue is read as permission, so half a catalogue would make the
+  archive look like garbage in exactly the proportion the read fell short by.
+  The endpoint states its own total; a page that comes up short raises rather
+  than returning what arrived. The read is also two passes — `proper_import`
+  false and then true — because one unfiltered-looking call returns only the
+  videos whose ingest *finished*, and everything mid-ingest would otherwise
+  look deleted. Unfinished first, so a video that finishes between the two
+  passes was already in hand rather than in neither.
+* **the share of the archive about to go is checked once, before anything
+  moves.** `--max-delete-fraction`, 2% by default. The failure it is really for
+  is the archive and the catalogue being different environments: every
+  individual decision is then locally correct — that video really is not in
+  that catalogue — and only the total is insane. Harder to cause now that the
+  environment defaults to the archive profile's own name, but `--environment`
+  still exists, and a genuine mass deletion should stop and ask regardless.
+
+Nothing is destroyed. Collecting a video is a rename into `.trash/`, so the
+window in which a wrong answer can still be undone is however long the trash is
+kept before `fk-archive-purge-trash` runs.
+
 ## The broadcast migration
 
 `broadcast/` is what the system before this one called a video's source file.
@@ -100,26 +151,28 @@ the engine needed a standing permission to rename files in the archive in order
 to run a migration that happens once per video. It is now
 `fk-archive-migrate-broadcast`, here, and that permission does not exist.
 
-The migration is half an archive operation and half a database one — moving the
-file without retagging the row that names it would leave the catalogue pointing
-at nothing — so it talks to django-api, using the token `fk-cli` logged in with:
+Like `gc`, the migration is half an archive operation and half a database one —
+moving the file without retagging the row that names it would leave the
+catalogue pointing at nothing — so it talks to django-api, using the token
+`fk-cli` logged in with:
 
 ```bash
 sudo fk-archive-migrate-broadcast prod            # plan only; changes nothing
 sudo fk-archive-migrate-broadcast prod --apply
 ```
 
-Run it with plain `sudo`. Root is what can read the operator's
-`~/.frikanalen.yaml`; the tool reads the token, then permanently becomes the
-profile's manager account before it opens the archive, so the directories it
+Both tools that read the catalogue work the same way, and it is worth stating
+once. Run them with plain `sudo`: root is what can read the operator's
+`~/.frikanalen.yaml`, and each reads the token and then permanently becomes the
+profile's manager account before opening the archive, so the directories it
 creates are owned by the account that has to write into them afterwards.
 
 The fk-cli environment defaults to **the archive profile's name**, not to the
-`environment:` the config file currently selects. Migrating the production
-archive and recording it against whichever catalogue an operator last pointed
-fk-cli at is the one mistake here that a rename cannot undo, so the two are
-tied together unless `--environment` separates them. With no token for that
-environment, it says to log in with `fk-cli` and stops.
+`environment:` the config file currently selects. Pairing the production
+archive with whichever catalogue an operator last pointed fk-cli at is the one
+mistake here that a rename cannot undo, so the two are tied together unless
+`--environment` separates them. With no token for that environment, they say to
+log in with `fk-cli` and stop.
 
 It decides per video exactly what the chore decided, and prints a line for
 each:
@@ -177,7 +230,9 @@ each failure the caller acts on differently gets its own.
 | 4 | the path is not in the archive |
 | 5 | the bytes that arrived are not the bytes that were promised — retryable |
 | 6 | the profile is missing or unusable — a fault on this host |
-| 7 | django-api could not be reached or would not answer (migration only) |
+| 7 | django-api could not be reached or would not answer |
+| 8 | the catalogue could not be read in full — nothing was collected |
+| 9 | more of the archive is unaccounted for than a sweep will act on alone |
 
 ## Installing
 

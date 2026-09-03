@@ -1,16 +1,16 @@
-"""What `plan` and `apply` each decide to look at.
+"""What `plan` and `apply` decide to look at.
 
-The two subcommands share their selection arguments but not their chores, and
-that difference is the whole subject here. `apply` can only offer a video to
-the queue, so the only chores it may consider are the ones a worker will run
-when it claims one. `gc` is not among them and cannot be: an ingest job belongs
-to a video, and a video the catalogue has deleted has none.
+The catalogue, and only the catalogue. An archived directory the catalogue has
+dropped is not this tool's subject at all -- there is no job to queue for a
+video that does not exist -- and reclaiming it is `fk-archive-gc`, on the host
+holding the archive.
 
-Getting that wrong is not a cosmetic error. A whole-catalogue `apply` used to
+That is a stronger statement than it sounds. A whole-catalogue `apply` used to
 plan `gc` too, find a destructive action for every archived directory the
-catalogue had dropped, and refuse the entire run -- queueing nothing, including
+catalogue had dropped, and refuse the entire run: queueing nothing, including
 every legitimate format rebuild, and exiting 1 on what looked like a normal
-day. The documented way to resume a backfill did nothing at all.
+day. The documented way to resume a backfill did nothing at all. These tests
+are what keep an orphan directory from ever being in the way again.
 """
 
 from pathlib import Path, PurePosixPath
@@ -22,12 +22,10 @@ from frikanalen_django_api_client.models import IngestStateEnum, VideoFileVarian
 
 from app.archive_store import LocalArchiveStore
 from app.backfill import cli
-from app.backfill.actions import TrashPath
-from app.backfill.chores import Plan
 
 #: In the catalogue, source archived, no derivatives: needs every format.
 NEEDS_FORMATS = "100"
-#: In the archive, gone from the catalogue. Only `gc` has anything to say.
+#: In the archive, gone from the catalogue. Nothing here has anything to say.
 ORPHAN = "300"
 
 
@@ -138,67 +136,44 @@ def test_apply_leaves_the_orphan_alone(run, django_api):
     assert queued(django_api) == {NEEDS_FORMATS}
 
 
-def test_apply_refuses_gc(capsys):
-    """Rejected at the parser, with somewhere to go rather than a list of letters."""
-    with pytest.raises(SystemExit) as exit_code:
-        cli.main(["apply", "--chore", "gc"])
+def test_gc_says_where_it_went(capsys):
+    """`fk-backfill gc` was documented, so it is in runbooks and shell
+    histories. Argparse would answer it with "invalid choice"."""
+    assert cli.main(["gc"]) == 2
 
-    assert exit_code.value.code == 2
-    assert "fk-backfill gc" in capsys.readouterr().err
-
-
-@pytest.mark.asyncio
-async def test_apply_confirms_a_plan_that_moves_media_out_of_the_published_tree(django_api, capsys):
-    """No convergence chore is destructive today.
-
-    The legacy `broadcast/` migration was the last one that was, and it is now
-    an operator tool on the storage host rather than a chore. The guard stays:
-    it costs two lines, and it is what makes adding a destructive chore later
-    safe rather than something that ships a whole-catalogue `apply` with no
-    confirmation at all. So it is tested on a plan built here, since no chore
-    will produce one.
-    """
-    destructive = Plan(
-        video_id=NEEDS_FORMATS,
-        actions=(TrashPath(path=PurePosixPath(f"{NEEDS_FORMATS}/dash"), reason="stale"),),
-    )
-    args = SimpleNamespace(yes=False, priority=0)
-
-    assert await cli._enqueue(args, django_api, [destructive]) == 1
-    assert "move media out of the published tree" in capsys.readouterr().out
-    django_api.enqueue_ingest_job.assert_not_awaited()
-
-    args.yes = True
-    assert await cli._enqueue(args, django_api, [destructive]) == 0
-    assert queued(django_api) == {NEEDS_FORMATS}
+    printed = capsys.readouterr().err
+    assert "fk-archive-gc" in printed
+    assert "storage host" in printed
 
 
-def test_plan_still_reports_the_orphan(run, django_api, capsys):
-    """gc stays visible where it changes nothing, which is the point of `plan`."""
+def test_gc_says_where_it_went_however_it_was_invoked(capsys):
+    assert cli.main(["gc", "--yes", "--max-delete-fraction", "0.5"]) == 2
+    assert "fk-archive-gc" in capsys.readouterr().err
+
+
+def test_neither_subcommand_reports_the_orphan(run, django_api, capsys):
+    """It is not a finding here any more; it is a finding on the storage host."""
     assert run(["plan"]) == 0
 
     output = capsys.readouterr().out
-    assert f"trash {ORPHAN}" in output
+    assert ORPHAN not in output
     django_api.enqueue_ingest_job.assert_not_awaited()
 
 
-def test_apply_does_not_read_the_archive_root(run, django_api, monkeypatch):
-    """Without gc there is nothing in an orphan directory worth a round trip.
+def test_neither_subcommand_reads_an_orphan_directory(run, monkeypatch):
+    """Read as a claim about cost, not tidiness: over SFTP this is one listing
+    per directory the catalogue has dropped, before every chore declines to
+    act on it. There are thousands of them."""
+    observed = []
+    original = cli.Observer._archived_directories
 
-    Read as a claim about cost, not tidiness: over SFTP this is one listing per
-    directory the catalogue has dropped, before every chore declines to act.
-    """
-    seen = []
-    original = cli.Observer.archived_video_ids
+    async def record(self, video_id):
+        observed.append(video_id)
+        return await original(self, video_id)
 
-    async def record(self):
-        seen.append(True)
-        return await original(self)
-
-    monkeypatch.setattr(cli.Observer, "archived_video_ids", record)
+    monkeypatch.setattr(cli.Observer, "_archived_directories", record)
 
     run(["apply"])
-    assert not seen
-
     run(["plan"])
-    assert seen
+
+    assert observed == [NEEDS_FORMATS, NEEDS_FORMATS]

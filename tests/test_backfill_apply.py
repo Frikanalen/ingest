@@ -1,8 +1,8 @@
 """Carrying out a plan against a real archive.
 
 The interesting behaviour is ordering and laziness: a rebuild takes the stale
-directory out before it publishes over the path, and a plan that only tidies
-directories must never pull the original off the archive to do it.
+directory out before it publishes over the path, and a plan that needs nothing
+from the original must never pull it off the archive.
 """
 
 import logging
@@ -16,7 +16,7 @@ from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.archive_store import LocalArchiveStore
 from app.archive_store.base import TRASH_DIR
-from app.backfill.actions import ProduceFormat, RefreshMetadata, TrashPath
+from app.backfill.actions import ProduceFormat, RefreshMetadata
 from app.backfill.apply import Applier, SourceUnavailable
 from app.backfill.chores import Plan
 
@@ -62,25 +62,16 @@ def plan_of(*actions) -> Plan:
 
 
 @pytest.mark.asyncio
-async def test_trashing_takes_a_directory_out_of_the_published_tree(applier, archive_root):
-    place(archive_root, DASH_DIR / "manifest.mpd")
+async def test_a_plan_with_nothing_to_do_fetches_nothing(applier, django_api):
+    """There is no original in this archive at all.
 
-    await applier.apply(plan_of(TrashPath(path=DASH_DIR, reason="superseded")))
+    Which is the point: a video with nothing registered plans no actions, and
+    a run over the catalogue must not turn every one of those into a fetch
+    that then fails to find a source.
+    """
+    await applier.apply(plan_of())
 
-    assert not (archive_root / DASH_DIR).exists()
-    assert list((archive_root / TRASH_DIR).rglob("manifest.mpd"))
-
-
-@pytest.mark.asyncio
-async def test_a_directory_only_plan_never_fetches_the_original(applier, archive_root):
-    """Worth several gigabytes a video: a run that only tidies directories has
-    no business pulling originals off the archive to do it. There is no
-    original here at all, and the plan must still succeed."""
-    place(archive_root, DASH_DIR / "manifest.mpd")
-
-    await applier.apply(plan_of(TrashPath(path=DASH_DIR, reason="superseded")))
-
-    assert not (archive_root / DASH_DIR).exists()
+    django_api.set_video_duration.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -179,14 +179,6 @@ class Observer:
         if seen != expected:
             raise IncompleteSnapshot(f"{what} reported {expected} rows but returned {seen}")
 
-    async def archived_video_ids(self) -> list[str]:
-        """The video directories in the archive, ignoring its own bookkeeping."""
-        entries = await self.archive.list_dir(PurePosixPath("."))
-        return sorted(
-            (entry.name for entry in entries if entry.is_dir and entry.name.isdigit()),
-            key=int,
-        )
-
     async def observe(self, video_id: str, snapshot: CatalogueSnapshot) -> VideoState:
         """Assemble everything the chores need to decide about one video."""
         catalogue = snapshot.videos.get(video_id)

@@ -22,6 +22,7 @@ dependencies = ["PyYAML>=6"]
 # every write.
 fk-archive = "fk_archive_utils.cli:main"
 fk-archive-purge-trash = "fk_archive_utils.purge_cli:main"
+fk-archive-gc = "fk_archive_utils.gc:main"
 # One-shot, and deliberately its own command rather than a verb of fk-archive:
 # see fk_archive_utils/migrate_broadcast.py. Delete it when it has finished.
 fk-archive-migrate-broadcast = "fk_archive_utils.migrate_broadcast:main"

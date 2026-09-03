@@ -3,26 +3,21 @@
 Every chore is a pure function from an observed VideoState to the actions that
 would bring it toward the desired state. No network, no filesystem, no clock --
 which is what makes the interesting cases (an original that is registered but
-missing, a format built by a superseded profile, a video the catalogue has
-dropped) table tests rather than fixtures.
+missing, a format built by a superseded profile, media nothing claims) table
+tests rather than fixtures.
 
 Chores run in a fixed order and each is handed the state its predecessors will
-have left behind, so a video the first chore has decided to collect is not one
-the last spends an hour of CPU deriving formats for.
+have left behind, so the metadata a probe fills in is already there when the
+formats derived from it are planned.
 """
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 from frikanalen_django_api_client.models import VideoFileVariantEnum
 
-from app.backfill.actions import (
-    Action,
-    ProduceFormat,
-    RefreshMetadata,
-    TrashPath,
-)
+from app.backfill.actions import Action, ProduceFormat, RefreshMetadata
 from app.backfill.state import VideoState
 from app.formats import DESIRED_FORMATS, current_revision
 
@@ -64,48 +59,11 @@ class Plan:
     def __bool__(self) -> bool:
         return bool(self.actions)
 
-    @property
-    def needs_original(self) -> bool:
-        """Whether carrying this out means fetching the source file."""
-        return any(action.needs_original for action in self.actions)
-
-    @property
-    def is_destructive(self) -> bool:
-        return any(action.destructive for action in self.actions)
-
     def describe(self) -> str:
         lines = [f"video {self.video_id}"]
         lines += [f"  - {action.describe()}" for action in self.actions]
         lines += [f"  ? {note}" for note in self.notes]
         return "\n".join(lines)
-
-
-def collect_garbage(state: VideoState, desired: DesiredState) -> Fragment:
-    """Reclaim the media behind a video the catalogue no longer has.
-
-    Whole videos only. A format directory with no row is left to the formats
-    chore, which reads it as missing and rebuilds it -- collecting it here
-    instead would have the two fighting over the same path.
-
-    Editorial images are collected with everything else, deliberately. They
-    cannot be rebuilt, which argues for caution -- but the video row they hang
-    off is gone, so the database has already dropped their rows with it, and
-    trashing is a rename that `purge-trash` undoes until someone purges it. A
-    chore that spared them would leave every video that ever had one
-    uncollectable for good.
-    """
-    if state.in_catalogue or not state.directories:
-        return Fragment(state)
-
-    return Fragment(
-        state=replace(state, directories={}),
-        actions=(
-            TrashPath(
-                path=PurePosixPath(state.video_id),
-                reason="no video with this id in the catalogue",
-            ),
-        ),
-    )
 
 
 def refresh_metadata(state: VideoState, desired: DesiredState) -> Fragment:
@@ -228,24 +186,18 @@ def produce_formats(state: VideoState, desired: DesiredState) -> Fragment:
 
 Chore = Callable[[VideoState, DesiredState], Fragment]
 
-#: In order. Garbage first, so nothing downstream spends an hour of CPU on a
-#: video that is about to go.
+#: In order, and this is the whole set: what it means to converge one video,
+#: and therefore what every caller does -- a worker draining the queue, and the
+#: terminal deciding what to put on it. There is deliberately no second list
+#: for one of them to run instead, because a chore that reached one path and
+#: not the other is precisely the drift this arrangement exists to prevent.
+#:
+#: Metadata before formats: a format built from an original nobody has probed
+#: is a format built at the wrong frame rate.
 CHORES: Mapping[str, Chore] = {
-    "gc": collect_garbage,
     "metadata": refresh_metadata,
     "formats": produce_formats,
 }
-
-#: What it means to converge one video that still exists. Named here rather
-#: than spelled out at each call site because both of them -- a worker draining
-#: the queue and the hook handling a fresh upload -- have to agree on it, and a
-#: chore that reached one path and not the other is precisely the drift this
-#: whole arrangement exists to prevent.
-#:
-#: Garbage collection is left out for the same reason it exists: it is about
-#: videos the catalogue has dropped, which have neither a job to be claimed
-#: under nor an upload behind them.
-CONVERGENCE_CHORES: Sequence[str] = ("metadata", "formats")
 
 
 def plan(state: VideoState, desired: DesiredState, chores: Sequence[str] = tuple(CHORES)) -> Plan:

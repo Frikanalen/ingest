@@ -55,10 +55,14 @@ class TransferError(ArchiveUtilsError):
 class CatalogueError(ArchiveUtilsError):
     """django-api could not be reached, or would not say what was asked.
 
-    Only the one-shot broadcast migration talks to the catalogue at all, and
-    it is the one operation here that is not confined to this host -- so a
-    failure that came from the far end is worth telling apart from one that
-    came from the archive.
+    The two tools that compare the archive against the catalogue are the only
+    operations here that are not confined to this host, so a failure that came
+    from the far end is worth telling apart from one that came from the
+    archive.
+
+    `IncompleteCatalogue` is the subclass that matters: a partial answer is
+    never treated as a complete one, because garbage collection reads absence
+    as permission.
     """
 
     exit_code = 7
@@ -67,6 +71,19 @@ class CatalogueError(ArchiveUtilsError):
     #: 404 -- which for a video means "the catalogue has dropped it", an answer
     #: rather than a fault -- apart from everything else.
     status: int | None = None
+
+
+class IncompleteCatalogue(CatalogueError):
+    """The catalogue could not be read in full.
+
+    Raised rather than returning what did arrive. The most destructive thing
+    in this package -- deciding a video no longer exists and reclaiming its
+    media -- reads absence from the catalogue as permission, so half a
+    catalogue would make the archive look like garbage in exactly the
+    proportion the read fell short by.
+    """
+
+    exit_code = 8
 
 
 class ProfileError(ArchiveUtilsError):

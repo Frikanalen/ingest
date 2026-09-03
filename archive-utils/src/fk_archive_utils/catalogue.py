@@ -1,13 +1,17 @@
-"""Just enough django-api to finish the `broadcast/` migration.
+"""Just enough django-api for the two tools that need to read the catalogue.
 
-Temporary, and deliberately shaped so it is obvious that it is: this package
-otherwise knows nothing about the catalogue, and has no business knowing.
-It exists because moving a video's source from `broadcast/` to `original/` is
-half an archive operation and half a database one, and doing only the archive
-half would leave rows naming files that are no longer there.
+Both are operator tools, and both are operations that are half an archive
+question and half a database one:
 
-When the last `broadcast/` directory is gone, this module, `migrate_broadcast`,
-their entry point and the python3-yaml dependency all go together.
+* `gc` reclaims media for videos the catalogue no longer has, so it has to
+  know what the catalogue has -- in full, or not at all;
+* `migrate_broadcast` moves a video's source out of the directory the previous
+  system kept it in, and doing only the archive half would leave rows naming
+  files that are no longer there.
+
+Nothing an SSH session can reach touches any of this. `fk-archive` publishes
+and trashes what it is told to and asks the catalogue nothing, which is what
+keeps the far end out of the path an upload depends on.
 
 urllib rather than requests or httpx, and PyYAML only in the one function that
 needs it: the commands an SSH session can reach import nothing outside the
@@ -22,16 +26,21 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from fk_archive_utils.errors import CatalogueError
+from fk_archive_utils.errors import CatalogueError, IncompleteCatalogue
 
 #: Where fk-cli keeps the session it logged in with. Read rather than
 #: reimplemented: an operator who has just run fk-cli should not then have to
 #: find the token and pass it in by hand.
 DEFAULT_CONFIG = "~/.frikanalen.yaml"
 
-#: Long enough for a catalogue under load, short enough that a migration over
+#: Long enough for a catalogue under load, short enough that a run over
 #: thousands of videos does not silently hang on one of them.
 TIMEOUT_S = 30
+
+#: Rows per request when reading the whole catalogue. Large enough that it is
+#: a handful of requests, small enough not to ask django-api for everything it
+#: has in one query.
+PAGE_SIZE = 500
 
 
 @dataclass(frozen=True)
@@ -121,6 +130,62 @@ class Catalogue:
                 return False
             raise
         return True
+
+    def video_ids(self) -> set[str]:
+        """Every video django-api has, finished ingest or not.
+
+        Two passes, because `proper_import` is a boolean filter with no value
+        meaning "either" -- and because omitting it does not mean "either", it
+        means true. One unfiltered-looking call returns the public catalogue,
+        which is every video whose ingest finished. Everything mid-ingest and
+        everything whose ingest ever failed is missing from it, and a video
+        missing from here is a video whose archived media gc trashes.
+
+        The order of the two passes is the interesting part. They are separate
+        requests and so separate moments, and a video that changes state in
+        between is only seen if it lands in the pass that has not run yet. The
+        transition that actually happens is an ingest finishing, false -> true:
+        read unfinished first and such a video was already in hand before it
+        moved; read finished first and it is in neither page -- which is the
+        same bug, reintroduced as a race and far harder to see.
+        """
+        ids: set[str] = set()
+        for proper_import in ("false", "true"):
+            what = "unfinished videos" if proper_import == "false" else "finished videos"
+            for row in self._pages("/api/videos", {"proper_import": proper_import}, what):
+                ids.add(str(row["id"]))
+        return ids
+
+    def _pages(self, path: str, params: dict, what: str):
+        """Walk a paginated endpoint, and insist on getting all of it.
+
+        The endpoint states its own total, so a page that comes up short is
+        detectable here rather than something to be discovered later by a
+        sweep acting on half a catalogue.
+        """
+        offset = 0
+        expected: int | None = None
+        seen = 0
+
+        while True:
+            query = urllib.parse.urlencode({**params, "limit": PAGE_SIZE, "offset": offset, "ordering": "id"})
+            page = self._request("GET", f"{path}?{query}")
+            if expected is None:
+                expected = page.get("count", 0)
+
+            rows = page.get("results") or []
+            for row in rows:
+                seen += 1
+                yield row
+
+            if not rows:
+                break
+            offset += len(rows)
+            if seen >= expected:
+                break
+
+        if seen != expected:
+            raise IncompleteCatalogue(f"{what} reported {expected} rows but returned {seen}")
 
     def files_for_video(self, video_id: str) -> list[dict]:
         """Every videofile row for this video, following pagination."""

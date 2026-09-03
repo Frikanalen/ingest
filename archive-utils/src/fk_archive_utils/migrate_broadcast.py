@@ -33,7 +33,6 @@ that does not yet hold it.
 
 import argparse
 import os
-import pwd
 import stat
 import sys
 from dataclasses import dataclass, field
@@ -43,6 +42,7 @@ from fk_archive_utils import operations
 from fk_archive_utils.archive_path import parse_file_path, parse_removable_path
 from fk_archive_utils.catalogue import Catalogue, load_credentials
 from fk_archive_utils.errors import ArchiveUtilsError, UsageError
+from fk_archive_utils.privileges import drop_to_manager
 from fk_archive_utils.profile import PROFILE_DIR, Profile, load
 from fk_archive_utils.safe_root import SafeRoot
 
@@ -192,25 +192,6 @@ def _files_in(profile: Profile, parts: tuple[str, ...]) -> list[str]:
             return names
 
 
-def drop_privileges(profile: Profile) -> None:
-    """Become the archive account, permanently, before touching the archive.
-
-    Run this with plain `sudo`: root is what can read the operator's
-    `~/.frikanalen.yaml`, and dropping afterwards is what keeps the
-    directories this creates -- `<id>/original/`, `.trash/<stamp>/` -- owned by
-    the account that has to write into them afterwards. A migration that left
-    a root-owned `original/` behind would archive one video and then break
-    every later publish to it.
-    """
-    if os.geteuid() != 0:
-        return
-
-    account = pwd.getpwnam(profile.manager)
-    os.initgroups(account.pw_name, account.pw_gid)
-    os.setgid(account.pw_gid)
-    os.setuid(account.pw_uid)
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="fk-archive-migrate-broadcast",
@@ -255,7 +236,7 @@ def run(argv: list[str], stdout=None, profile_dir=PROFILE_DIR) -> int:
         environment = args.environment or profile.name
         # Before dropping privileges: the file belongs to whoever ran this.
         credentials = load_credentials(environment, config_path=args.config, api_url=args.api_url)
-        drop_privileges(profile)
+        drop_to_manager(profile)
 
         videos = args.videos or find_candidates(profile)
     except ArchiveUtilsError as error:

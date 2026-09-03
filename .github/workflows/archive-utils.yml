@@ -84,11 +84,13 @@ jobs:
           fk-archive ci trash 12/original
           fk-archive-purge-trash ci --older-than 0
           fk-archive-migrate-broadcast --help > /dev/null
+          fk-archive-gc --help > /dev/null
           # The sudoers rule ends in a wildcard, so what fk-archive cannot do
           # is the whole of what the rule withholds. Both of these belong to
           # an operator, and neither may be reachable from an SSH session.
           ! fk-archive ci move 12/broadcast/a.mov 12/original/a.mov
           ! fk-archive ci purge-trash --older-than 0
+          ! fk-archive ci gc
           # A packaging mistake that leaves a command unable to refuse would
           # pass every unit test, because the unit tests import the module
           # rather than running what the package installed.

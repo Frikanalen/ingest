@@ -6,14 +6,13 @@ for the worker pool to drain. Neither does the work itself: what a video needs
 is decided again by whichever worker claims it, so nothing here can hand a
 worker a stale instruction, and closing the terminal stops nothing.
 
-`gc` is the exception, and has to be. Reclaiming media for a video the
-catalogue has deleted cannot go through the queue -- an ingest job belongs to a
-video, and that video is gone -- so the sweep does the work itself.
-
-That is why the two subcommands do not run the same chores. `plan` runs all
-four, because reporting that a deleted video is still holding media is worth
-knowing and costs nothing. `apply` runs only the ones a worker will run, so
-that what it queues and what gets done are the same list.
+That is the whole of it, and the constraint that keeps it that way is worth
+saying: everything either subcommand can decide is something an ingest job can
+carry out, because an ingest job belongs to a video and every chore is about a
+video that exists. Reclaiming media for a video the catalogue has *deleted*
+fits neither half -- there is no job to queue and no worker to claim it -- so
+it is not here at all. It is `fk-archive-gc`, run on the storage host, where
+the archive is.
 """
 
 import argparse
@@ -26,23 +25,14 @@ from collections.abc import Sequence
 from frikanalen_django_api_client import AuthenticatedClient
 
 from app.archive_store import create_archive_store
-from app.backfill.chores import CHORES, CONVERGENCE_CHORES, DesiredState, Plan, plan
+from app.backfill.chores import CHORES, DesiredState, Plan, plan
 from app.backfill.enqueue import Enqueuer
 from app.backfill.observe import CatalogueSnapshot, Observer
-from app.backfill.sweep import DEFAULT_MAX_DELETE_FRACTION, Sweep, TooMuchGarbage
 from app.django_client.service import DjangoApiService
 from app.util.lifespan import get_token
 from app.util.settings import get_settings
 
 logger = logging.getLogger("backfill")
-
-
-def _bytes(count: float) -> str:
-    for unit in ("B", "kB", "MB", "GB", "TB"):
-        if abs(count) < 1000 or unit == "TB":
-            return f"{count:.0f} {unit}" if unit == "B" else f"{count:.1f} {unit}"
-        count /= 1000.0
-    return f"{count} B"
 
 
 class Summary:
@@ -53,14 +43,12 @@ class Summary:
         self.with_work = 0
         self.actions: Counter[str] = Counter()
         self.notes: Counter[str] = Counter()
-        self.needing_original = 0
 
     def add(self, result: Plan) -> None:
         self.videos += 1
         if not result:
             return
         self.with_work += 1
-        self.needing_original += result.needs_original
         for action in result.actions:
             self.actions[type(action).__name__] += 1
         for note in result.notes:
@@ -72,10 +60,10 @@ class Summary:
         if self.actions:
             lines.append("")
             lines += [f"  {count:>7}  {name}" for name, count in self.actions.most_common()]
-        if self.needing_original:
+        if self.with_work:
             lines += [
                 "",
-                f"  {self.needing_original} of them need the original fetched and re-encoded,",
+                "  Every one of those fetches the original and re-encodes from it,",
                 "  which is where essentially all of the wall-clock time goes.",
             ]
         if self.notes:
@@ -102,20 +90,18 @@ async def _with_services(handler):
 
 
 async def _selection(args, observer: Observer, snapshot: CatalogueSnapshot) -> Sequence[str]:
+    """Which videos to look at: the catalogue's, and only the catalogue's.
+
+    Never the archive's. Every chore is about a video that exists and returns
+    early on one that does not, so listing the archive would buy a directory
+    listing per orphan to learn that nothing will be done about it. What to do
+    about an archived video the catalogue has dropped is `fk-archive-gc`'s
+    question, and it is asked on the host holding the archive.
+    """
     if args.video_id:
         return args.video_id
 
-    ids = set(snapshot.videos)
-
-    # The archive side of the union is only ever `gc`'s: it is the one chore
-    # whose subject is a directory the catalogue has no row for. Every other
-    # chore starts by returning early on a video that is not in the catalogue,
-    # so pulling those ids in without `gc` selected buys a directory listing
-    # per orphan to learn that nothing will be done about it.
-    if "gc" in args.chore:
-        ids |= set(await observer.archived_video_ids())
-
-    ordered = sorted(ids, key=int)
+    ordered = sorted(snapshot.videos, key=int)
     return ordered[: args.limit] if args.limit else ordered
 
 
@@ -157,14 +143,6 @@ async def _enqueue(args, django_api, wanted: list[Plan]) -> int:
         print("\nNothing to queue.")
         return 0
 
-    destructive = [result for result in wanted if result.is_destructive]
-    if destructive and not args.yes:
-        print(
-            f"\n{len(destructive)} of these move media out of the published tree. "
-            f"Re-run with --yes once the plan above looks right."
-        )
-        return 1
-
     report = await Enqueuer(django_api, priority=args.priority).enqueue_all(r.video_id for r in wanted)
     print()
     print(report.describe())
@@ -172,75 +150,22 @@ async def _enqueue(args, django_api, wanted: list[Plan]) -> int:
     return 1 if report.failed else 0
 
 
-async def _run_gc(args: argparse.Namespace) -> int:
-    async def go(settings, archive_store, django_api):
-        sweep = Sweep(
-            archive_store,
-            django_api,
-            max_delete_fraction=args.max_delete_fraction,
-            work_dir=settings.work_dir,
-        )
+def _add_selection_arguments(parser: argparse.ArgumentParser) -> None:
+    """Arguments shared by `plan` and `apply`.
 
-        try:
-            report = await sweep.run(apply=args.yes)
-        except TooMuchGarbage as refusal:
-            print(f"\nRefusing to sweep: {refusal}")
-            return 1
-
-        print(
-            f"\n{len(report.orphans)} of {report.archived} archived videos are not in the catalogue "
-            f"({report.share:.1%}), holding {_bytes(report.reclaimable_bytes)}."
-        )
-        for video_id in report.orphans[:20]:
-            print(f"  {video_id}")
-        if len(report.orphans) > 20:
-            print(f"  ... and {len(report.orphans) - 20} more")
-
-        if args.yes:
-            print(f"\n{len(report.trashed)} moved into .trash/, recoverable until purged.")
-        else:
-            print("\nNothing was changed. Pass --yes to move these into .trash/.")
-        return 0
-
-    return await _with_services(go)
-
-
-def _not_queueable(value: str) -> str:
-    """Turn away a chore the queue cannot carry.
-
-    Left to itself argparse would answer `--chore gc` with "invalid choice",
-    which is true and useless to someone who has just read that gc is one of
-    the four chores. What they need is where it went.
+    Shared entire, now that both subcommands consider the same chores: what a
+    worker will run when it claims a video is the only list there is, so there
+    is nothing for the two to disagree about.
     """
-    if value == "gc":
-        raise argparse.ArgumentTypeError(
-            "gc cannot be queued: an ingest job belongs to a video, and a video the "
-            "catalogue has deleted has none. Use `fk-backfill gc`, which does the work itself."
-        )
-    return value
-
-
-#: What `--chore` means on a subcommand that queues, and on one that only reads.
-_QUEUEABLE_ONLY = (
-    "Repeatable, defaults to every chore a worker can run. gc is not one of them and has a subcommand of its own."
-)
-_EVERYTHING = "Repeatable, defaults to all of them."
-
-
-def _add_selection_arguments(parser: argparse.ArgumentParser, *, chores: Sequence[str]) -> None:
-    """Arguments shared by `plan` and `apply`, over the chores each may run."""
-    queues = "gc" not in chores
-
     parser.add_argument("video_id", nargs="*", help="videos to look at; omit for all of them")
     parser.add_argument("--limit", type=int, help="stop after this many videos")
     parser.add_argument(
         "--chore",
         action="append",
-        choices=list(chores),
-        type=_not_queueable if queues else None,
+        choices=list(CHORES),
         help=(
             "consider only these chores when deciding whether a video needs anything. "
-            f"{_QUEUEABLE_ONLY if queues else _EVERYTHING} "
+            "Repeatable, defaults to all of them. "
             "Note that this selects which videos are queued, not what happens to them: "
             "a worker that claims one re-plans it and does everything it turns out to need."
         ),
@@ -250,51 +175,62 @@ def _add_selection_arguments(parser: argparse.ArgumentParser, *, chores: Sequenc
     # Not `default=`: with action="append" argparse appends to the default
     # rather than replacing it, so one `--chore formats` would mean "all of
     # them, and formats too". main() substitutes this when none were given.
-    parser.set_defaults(default_chores=tuple(chores))
+    parser.set_defaults(default_chores=tuple(CHORES))
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fk-backfill", description=__doc__.splitlines()[0])
     subcommands = parser.add_subparsers(dest="command", required=True)
 
-    # `plan` reports on all four. Saying that a video the catalogue has dropped
-    # is still holding media is worth knowing, and saying it changes nothing.
     planner = subcommands.add_parser("plan", help="say what the catalogue needs, and change nothing")
-    _add_selection_arguments(planner, chores=list(CHORES))
+    _add_selection_arguments(planner)
     planner.set_defaults(handler=_run_plan, enqueue=False)
 
-    # `apply` can only offer a video to the queue, so it plans exactly what a
-    # worker will run when it claims one -- the same constant, so the two
-    # cannot drift. gc is not in it and cannot be: there is no job to queue.
+    # The same chores as `plan`, deliberately: `apply` can only offer a video
+    # to the queue, so it must plan exactly what a worker will run when it
+    # claims one, and there is only one list for either to read.
     applier = subcommands.add_parser("apply", help="queue the work for the worker pool")
-    _add_selection_arguments(applier, chores=list(CONVERGENCE_CHORES))
+    _add_selection_arguments(applier)
     applier.add_argument(
         "--priority",
         type=int,
         default=0,
         help="claim order among waiting jobs; higher is sooner. Leave at 0 so a member's upload goes first.",
     )
-    applier.add_argument("--yes", action="store_true", help="confirm work that moves media out of the published tree")
     applier.set_defaults(handler=_run_plan, enqueue=True)
-
-    collector = subcommands.add_parser("gc", help="reclaim media for videos the catalogue no longer has")
-    collector.add_argument(
-        "--max-delete-fraction",
-        type=float,
-        default=DEFAULT_MAX_DELETE_FRACTION,
-        help=(
-            "refuse to sweep if more than this share of the archive is unaccounted for. "
-            "Crossing it usually means FK_API_URL and FK_ARCHIVE_DIR name different environments."
-        ),
-    )
-    collector.add_argument("--yes", action="store_true", help="actually move the orphans into .trash/")
-    collector.set_defaults(handler=_run_gc)
 
     return parser
 
 
+def _gc_moved() -> int:
+    """Say where garbage collection went, rather than what argparse would say.
+
+    A tombstone, intercepted ahead of the parser rather than declared as a
+    subcommand: `fk-backfill gc --yes` is what a runbook actually says, and a
+    subparser would answer that with "unrecognized arguments". Delete this
+    once typing it has stopped being a thing anyone does.
+    """
+    print(
+        "Garbage collection is `fk-archive-gc` now, and runs on the storage host.\n"
+        "\n"
+        "It never fitted here: an ingest job belongs to a video, so a video the\n"
+        "catalogue has deleted has no job to queue and no worker to claim it --\n"
+        "and doing it from here meant this holding a standing permission to\n"
+        "remove any directory in the archive.\n"
+        "\n"
+        "    ssh file01 sudo fk-archive-gc prod\n"
+        "    ssh file01 sudo fk-archive-gc prod --apply",
+        file=sys.stderr,
+    )
+    return 2
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
+
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["gc"]:
+        return _gc_moved()
 
     args = build_parser().parse_args(argv)
     if getattr(args, "chore", None) is None and hasattr(args, "default_chores"):

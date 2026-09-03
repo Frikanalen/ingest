@@ -1,8 +1,8 @@
 """What each chore decides, given what was observed.
 
 Chores are pure, so the cases that matter -- a format built by a profile we
-have moved past, media nothing claims, a video the catalogue has dropped -- are
-ordinary table tests. No archive, no API, no ffmpeg.
+have moved past, media nothing claims, an original that is registered but
+missing -- are ordinary table tests. No archive, no API, no ffmpeg.
 """
 
 from pathlib import PurePosixPath
@@ -11,7 +11,7 @@ import pytest
 from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.archive_store import ArchiveEntry
-from app.backfill.actions import ProduceFormat, RefreshMetadata, TrashPath
+from app.backfill.actions import ProduceFormat, RefreshMetadata
 from app.backfill.chores import DesiredState, plan
 from app.backfill.state import RegisteredFile, VideoState
 from app.formats import UNTRACKED_REVISION
@@ -72,42 +72,17 @@ def test_a_healthy_video_needs_nothing():
     assert not plan(video(), DESIRED)
 
 
-# --- garbage collection ----------------------------------------------------
+# --- videos the catalogue has dropped --------------------------------------
 
 
-def test_media_for_a_deleted_video_is_trashed():
-    [action] = actions_of(video(in_catalogue=False))
+def test_a_video_the_catalogue_has_dropped_is_left_entirely_alone():
+    """Reclaiming its media is `fk-archive-gc`'s, on the storage host.
 
-    assert isinstance(action, TrashPath)
-    assert action.path == PurePosixPath(VIDEO_ID)
-    assert action.destructive
-
-
-def test_a_deleted_video_with_no_media_needs_nothing():
-    assert not plan(video(in_catalogue=False, directories={}), DESIRED)
-
-
-def test_nothing_is_derived_for_a_video_being_collected():
-    """Trashing it and then rebuilding its ladder would be an expensive loop."""
-    actions = actions_of(video(in_catalogue=False, files=()))
-
-    assert not any(isinstance(action, ProduceFormat) for action in actions)
-
-
-def test_a_deleted_videos_images_are_collected_with_everything_else():
-    """Their rows went with the video row, so the bytes are garbage too."""
-    state = video(
-        in_catalogue=False,
-        directories={
-            "original": (entry(f"{VIDEO_ID}/original/source.mp4"),),
-            "images": (entry(f"{VIDEO_ID}/images/2f92e90d.png"),),
-        },
-    )
-
-    [action] = plan(state, DESIRED, chores=("gc",)).actions
-
-    assert isinstance(action, TrashPath)
-    assert action.path == PurePosixPath(VIDEO_ID)
+    Nothing here has anything to say about a video that does not exist, and
+    deriving formats for one would be an expensive way to say nothing.
+    """
+    assert not plan(video(in_catalogue=False), DESIRED)
+    assert not plan(video(in_catalogue=False, files=()), DESIRED)
 
 
 def test_a_video_with_only_images_is_not_read_as_a_lost_ladder():
@@ -116,15 +91,6 @@ def test_a_video_with_only_images_is_not_read_as_a_lost_ladder():
 
     assert not plan(state, DESIRED, chores=("formats",)).notes
 
-
-def test_a_format_directory_with_no_row_is_not_garbage():
-    """It reads as missing to the formats chore, which rebuilds it."""
-    state = video(files=tuple(f for f in video().files if f.variant != VideoFileVariantEnum.DASH))
-
-    actions = actions_of(state)
-
-    assert not any(isinstance(action, TrashPath) for action in actions)
-    assert [a.file_format for a in actions if isinstance(a, ProduceFormat)] == [VideoFileVariantEnum.DASH]
 
 
 # --- the legacy broadcast/ directory ---------------------------------------
@@ -312,7 +278,7 @@ def test_an_unmeasurable_loudness_converges_after_one_pass():
     writes nothing, so the state it was keyed on comes back unchanged. The
     second pass has to stop asking, or it never will."""
     first = plan(unmeasured(framerate=None), DESIRED)
-    assert first.needs_original
+    assert first.actions
 
     # What the archive and the catalogue look like once that has been carried
     # out against a source with nothing to measure: framerate written, loudness
@@ -320,33 +286,18 @@ def test_an_unmeasurable_loudness_converges_after_one_pass():
     second = plan(unmeasured(), DESIRED)
 
     assert not second.actions
-    assert not second.needs_original
 
 
 # --- the plan itself -------------------------------------------------------
 
 
-def test_a_directory_only_plan_does_not_need_the_original():
-    """Several gigabytes a video rides on this being right."""
-    state = video(
-        files=(*video().files, registered(VideoFileVariantEnum.BROADCAST, "source.mp4", file_id=7)),
-        directories={**video().directories, "broadcast": (entry(f"{VIDEO_ID}/broadcast/source.mp4"),)},
-    )
-
-    assert not plan(state, DESIRED).needs_original
-
-
-def test_a_plan_that_transcodes_needs_the_original():
-    state = video(files=(registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", file_id=1),))
-
-    assert plan(state, DESIRED).needs_original
-
-
 def test_chores_can_be_selected():
-    state = video(in_catalogue=False)
+    """Which is about what a run *reports*, not about what a worker will do:
+    a worker that claims one of these re-plans it and runs everything."""
+    state = video(framerate=None)
 
+    assert plan(state, DESIRED, chores=("metadata",)).actions
     assert not plan(state, DESIRED, chores=("formats",)).actions
-    assert plan(state, DESIRED, chores=("gc",)).actions
 
 
 def test_a_plan_describes_itself():

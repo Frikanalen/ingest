@@ -155,16 +155,6 @@ async def test_a_row_that_omits_the_revision_reads_as_untracked(observer, django
 
 
 @pytest.mark.asyncio
-async def test_archived_video_ids_ignore_the_archives_own_directories(observer, archive_root):
-    place(archive_root, f"{VIDEO_ID}/original/source.mp4")
-    place(archive_root, "999/original/other.mp4")
-    place(archive_root, ".trash/20260101T000000Z/1/original/gone.mp4")
-    place(archive_root, ".spool/2/original/partial.mp4")
-
-    assert await observer.archived_video_ids() == ["999", "12345"]
-
-
-@pytest.mark.asyncio
 async def test_observing_reads_every_directory_and_its_contents(observer, archive_root):
     place(archive_root, f"{VIDEO_ID}/original/source.mp4")
     place(archive_root, f"{VIDEO_ID}/dash/manifest.mpd")
