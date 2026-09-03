@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock
 import pytest
 from frikanalen_django_api_client.models import IngestKindEnum, IngestStateEnum
 
-from app.backfill.enqueue import Enqueuer
+from fk_queue.enqueue import Enqueuer
 
 
 def job(state):

@@ -4,7 +4,7 @@ Actions are data, not closures: a plan can be printed, counted, diffed and
 reviewed before anything happens, and reviewing a whole-catalogue run before
 it is queued is the point.
 
-Nothing here executes. app.backfill.apply does that.
+Nothing here executes. app.converge.apply does that.
 """
 
 from dataclasses import dataclass

@@ -34,13 +34,6 @@ ACTIVE_STATES = frozenset(
     }
 )
 
-#: Where a member's upload goes in relative to a backfill, which goes in at 0.
-#: Claiming does not preempt -- it hands out the highest-priority job that is
-#: waiting, not one already in progress -- so this decides what a free worker
-#: picks up next rather than interrupting an encode.
-UPLOAD_PRIORITY = 100
-
-
 def is_someone_elses(job) -> bool:
     """Whether this job belongs to work already under way.
 

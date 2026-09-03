@@ -1,1 +1,11 @@
-This is just a lil' hack which takes the hook request/response types from the tusd source and generates a JSON Schema from this, which is then turned into a Pydantic file.
+Two unrelated things live here.
+
+scan-metadata.py and backfill.py are the operator tools that put videos on
+the ingest queue, sharing fk_queue/. They talk to django-api and nothing
+else; the README at the repository root describes them.
+
+Everything else is code generation, run by hand and committed:
+generate-client.sh and update-schema.sh for the django-api client, and
+generate-hook-types.sh, which is just a lil' hack that takes the hook
+request/response types from the tusd source, generates a JSON Schema from
+them, and turns that into a Pydantic file.

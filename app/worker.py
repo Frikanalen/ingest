@@ -19,9 +19,9 @@ from pathlib import Path
 from frikanalen_django_api_client.models import IngestKindEnum, IngestStateEnum
 
 from app.archive_store import ArchiveError, ArchiveStore
-from app.backfill.apply import Applier, SourceUnavailable
-from app.backfill.chores import DesiredState, plan
-from app.backfill.observe import Observer
+from app.converge.apply import Applier, SourceUnavailable
+from app.converge.chores import DesiredState, plan
+from app.converge.observe import Observer
 from app.django_client.service import DjangoApiService
 from app.ingest_reporting import IngestErrorCode, IngestReporter, transcode_progress_reporter
 from app.media.produce import PublishFailed, TranscodeFailed

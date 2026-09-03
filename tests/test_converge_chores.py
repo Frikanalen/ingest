@@ -11,9 +11,9 @@ import pytest
 from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.archive_store import ArchiveEntry
-from app.backfill.actions import ProduceFormat, RefreshMetadata
-from app.backfill.chores import DesiredState, plan
-from app.backfill.state import RegisteredFile, VideoState
+from app.converge.actions import ProduceFormat, RefreshMetadata
+from app.converge.chores import DesiredState, plan
+from app.converge.state import RegisteredFile, VideoState
 from app.formats import UNTRACKED_REVISION
 
 VIDEO_ID = "12345"
@@ -201,6 +201,90 @@ def test_a_registered_format_missing_from_the_archive_is_rebuilt_and_reported():
     [produce] = [a for a in result.actions if isinstance(a, ProduceFormat)]
     assert produce.replacing is None
     assert any("registered but missing" in note for note in result.notes)
+
+
+# --- planning without having read the archive ------------------------------
+#
+# What the queue-side tools do. They decide from the catalogue alone, so every
+# state they build says the archive was never looked at -- which has to be a
+# different answer from having looked and found nothing, or every stale format
+# in the catalogue would be reported as missing from an archive that in fact
+# holds it.
+
+
+def unread(**overrides) -> VideoState:
+    """A video as the catalogue describes it, with no archive listing at all."""
+    return video(directories=None, **overrides)
+
+
+def test_the_same_work_is_found_without_the_archive():
+    """The property the split rests on: which videos need something is a
+    question about the videofile rows, so an operator with an API token and no
+    SSH key plans the same set a worker would."""
+    stale = dict(
+        files=(
+            registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", file_id=1),
+            registered(VideoFileVariantEnum.DASH, "manifest.mpd", revision=1, file_id=2),
+            registered(VideoFileVariantEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
+        )
+    )
+
+    with_archive = [a.file_format for a in actions_of(video(**stale)) if isinstance(a, ProduceFormat)]
+    without = [a.file_format for a in actions_of(unread(**stale)) if isinstance(a, ProduceFormat)]
+
+    assert without == with_archive == [VideoFileVariantEnum.DASH]
+
+
+def test_nothing_is_reported_missing_from_an_archive_nobody_read():
+    result = plan(
+        unread(
+            files=(
+                registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", file_id=1),
+                registered(VideoFileVariantEnum.DASH, "manifest.mpd", revision=1, file_id=2),
+                registered(VideoFileVariantEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
+            )
+        ),
+        DESIRED,
+    )
+
+    assert not any("registered but missing" in note for note in result.notes)
+
+
+def test_nothing_is_swapped_out_on_the_strength_of_a_listing_nobody_made():
+    """The swap is the worker's to decide, when it re-plans with the archive in
+    front of it. A stale format still has to be rebuilt, but a plan made from
+    the catalogue alone must not name a directory to trash."""
+    state = unread(
+        files=(
+            registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", file_id=1),
+            registered(VideoFileVariantEnum.DASH, "manifest.mpd", revision=1, file_id=2),
+            registered(VideoFileVariantEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
+        )
+    )
+
+    [produce] = [a for a in actions_of(state) if isinstance(a, ProduceFormat)]
+
+    assert produce.file_format == VideoFileVariantEnum.DASH
+    assert produce.replacing is None
+
+
+def test_a_legacy_source_is_still_reported_without_the_archive():
+    """The rows alone say it: something is registered, and the file everything
+    derives from is not among it. That count is how an operator sees how far
+    the broadcast migration still has to go, so it must not need an SSH key."""
+    result = plan(unread(files=broadcast_only().files), DESIRED)
+
+    assert not result.actions
+    assert any("no original is registered" in note for note in result.notes)
+
+
+def test_a_video_with_no_original_is_silent_when_the_archive_was_not_read():
+    """It cannot tell a video whose ladder went missing from one nobody has
+    uploaded to, so it says nothing rather than guessing."""
+    result = plan(unread(files=()), DESIRED)
+
+    assert not result.actions
+    assert not result.notes
 
 
 def test_nothing_is_derived_without_a_registered_original():
