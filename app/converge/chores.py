@@ -17,8 +17,8 @@ from pathlib import PurePosixPath
 
 from frikanalen_django_api_client.models import VideoFileVariantEnum
 
-from app.backfill.actions import Action, ProduceFormat, RefreshMetadata
-from app.backfill.state import VideoState
+from app.converge.actions import Action, ProduceFormat, RefreshMetadata
+from app.converge.state import VideoState
 from app.formats import DESIRED_FORMATS, current_revision
 
 ORIGINAL_DIR = "original"
@@ -138,7 +138,16 @@ def refresh_metadata(state: VideoState, desired: DesiredState) -> Fragment:
 def produce_formats(state: VideoState, desired: DesiredState) -> Fragment:
     """Build every desired format that is absent or built by an older profile."""
     if not state.rows_for(VideoFileVariantEnum.ORIGINAL):
-        if state.has_archived_media:
+        # Something is registered against this video, or something is archived
+        # for it, but the one file everything is derived from is neither.
+        # Usually the legacy shape: the source is still under `broadcast/`,
+        # waiting on the one-shot migration on the storage host. Said out loud
+        # rather than repaired -- nothing here renames anything.
+        #
+        # The rows are asked first because they are the half a caller that
+        # never read the archive still has, and this is the note worth keeping
+        # for it: it counts the videos the migration has yet to reach.
+        if state.files or state.has_archived_media:
             return Fragment(state, notes=("no original is registered; nothing can be derived",))
         return Fragment(state)
 
@@ -158,10 +167,12 @@ def produce_formats(state: VideoState, desired: DesiredState) -> Fragment:
         # published leaves a complete directory nothing claims, and publishing
         # into it would collide rather than replace -- put() refuses to
         # overwrite, by design. So the swap is keyed off what is actually
-        # there.
-        occupied = str(file_format) in state.directories
+        # there, and off nothing at all when nobody has looked: the queue-side
+        # tools plan from the catalogue, and the worker that claims the video
+        # plans it again with the archive in front of it.
+        occupied = state.archive_was_read and str(file_format) in state.directories
 
-        if registered and not occupied:
+        if registered and state.archive_was_read and not occupied:
             # Registered, due a rebuild, and not actually there. Rebuilding is
             # still right, but the absence is worth saying out loud.
             notes.append(f"{directory} is registered but missing from the archive")

@@ -16,9 +16,9 @@ from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.archive_store import LocalArchiveStore
 from app.archive_store.base import TRASH_DIR
-from app.backfill.actions import ProduceFormat, RefreshMetadata
-from app.backfill.apply import Applier, SourceUnavailable
-from app.backfill.chores import Plan
+from app.converge.actions import ProduceFormat, RefreshMetadata
+from app.converge.apply import Applier, SourceUnavailable
+from app.converge.chores import Plan
 
 VIDEO_ID = "12345"
 ORIGINAL = PurePosixPath(f"{VIDEO_ID}/original/source.mp4")
@@ -95,7 +95,7 @@ async def test_a_silent_source_records_no_loudness(applier, archive_root, django
     """
     place(archive_root, ORIGINAL, color_bars_video.read_bytes())
 
-    with caplog.at_level(logging.WARNING, logger="app.backfill.apply"):
+    with caplog.at_level(logging.WARNING, logger="app.converge.apply"):
         await applier.apply(plan_of(RefreshMetadata(fields=("loudness",), original_file_id=7)))
 
     django_api.set_video_file_loudness.assert_not_awaited()

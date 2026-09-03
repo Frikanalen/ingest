@@ -4,7 +4,6 @@ from pathlib import Path, PurePosixPath
 
 from frikanalen_django_api_client.models import IngestKindEnum, IngestStateEnum, VideoFileVariantEnum
 
-from app.backfill.enqueue import UPLOAD_PRIORITY
 from app.django_client.service import DjangoApiService
 from app.ingest_reporting import IngestErrorCode, IngestReporter
 from app.util.file_name_utils import IMAGES_DIR, original_file_location
@@ -12,6 +11,12 @@ from app.util.logging import VideoIdFilter
 
 from .archive_store import ArchiveSession, ArchiveStore
 from .media.ffprobe_schema import FfprobeOutput
+
+#: Where a member's upload goes in relative to work an operator queued, which
+#: goes in at 0. Claiming does not preempt -- it hands out the highest-priority
+#: job that is waiting, not one already in progress -- so this decides what a
+#: free worker picks up next rather than interrupting an encode.
+UPLOAD_PRIORITY = 100
 
 
 class Ingester:
@@ -166,7 +171,7 @@ class Ingester:
         archive but nothing is coming for it, and the upload still sitting in
         the tusd volume is the evidence -- whereas unlinking first would leave
         a video that is archived, unqueued, and indistinguishable from one that
-        finished. Either way `fk-backfill apply <id>` is the recovery.
+        finished. Either way `scripts/backfill.py <id> --apply` is the recovery.
 
         The kind is sent explicitly because the column it would otherwise
         default to decides which pool may claim the job, and because the

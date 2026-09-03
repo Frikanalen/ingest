@@ -15,7 +15,7 @@ import pytest
 from frikanalen_django_api_client.models import IngestStateEnum, VideoFileVariantEnum
 
 from app.archive_store import LocalArchiveStore
-from app.backfill.apply import SourceUnavailable
+from app.converge.apply import SourceUnavailable
 from app.ingest_reporting import IngestErrorCode
 from app.media.produce import TranscodeFailed
 from app.worker import Worker
