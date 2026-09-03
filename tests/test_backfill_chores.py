@@ -101,6 +101,29 @@ def test_nothing_is_derived_for_a_video_being_collected():
     assert not any(isinstance(action, ProduceFormat) for action in actions)
 
 
+def test_a_deleted_videos_images_are_collected_with_everything_else():
+    """Their rows went with the video row, so the bytes are garbage too."""
+    state = video(
+        in_catalogue=False,
+        directories={
+            "original": (entry(f"{VIDEO_ID}/original/source.mp4"),),
+            "images": (entry(f"{VIDEO_ID}/images/2f92e90d.png"),),
+        },
+    )
+
+    [action] = plan(state, DESIRED, chores=("gc",)).actions
+
+    assert isinstance(action, TrashPath)
+    assert action.path == PurePosixPath(VIDEO_ID)
+
+
+def test_a_video_with_only_images_is_not_read_as_a_lost_ladder():
+    """Key art uploaded before the video is the normal order of events."""
+    state = video(files=(), directories={"images": (entry(f"{VIDEO_ID}/images/2f92e90d.png"),)})
+
+    assert not plan(state, DESIRED, chores=("formats",)).notes
+
+
 def test_a_format_directory_with_no_row_is_not_garbage():
     """It reads as missing to the formats chore, which rebuilds it."""
     state = video(files=tuple(f for f in video().files if f.variant != VideoFileVariantEnum.DASH))

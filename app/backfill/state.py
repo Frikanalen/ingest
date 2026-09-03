@@ -13,6 +13,7 @@ from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.archive_store import ArchiveEntry
 from app.formats import UNTRACKED_REVISION
+from app.util.file_name_utils import IMAGES_DIR
 
 
 @dataclass(frozen=True)
@@ -46,7 +47,14 @@ class VideoState:
 
     @property
     def has_archived_media(self) -> bool:
-        return any(self.contents_of(name) for name in self.directories)
+        """Whether any video media is archived for this video.
+
+        Images do not count. They are registered against a different model, are
+        never derived from an original, and a video whose only archived file is
+        a piece of key art is not a video whose ladder went missing -- it is a
+        video nobody has uploaded yet.
+        """
+        return any(self.contents_of(name) for name in self.directories if name != IMAGES_DIR)
 
     def rows_for(self, variant: VideoFileVariantEnum) -> tuple[RegisteredFile, ...]:
         return tuple(f for f in self.files if f.variant == variant)

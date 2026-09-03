@@ -90,6 +90,13 @@ def collect_garbage(state: VideoState, desired: DesiredState) -> Fragment:
     Whole videos only. A format directory with no row is left to the formats
     chore, which reads it as missing and rebuilds it -- collecting it here
     instead would have the two fighting over the same path.
+
+    Editorial images are collected with everything else, deliberately. They
+    cannot be rebuilt, which argues for caution -- but the video row they hang
+    off is gone, so the database has already dropped their rows with it, and
+    trashing is a rename that `purge-trash` undoes until someone purges it. A
+    chore that spared them would leave every video that ever had one
+    uncollectable for good.
     """
     if state.in_catalogue or not state.directories:
         return Fragment(state)

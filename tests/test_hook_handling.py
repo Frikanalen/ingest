@@ -1,4 +1,6 @@
+import os
 import tempfile
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -118,6 +120,38 @@ def test_pre_create_gives_each_programme_image_a_unique_spool_path():
     assert first_change["ID"] != second_change["ID"]
     assert first_change["Storage"]["Path"].startswith(f"1234/image_uploads/{first_change['ID']}/")
     assert first_change["Storage"]["Path"].endswith("/Key_art.png")
+
+
+def test_pre_create_clears_this_videos_abandoned_image_uploads(tmp_path):
+    """Nothing else ever will: each image upload gets a path of its own, so no
+    later attempt overwrites one that failed."""
+    django_api.reset_mock()
+    abandoned = tmp_path / "1234" / "image_uploads" / "imageabandoned"
+    abandoned.mkdir(parents=True)
+    (abandoned / "rejected.png").write_text("not an image")
+    long_ago = time.time() - 30 * 24 * 60 * 60
+    for path in (abandoned / "rejected.png", abandoned):
+        os.utime(path, (long_ago, long_ago))
+
+    request = pre_create_request_valid.model_copy(deep=True)
+    request.event.upload.meta_data = MetaData(
+        **{
+            "videoID": "1234",
+            "origFileName": "Key art.png",
+            "uploadToken": "asdfasdf",
+            "uploadKind": "program_image",
+            "imageRole": "key_art_titled",
+        }
+    )
+
+    app.dependency_overrides[get_settings] = lambda: get_settings_override().model_copy(update={"tusd_dir": tmp_path})
+    try:
+        response = client.post(HOOK_PATH, json=request.model_dump(by_alias=True))
+    finally:
+        app.dependency_overrides[get_settings] = get_settings_override
+
+    assert response.status_code == 200
+    assert not abandoned.exists()
 
 
 def test_pre_create_rejects_an_oversized_programme_image():
