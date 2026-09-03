@@ -85,6 +85,25 @@ that later looks like a finished one.
 
 Both SSH credentials must be given explicitly — ingest will not reach for the running user's `~/.ssh`, and it never disables host key verification. If either is missing, ingest logs a warning and archives to `FK_ARCHIVE_FALLBACK_DIR` instead, so you can run it locally without setting up SSH at all. **Set `FK_ARCHIVE_REQUIRED=true` anywhere that actually archives over SSH**: otherwise a secret that fails to mount leaves ingest quietly writing to scratch space, where files are lost on restart.
 
+### Writing without write access
+
+The SSH account described above has write access to the whole archive, which is
+far more than ingest needs: `ArchiveSession` only ever performs four mutations,
+and one of them (purging the trash) it never performs at all.
+
+[`archive-utils/`](archive-utils/) is those four mutations packaged as
+`fk-archive-utils`, a Debian package installed on the storage host. Ingest asks
+it to publish a file, move a file within a video, or trash a directory, over
+SSH through a single sudoers rule, and the account it logs in as needs no write
+access to the archive at all. Reads stay on SFTP, read-only.
+
+The package is built and released by
+[`.github/workflows/archive-utils.yml`](.github/workflows/archive-utils.yml)
+and installed by `roles/fk_archive_utils` in the infra repository. **The engine
+does not speak it yet** — `SshArchiveSession` still writes over SFTP, and the
+cutover is gated on that changing. `archive-utils/README.md` has the design;
+the infra role's README has the order to deploy it in.
+
 ## Reconciling the catalogue
 
 Ingest is not only a hook handler. What a video is *supposed* to have is declared in one place — `DESIRED_FORMATS` in `app/formats.py`, and the revision each template in `app/templates/` declares — and both paths that produce media converge on it: a fresh upload, and a video that has been in the archive for years.

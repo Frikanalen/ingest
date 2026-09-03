@@ -1,0 +1,94 @@
+name: Archive utils
+
+# The storage-host half of ingest: it has no dependency on the application, no
+# dependency on the generated API client, and does not want ffmpeg -- so it
+# gets its own workflow rather than a job wedged into the application's.
+on:
+  push:
+    branches: [main]
+    paths: ['archive-utils/**', '.github/workflows/archive-utils.yml']
+  pull_request:
+    paths: ['archive-utils/**', '.github/workflows/archive-utils.yml']
+
+concurrency:
+  group: archive-utils-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest and ruff
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: archive-utils
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pinned to an exact tag on purpose: setup-uv stopped publishing the
+      # floating `v10`/`v10.0` tags in v8, so a major-only ref does not resolve.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run tests
+        run: uv run pytest
+
+      - name: Lint
+        run: uv run ruff check
+
+  package:
+    name: Build the Debian package
+    runs-on: ubuntu-latest
+    # trixie is what file01 runs, and the package is built against its
+    # python3. Building it on the runner's Ubuntu would produce a
+    # ${python3:Depends} naming a version Debian does not have.
+    container: debian:trixie
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential debhelper dh-python pybuild-plugin-pyproject \
+            python3-all python3-setuptools
+
+      # A build on a branch is a check that the packaging still works, so the
+      # version is deliberately one nothing would install by accident.
+      - name: Build
+        working-directory: archive-utils
+        run: ./build-deb.sh "0.0.0~${GITHUB_SHA::8}"
+
+      - name: Check the package for policy violations
+        working-directory: archive-utils
+        run: |
+          apt-get install -y --no-install-recommends lintian
+          # Informational: this is an internal package, not one headed for the
+          # Debian archive, and several of its tags are about that.
+          lintian --fail-on error dist/*.deb || true
+
+      - name: Install it and run the tools it installed
+        working-directory: archive-utils
+        run: |
+          apt-get install -y --no-install-recommends ./dist/*_all.deb
+          mkdir -p /archive/media
+          printf 'root = "/archive/media"\nmanager = "root"\n' \
+            > /etc/fk-archive-utils/profiles.d/ci.toml
+          printf 'hello' | fk-archive ci publish 12/original/a.mov --size 5
+          fk-archive ci trash 12/original
+          fk-archive-purge-trash ci --older-than 0
+          # A packaging mistake that leaves a command unable to refuse would
+          # pass every unit test, because the unit tests import the module
+          # rather than running what the package installed.
+          ! fk-archive ci trash ../../etc
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: fk-archive-utils-deb
+          path: archive-utils/dist/*.deb

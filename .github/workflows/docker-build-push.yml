@@ -26,6 +26,39 @@ jobs:
         with:
           release-type: python
 
+  archive-utils:
+    name: Attach fk-archive-utils to the release
+    needs: release
+    # Only on a release commit, and only on main: the .deb's version is the
+    # release tag, so there is nothing to name it after otherwise. Branch
+    # builds of the package are covered by .github/workflows/archive-utils.yml.
+    if: ${{ github.ref == 'refs/heads/main' && needs.release.outputs.created == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      # Built inside trixie because that is what file01 runs: the package's
+      # ${python3:Depends} has to name a python3 Debian actually has. Done with
+      # `docker run` rather than a `container:` job so the gh CLI the upload
+      # needs is still the runner's.
+      - name: Build the Debian package
+        run: |
+          docker run --rm -v "$PWD/archive-utils:/src" -w /src debian:trixie bash -euc '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            apt-get install -y -qq --no-install-recommends \
+              build-essential debhelper dh-python pybuild-plugin-pyproject \
+              python3-all python3-setuptools
+            ./build-deb.sh "${{ needs.release.outputs.tag }}"
+          '
+
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ needs.release.outputs.tag }}" archive-utils/dist/*.deb --clobber
+
   build:
     name: Build and push Docker image to GHCR
     needs: release
