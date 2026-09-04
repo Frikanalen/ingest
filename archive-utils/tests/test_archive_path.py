@@ -1,6 +1,6 @@
 import pytest
 
-from fk_archive_utils.archive_path import parse_file_path, parse_removable_path
+from fk_archive_utils.archive_path import parse_file_path, parse_removable_path, parse_variant_path
 from fk_archive_utils.errors import UsageError
 
 
@@ -58,3 +58,19 @@ def test_removable_paths_are_a_video_or_one_directory_in_one():
 def test_removable_paths_refuse_everything_else(raw):
     with pytest.raises(UsageError):
         parse_removable_path(raw)
+
+
+def test_variant_path_is_built_from_exactly_two_checked_arguments():
+    assert parse_variant_path("12", "dash_preview").parts == ("12", "dash_preview")
+
+
+@pytest.mark.parametrize("video_id", ["../etc", "007", "", "twelve"])
+def test_variant_path_refuses_malformed_video_ids(video_id):
+    with pytest.raises(UsageError):
+        parse_variant_path(video_id, "dash_preview")
+
+
+@pytest.mark.parametrize("variant", ["a/b", "..", ".hidden", ".trash", "dash_preview "])
+def test_variant_path_refuses_malformed_variants(variant):
+    with pytest.raises(UsageError):
+        parse_variant_path("12", variant)

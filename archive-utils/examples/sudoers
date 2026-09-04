@@ -1,16 +1,16 @@
 # /etc/sudoers.d/fk-archive-utils -- install with mode 0440, root:root, and
 # always through `visudo -c -f` first.
 #
-# The ingest account may run the two mutations it actually performs against
+# The ingest account may run the three mutations it actually performs against
 # its own archive, and nothing else. The profile name is matched literally, so
 # the staging key cannot reach production's archive however it is invoked --
 # which is the whole reason the archive root is a profile lookup rather than
 # an argument.
 #
 # fk-archive-purge-trash and fk-archive-migrate-broadcast are deliberately
-# absent: one is the only command in the package that deletes anything, and
-# the other is a one-shot migration. Leaving both out of these rules is what
-# lets them end in a wildcard.
+# absent: one can delete archived material that is not regenerable from the
+# original, and the other is a one-shot migration. Leaving both out of these
+# rules is what lets them end in a wildcard.
 
 # env_reset is Debian's default; restated per command because these are Python
 # programs run through sudo, and PYTHONPATH or PYTHONSTARTUP surviving the

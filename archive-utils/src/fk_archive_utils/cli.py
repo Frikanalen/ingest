@@ -1,6 +1,6 @@
 """`fk-archive` -- the mutations the ingest engine is allowed to ask for.
 
-One command with two verbs, rather than two commands, because the sudoers rule
+One command with three verbs, rather than three commands, because the sudoers rule
 that grants them is a single line and stays readable:
 
     ingest ALL=(archive-manager) NOPASSWD: /usr/bin/fk-archive prod *
@@ -27,7 +27,7 @@ import os
 import sys
 
 from fk_archive_utils import operations
-from fk_archive_utils.archive_path import parse_file_path, parse_removable_path
+from fk_archive_utils.archive_path import parse_file_path, parse_removable_path, parse_variant_path
 from fk_archive_utils.errors import ArchiveUtilsError
 from fk_archive_utils.profile import PROFILE_DIR, Profile, load
 
@@ -53,6 +53,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     trash = verbs.add_parser("trash", help="move a video, or one directory in one, into .trash/")
     trash.add_argument("path")
+    delete_variant = verbs.add_parser(
+        "delete-variant",
+        help="permanently remove one explicitly deletable variant from one video",
+    )
+    delete_variant.add_argument("variant")
+    delete_variant.add_argument("video_id")
 
     return parser
 
@@ -95,6 +101,8 @@ def _dispatch(args: argparse.Namespace, profile: Profile, stdin) -> operations.R
             )
         case "trash":
             return operations.trash(profile, parse_removable_path(args.path, what="path"))
+        case "delete-variant":
+            return operations.delete_variant(profile, parse_variant_path(args.video_id, args.variant))
         case _:  # pragma: no cover - argparse rejects anything else first
             raise AssertionError(args.verb)
 

@@ -14,19 +14,26 @@ nothing between the two to notice.
 
 What the engine actually needs is much smaller than that. Every mutation it
 performs goes through one interface (`ArchiveSession` in the ingest
-repository), and there are only four of them:
+repository), and there are only five of them:
 
 | Mutation | Who asks for it | Reachable over SSH |
 | --- | --- | --- |
 | **publish** | the upload hook (`original/`), the format producer (`dash/`, `*_thumb/`), the programme-image ingest (`images/`) | yes |
 | **trash** | superseding an upload, replacing a rebuilt format | yes |
+| **delete-variant** | retiring a temporary, regenerable preview after the full rendition is ready | yes |
 | **purge-trash** | an operator, or a timer | no |
 | **move** | the one-shot `broadcast/` → `original/` migration | no |
 
-So those four are what this package offers, and nothing else — and only the
-first two are things a running ingest engine ever asks for, so only those two
-are verbs of `fk-archive`. The sudoers rule ends in a wildcard, which means
-what that command *cannot* do is the whole of what the rule withholds.
+So those five are what this package offers, and nothing else — and only the
+first three are things a running ingest engine ever asks for, so only those
+three are verbs of `fk-archive`. The sudoers rule ends in a wildcard, which
+means what that command *cannot* do is the whole of what the rule withholds.
+
+`delete-variant` is deliberately narrower than `trash`: it can name only one
+variant of one video, and an allowlist limits it to derivatives that are both
+regenerable from the original and cheap enough that destroying one is not an
+incident. Today that means only `dash_preview`. Routine preview retirement
+therefore does not bury the exceptional, operator-worthy contents of `.trash/`.
 
 `move` is on the far side of that line because renaming a file inside a video
 happens exactly once per video, ever, as a migration off the directory layout
@@ -38,7 +45,7 @@ Two whole-archive operations live here as their own commands rather than as
 mutations at all, because their subject is the archive rather than a video:
 [garbage collection](#garbage-collection), which reclaims media for videos the
 catalogue has dropped, and `fk-archive-purge-trash`, which is the only thing
-here that destroys anything.
+here that may destroy material that cannot be rebuilt from the original.
 
 ## How the pieces fit
 
@@ -59,8 +66,9 @@ operator ───────────▶  sudo fk-archive-gc prod --apply
   `fk-archive` and refuses everything else, an SFTP subsystem request included
   — so a stolen key cannot run arbitrary code as the ingest account either, and
   has no file descriptor on this host to reach for.
-* **`fk-archive <profile> {publish,trash}`** performs one mutation and prints a
-  JSON object saying what it did. This is the command sudoers grants.
+* **`fk-archive <profile> {publish,trash,delete-variant}`** performs one mutation
+  and prints a JSON object saying what it did. This is the command sudoers
+  grants.
 * **`fk-archive-gc <profile>`** reclaims media for videos the catalogue no
   longer has. Not granted to the ingest account; `--apply` to act.
 * **`fk-archive-purge-trash <profile> --older-than DAYS`** is the destructive
@@ -215,10 +223,12 @@ migrating reads like a rule about how the archive works.
   the old, because `link` fails with `EEXIST` where `rename` would replace
   silently. The archive is exported read-only to the playout hosts; a file
   swapped under a reader is worse than a refusal.
-* **Deleting.** Trash is a rename. Only `fk-archive-purge-trash` unlinks
-  anything, and each trash operation gets its own exclusively-created stamp
-  directory, which is also what makes the rename into it safe without a
-  no-clobber rename.
+* **Destroying only what can be rebuilt.** Trash is a rename, and each trash
+  operation gets its own exclusively-created stamp directory, which is also
+  what makes the rename into it safe without a no-clobber rename.
+  `delete-variant` may unlink only an explicitly allowed cheap, regenerable
+  derivative. Only `fk-archive-purge-trash` may destroy anything else, and it
+  is withheld from the ingest account.
 
 ## Exit codes
 

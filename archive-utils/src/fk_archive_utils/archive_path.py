@@ -14,6 +14,7 @@ The namespace, in full:
     <video-id>/original/<file>      the source file, exactly one per video
     <video-id>/images/<file>        editorial stills, registered separately
     <video-id>/<format>/<file>      everything derived from the source
+    <video-id>/<variant>/           a variant that may be named as a directory
     .spool/                         where a publish stages, never published to
     .trash/<stamp>/<path>           where a removal goes, never published to
 
@@ -156,3 +157,11 @@ def parse_removable_path(raw: str, *, what: str = "path") -> ArchivePath:
     if len(parts) not in (1, 2):
         raise UsageError(f"{what} must be <video-id> or <video-id>/<category>, got {raw!r}")
     return ArchivePath(parts)
+
+
+def parse_variant_path(video_id: str, variant: str) -> ArchivePath:
+    """Parse `<video-id>/<variant>` from two separate arguments."""
+    if not VIDEO_ID.match(video_id):
+        raise UsageError(f"video id is malformed: {video_id!r}")
+    _check_component(variant, what="variant")
+    return ArchivePath((video_id, variant))

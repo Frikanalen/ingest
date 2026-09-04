@@ -13,6 +13,23 @@ def test_an_archive_command_is_run_as_the_archive_account():
     assert argv == [SUDO, "-n", "-u", "archive-manager-staging", "--", FK_ARCHIVE, "staging", "trash", "12/dash"]
 
 
+def test_delete_variant_is_passed_through_like_any_other_archive_command():
+    argv = resolve("fk-archive delete-variant dash_preview 12", PROFILE)
+
+    assert argv == [
+        SUDO,
+        "-n",
+        "-u",
+        "archive-manager-staging",
+        "--",
+        FK_ARCHIVE,
+        "staging",
+        "delete-variant",
+        "dash_preview",
+        "12",
+    ]
+
+
 def test_the_profile_comes_from_the_key_and_not_from_the_request():
     argv = resolve("fk-archive prod trash 12", PROFILE)
 
