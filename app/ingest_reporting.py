@@ -97,11 +97,18 @@ class IngestReporter:
 def transcode_progress_reporter(reporter: IngestReporter) -> Callable[[float], Awaitable[None]]:
     """Turns ffmpeg's own -progress stream into a percentage.
 
-    Only the DASH template emits -progress; thumbnails are over before ffmpeg
-    would have anything to report. So in practice this is the DASH encode's own
-    completion fraction, and nothing else moves the bar -- which matches
-    reality, since a 60s 1080p source measures the DASH ladder at roughly 100x
-    the cost of the other three formats combined.
+    This is the DASH ladder's own completion fraction, and nothing else moves
+    the bar -- which matches reality, since a 60s 1080p source measures the
+    ladder at roughly 100x the cost of the three thumbnails combined.
+
+    Nothing else moves it because nothing else is *given* it. The thumbnails
+    could not: they are over before ffmpeg would have anything to report. The
+    preview very much could -- it is a second encoding template, emitting the
+    same -progress stream -- so `ProduceFormat.drives_progress` withholds this
+    callback from it. Handed to both, the bar would run to 100 on the preview
+    and start again from nothing on the ladder, which to a member watching is
+    an import that restarted. The preview is minutes against the ladder's
+    hours, so the honest thing for it to report is nothing at all.
 
     Reports are throttled to one per whole percentage point: ffmpeg's -progress
     stream updates far more often than that, and each report is a call to

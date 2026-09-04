@@ -201,6 +201,10 @@ def produce_formats(state: VideoState, desired: DesiredState) -> Fragment:
                     ProduceFormat(
                         file_format=DASH_PREVIEW,
                         to_revision=current_revision(DASH_PREVIEW),
+                        # The ladder below owns the bar. Two encodes reporting
+                        # into it would run it to 100 and start it again, which
+                        # to a member watching is an import that restarted.
+                        drives_progress=False,
                     )
                 )
                 planned_preview = True

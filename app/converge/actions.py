@@ -46,6 +46,12 @@ class ProduceFormat(Action):
     #: different set of files and the old ones would otherwise linger beside
     #: the new output forever.
     replacing: PurePosixPath | None = None
+    #: Whether this format's own `-progress` moves the member's bar. At most
+    #: one format in a plan may, or the bar runs to 100 and starts again from
+    #: nothing -- which reads as the import having restarted. It belongs to
+    #: whichever encode the member is really waiting on, and against the
+    #: ladder's hours the preview that precedes it is minutes.
+    drives_progress: bool = True
 
     def describe(self) -> str:
         if self.from_revision != UNTRACKED_REVISION:

@@ -500,3 +500,15 @@ class TestThePreview:
         )
 
         assert not any(isinstance(a, RetirePreview) for a in plan(state, DESIRED).actions)
+
+    def test_it_does_not_drive_the_progress_bar(self):
+        """Two encodes reporting into one bar run it to 100 and start it again,
+        which to a member watching is an import that restarted. The ladder owns
+        the bar: it is hours where the preview is minutes."""
+        state = video(files=(registered(VideoFileVariantEnum.ORIGINAL, "source.mp4"),))
+
+        produced = [a for a in plan(state, DESIRED).actions if isinstance(a, ProduceFormat)]
+        drives = {a.file_format: a.drives_progress for a in produced}
+
+        assert drives[DASH_PREVIEW] is False
+        assert drives[VideoFileVariantEnum.DASH] is True

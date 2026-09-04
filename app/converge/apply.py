@@ -113,14 +113,19 @@ class Applier:
         on_progress: ProgressCallback | None,
     ) -> None:
         match action:
-            case ProduceFormat(file_format=file_format, replacing=replacing):
+            case ProduceFormat(file_format=file_format, replacing=replacing, drives_progress=drives_progress):
                 assert source is not None, "produce needs the original"
                 if replacing is not None:
                     # Swapped, not overwritten: a new revision can emit a
                     # different set of files, and the old ones would otherwise
                     # sit beside the new output forever.
                     await self.archive.trash(replacing)
-                await self.producer.produce(source, file_format, scratch, on_progress=on_progress)
+                await self.producer.produce(
+                    source,
+                    file_format,
+                    scratch,
+                    on_progress=on_progress if drives_progress else None,
+                )
 
             case RefreshMetadata(fields=fields, original_file_id=file_id):
                 assert source is not None, "refreshing metadata needs the original"
