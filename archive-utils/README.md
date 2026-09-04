@@ -34,6 +34,10 @@ variant of one video, and an allowlist limits it to derivatives that are both
 regenerable from the original and cheap enough that destroying one is not an
 incident. Today that means only `dash_preview`. Routine preview retirement
 therefore does not bury the exceptional, operator-worthy contents of `.trash/`.
+An absent variant is already the requested end state: the command exits 0 with
+`"deleted": false`, never exit 4. That idempotence is load-bearing because the
+caller deletes before unregistering, and a retry after either half succeeds
+must be able to converge.
 
 `move` is on the far side of that line because renaming a file inside a video
 happens exactly once per video, ever, as a migration off the directory layout

@@ -268,8 +268,9 @@ def delete_variant(profile: Profile, path: ArchivePath) -> Result:
     need to inspect something before purge destroys it.
 
     `rmtree` is used for the same reason as in `purge`: CPython uses a
-    descriptor-based, symlink-safe walk on Linux. `path_of` is only the initial
-    name passed to that walk; it is never fed back into an `open` of our own.
+    descriptor-based, symlink-safe walk on Linux. Unlike purge, this operation
+    is reachable by the ingest account, so its initial name is resolved
+    relative to the already-validated parent descriptor as well.
     """
     if path.name not in DELETABLE_VARIANTS:
         raise UsageError(f"variant is not deletable: {path.name!r}")
@@ -287,9 +288,12 @@ def delete_variant(profile: Profile, path: ArchivePath) -> Result:
             raise UsageError(f"{path} is not a directory")
 
         with archive.directory(path.parent) as parent:
-            target = archive.path_of(path.parts)
-            files_removed, bytes_removed = _tree_usage(target)
-            shutil.rmtree(target)
+            target = os.open(path.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            try:
+                files_removed, bytes_removed = _tree_usage(target)
+            finally:
+                os.close(target)
+            shutil.rmtree(path.name, dir_fd=parent)
             fsync_dir(parent)
 
     return Result(
@@ -301,15 +305,27 @@ def delete_variant(profile: Profile, path: ArchivePath) -> Result:
     )
 
 
-def _tree_usage(directory: Path) -> tuple[int, int]:
-    """Count directory entries that are not directories, without following links."""
+def _tree_usage(directory: int) -> tuple[int, int]:
+    """Count non-directories through an open directory, without following links.
+
+    Symlinks count as files, and their byte count is the length of the link text
+    reported by lstat rather than the size of anything they point to.
+    """
     files = 0
     size = 0
     with os.scandir(directory) as entries:
         for entry in entries:
             info = entry.stat(follow_symlinks=False)
             if stat.S_ISDIR(info.st_mode):
-                nested_files, nested_size = _tree_usage(Path(entry.path))
+                nested = os.open(
+                    entry.name,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                    dir_fd=directory,
+                )
+                try:
+                    nested_files, nested_size = _tree_usage(nested)
+                finally:
+                    os.close(nested)
                 files += nested_files
                 size += nested_size
             else:

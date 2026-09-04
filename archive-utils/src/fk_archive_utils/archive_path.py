@@ -13,8 +13,7 @@ The namespace, in full:
 
     <video-id>/original/<file>      the source file, exactly one per video
     <video-id>/images/<file>        editorial stills, registered separately
-    <video-id>/<format>/<file>      everything derived from the source
-    <video-id>/<variant>/           a variant that may be named as a directory
+    <video-id>/<variant>/<file>     everything derived from the source
     .spool/                         where a publish stages, never published to
     .trash/<stamp>/<path>           where a removal goes, never published to
 
@@ -160,7 +159,13 @@ def parse_removable_path(raw: str, *, what: str = "path") -> ArchivePath:
 
 
 def parse_variant_path(video_id: str, variant: str) -> ArchivePath:
-    """Parse `<video-id>/<variant>` from two separate arguments."""
+    """Parse `<video-id>/<variant>` from two separate arguments.
+
+    Taking two components rather than one path makes "exactly one variant of
+    exactly one video" structural: the caller has no syntax with which to name
+    a whole video, a file inside a variant, or anything outside that shape.
+    This is grammar only; operations decide which valid variants are deletable.
+    """
     if not VIDEO_ID.match(video_id):
         raise UsageError(f"video id is malformed: {video_id!r}")
     _check_component(variant, what="variant")

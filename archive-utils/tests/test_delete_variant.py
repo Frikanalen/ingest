@@ -115,6 +115,26 @@ def test_symlink_component_is_refused(profile_dir: Path, archive_root: Path, tmp
     assert survivor.read_bytes() == b"keep"
 
 
+def test_symlink_inside_preview_is_unlinked_without_following_it(
+    profile_dir: Path,
+    archive_root: Path,
+    tmp_path: Path,
+):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    survivor = outside / "survivor"
+    survivor.write_bytes(b"keep")
+    preview = archive_root / "12/dash_preview"
+    preview.mkdir(parents=True)
+    (preview / "outside-link").symlink_to(outside, target_is_directory=True)
+
+    code, result = invoke(profile_dir)
+
+    assert (code, result["deleted"]) == (0, True)
+    assert not preview.exists()
+    assert survivor.read_bytes() == b"keep"
+
+
 def test_regular_file_at_variant_path_is_refused(profile_dir: Path, archive_root: Path, make_file):
     target = make_file("12/dash_preview", b"keep")
 
