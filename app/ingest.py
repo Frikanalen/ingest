@@ -171,7 +171,7 @@ class Ingester:
         archive but nothing is coming for it, and the upload still sitting in
         the tusd volume is the evidence -- whereas unlinking first would leave
         a video that is archived, unqueued, and indistinguishable from one that
-        finished. Either way `scripts/backfill.py <id> --apply` is the recovery.
+        finished. Either way `fk archive backfill <id> --apply` is the recovery.
 
         The kind is sent explicitly because the column it would otherwise
         default to decides which pool may claim the job, and because the

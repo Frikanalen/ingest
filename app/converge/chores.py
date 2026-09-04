@@ -167,9 +167,9 @@ def produce_formats(state: VideoState, desired: DesiredState) -> Fragment:
         # published leaves a complete directory nothing claims, and publishing
         # into it would collide rather than replace -- put() refuses to
         # overwrite, by design. So the swap is keyed off what is actually
-        # there, and off nothing at all when nobody has looked: the queue-side
-        # tools plan from the catalogue, and the worker that claims the video
-        # plans it again with the archive in front of it.
+        # there, and off nothing at all when nobody has looked: whoever is
+        # deciding what to queue plans from the catalogue, and the worker that
+        # claims the video plans it again with the archive in front of it.
         occupied = state.archive_was_read and str(file_format) in state.directories
 
         if registered and state.archive_was_read and not occupied:

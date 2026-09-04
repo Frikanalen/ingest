@@ -4,9 +4,10 @@ Plain data, assembled once and then never consulted again -- a chore that went
 back to the network could see a different archive halfway through deciding what
 to do about it. Everything here is what was true when the video was looked at.
 
-Reading a django-api row into these terms lives here too, because two callers
-do it: a worker, which looks up one video, and the queue-side tools, which page
-the whole catalogue. A row read two ways is a video the two disagree about.
+Reading a django-api row into these terms lives here too. Only the worker does
+it now -- the tools that page the whole catalogue to decide what to queue are
+`fk archive` in fk-cli -- but the shape below still admits a video nobody read
+the archive for, because that is what those tools plan from.
 """
 
 from collections.abc import Mapping
@@ -69,9 +70,11 @@ class VideoState:
     #: Every directory directly under <id>/, and what is in it -- or None when
     #: the archive was never read. Present and empty means the directory exists
     #: and holds nothing, which is a different answer from nobody having
-    #: looked: the queue-side tools decide what to queue from the catalogue
-    #: alone, and a chore must not report media missing on the strength of a
-    #: listing it never made.
+    #: looked: a chore must not report media missing on the strength of a
+    #: listing it never made. Nothing in this repository passes None any more,
+    #: since the caller that planned from the catalogue alone now lives in
+    #: fk-cli. It stays because it is what makes a chore safe to ask without an
+    #: archive, which is the property that let those tools leave at all.
     directories: Mapping[str, tuple[ArchiveEntry, ...]] | None = None
     duration: str | None = None
     framerate: int | None = None
