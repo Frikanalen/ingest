@@ -57,7 +57,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             build-essential debhelper dh-python pybuild-plugin-pyproject \
-            python3-all python3-setuptools
+            python3-all python3-setuptools sudo
 
       # A build on a branch is a check that the packaging still works, so the
       # version is deliberately one nothing would install by accident.
@@ -108,6 +108,28 @@ jobs:
           refuse fk-archive ci move 12/broadcast/a.mov 12/original/a.mov
           refuse fk-archive ci purge-trash --older-than 0
           refuse fk-archive ci gc
+
+          # A sudoers file sudo will not read is one it ignores, so an
+          # unreadable or unparseable rule leaves fk-archive installed and
+          # unreachable rather than failing loudly. `visudo -c` checks the
+          # whole of /etc/sudoers and everything it includes, this file now
+          # among them; the mode is checked separately because sudo skips a
+          # group- or world-writable file without saying so.
+          visudo -c > /dev/null
+          [ "$(stat -c '%a %U %G' /etc/sudoers.d/fk-archive-utils)" = "440 root root" ]
+
+          # What the rule grants, asked of sudo itself rather than read off
+          # the file. `sudo -l -U` answers for another account without running
+          # anything, so this is the same question the storage host asks at
+          # publish time -- and the pinning that the whole profile design
+          # exists for is the second refusal: staging's account cannot reach
+          # production's archive even though both rules are in this one file.
+          useradd -M ingest-staging
+          useradd -M archive-manager-staging
+          allowed() { sudo -U ingest-staging -u archive-manager-staging -l "$@" > /dev/null; }
+          allowed /usr/bin/fk-archive staging publish 12/original/a.mov --size 5
+          refuse allowed /usr/bin/fk-archive prod publish 12/original/a.mov --size 5
+          refuse allowed /usr/bin/fk-archive-purge-trash staging --older-than 0
 
           # A packaging mistake that left a command unable to refuse a path
           # would pass every unit test, because the unit tests import the

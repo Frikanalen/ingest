@@ -2,5 +2,23 @@
 
 export PYBUILD_NAME=fk-archive-utils
 
+SUDOERS = debian/sudoers.d/fk-archive-utils
+INSTALLED_SUDOERS = debian/fk-archive-utils/etc/sudoers.d/fk-archive-utils
+
 %:
 	dh $@ --with python3 --buildsystem=pybuild
+
+# A syntax error in a file under /etc/sudoers.d is not a broken feature, it is
+# a host where nobody can run sudo at all -- so the file is parsed here, at
+# build time, rather than discovered by the first person who needs root after
+# an upgrade.
+override_dh_install:
+	visudo -c -f $(SUDOERS) > /dev/null
+	dh_install
+
+# sudo refuses to read a sudoers file that anyone but its owner may write, and
+# ignores one it will not read. dh_fixperms would leave this 0644, which is
+# exactly that case: installed, parseable, and silently not in force.
+override_dh_fixperms:
+	dh_fixperms
+	chmod 0440 $(INSTALLED_SUDOERS)
