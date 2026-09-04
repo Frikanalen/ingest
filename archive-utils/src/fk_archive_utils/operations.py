@@ -1,13 +1,13 @@
-"""The four things anything is allowed to do to the archive.
+"""The five things anything is allowed to do to the archive.
 
-Publish a file, move a file inside one video, trash a directory, and purge
-what has been in the trash long enough. That is the entire set: it is what the
-ingest engine's `ArchiveSession` actually calls, boiled down until each one is
-a single rename that either happens or does not.
+Publish a file, move a file inside one video, trash a directory, permanently
+delete one explicitly allowed regenerable variant, and purge what has been in
+the trash long enough. That is the entire set, boiled down until each operation
+has the narrowest subject its caller needs.
 
-Only two of them are reachable over SSH. `fk-archive` offers publish and
-trash; move and purge are operator tools with their own entry points, because
-neither is something a running ingest engine has any reason to ask for.
+Three of them are reachable over SSH. `fk-archive` offers publish, trash and
+delete-variant; move and purge are operator tools with their own entry points,
+because neither is something a running ingest engine has any reason to ask for.
 
 Two properties are load-bearing and are worth stating once here rather than
 per operation:
@@ -18,10 +18,10 @@ replacing -- `rename(2)` would replace silently, and there is no portable
 no-clobber rename to reach for. The archive is exported read-only to the
 playout hosts, and a file swapped under a reader is worse than a refusal.
 
-**Nothing is ever destroyed.** Trash is a rename into `.trash/<stamp>/`, and
-the only code in this package that can unlink archived media is `purge`, which
-ships as a separate command precisely so the ingest account's sudoers rule can
-leave it out.
+**Nothing the ingest account can reach destroys anything that cannot be rebuilt
+from the original.** Trash is a rename into `.trash/<stamp>/`; purge is kept in
+a separate operator command; and the one destructive SSH verb is restricted to
+an explicit allowlist of cheap, regenerable derivatives.
 """
 
 import os
@@ -45,6 +45,13 @@ CHUNK_BYTES = 4 * 1024 * 1024
 STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 STAMP_LENGTH = len(datetime(2000, 1, 1, tzinfo=UTC).strftime(STAMP_FORMAT))
 
+#: Variants `delete-variant` may remove. An allowlist rather than a list of
+#: protected names, because the failure mode of a denylist is that a variant
+#: added later is deletable by default and nobody revisits this file. The
+#: property wanted is "regenerable from the original, and cheap enough that
+#: destroying it is not an incident" -- which today is exactly one thing.
+DELETABLE_VARIANTS = frozenset({"dash_preview"})
+
 
 @dataclass(frozen=True)
 class Result:
@@ -57,6 +64,9 @@ class Result:
     #: undone by hand.
     destination: str | None = None
     bytes_written: int | None = None
+    deleted: bool | None = None
+    files_removed: int | None = None
+    bytes_removed: int | None = None
 
 
 def publish(
@@ -248,6 +258,82 @@ def _is_regular_file(info: os.stat_result) -> bool:
     return stat.S_ISREG(info.st_mode)
 
 
+def delete_variant(profile: Profile, path: ArchivePath) -> Result:
+    """Permanently remove one explicitly deletable derivative variant.
+
+    This is narrower than trash: its subject is always exactly one variant of
+    one video, and the allowlist contains only media that is both regenerable
+    from the original and cheap enough to destroy routinely. Keeping previews
+    out of `.trash` preserves that directory as a signal that an operator may
+    need to inspect something before purge destroys it.
+
+    `rmtree` is used for the same reason as in `purge`: CPython uses a
+    descriptor-based, symlink-safe walk on Linux. Unlike purge, this operation
+    is reachable by the ingest account, so its initial name is resolved
+    relative to the already-validated parent descriptor as well.
+    """
+    if path.name not in DELETABLE_VARIANTS:
+        raise UsageError(f"variant is not deletable: {path.name!r}")
+
+    with SafeRoot(profile.root) as archive:
+        try:
+            info = archive.lstat(path.parts)
+        except NotFound:
+            # A missing video and a missing variant are the same requested end
+            # state. In particular, neither is a failure worth retrying.
+            info = None
+        if info is None:
+            return Result("delete-variant", str(path), deleted=False)
+        if not stat.S_ISDIR(info.st_mode):
+            raise UsageError(f"{path} is not a directory")
+
+        with archive.directory(path.parent) as parent:
+            target = os.open(path.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            try:
+                files_removed, bytes_removed = _tree_usage(target)
+            finally:
+                os.close(target)
+            shutil.rmtree(path.name, dir_fd=parent)
+            fsync_dir(parent)
+
+    return Result(
+        "delete-variant",
+        str(path),
+        deleted=True,
+        files_removed=files_removed,
+        bytes_removed=bytes_removed,
+    )
+
+
+def _tree_usage(directory: int) -> tuple[int, int]:
+    """Count non-directories through an open directory, without following links.
+
+    Symlinks count as files, and their byte count is the length of the link text
+    reported by lstat rather than the size of anything they point to.
+    """
+    files = 0
+    size = 0
+    with os.scandir(directory) as entries:
+        for entry in entries:
+            info = entry.stat(follow_symlinks=False)
+            if stat.S_ISDIR(info.st_mode):
+                nested = os.open(
+                    entry.name,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                    dir_fd=directory,
+                )
+                try:
+                    nested_files, nested_size = _tree_usage(nested)
+                finally:
+                    os.close(nested)
+                files += nested_files
+                size += nested_size
+            else:
+                files += 1
+                size += info.st_size
+    return files, size
+
+
 @dataclass(frozen=True)
 class PurgeCandidate:
     name: str
@@ -264,9 +350,10 @@ def purge(
 ) -> list[PurgeCandidate]:
     """Delete trash entries stamped longer than `older_than_days` ago.
 
-    The only thing in this package that destroys anything, which is why it
-    ships as its own command: the ingest account's sudoers rule names the
-    other tool, so nothing the ingest engine can reach has a way to call this.
+    The only operation that destroys archived material which may not be
+    regenerable from the original, which is why it ships as its own command:
+    the ingest account's sudoers rule names the other tool, so nothing the
+    ingest engine can reach has a way to call this.
 
     An entry whose name does not begin with a timestamp is left alone and
     reported. Something put it there that was not `trash`, and guessing its

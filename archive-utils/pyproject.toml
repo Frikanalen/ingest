@@ -3,9 +3,10 @@ name = "fk-archive-utils"
 version = "0.1.0"
 description = "Privileged, well-defined mutations of a Frikanalen media archive"
 readme = "README.md"
-# Debian 13 ships 3.13. Nothing here needs anything newer than tomllib, which
-# arrived in 3.11, so the floor is set where the oldest interesting host is.
-requires-python = ">=3.11"
+# Debian 13 ships 3.13, which is the oldest Python on a storage host this
+# package supports. delete-variant uses shutil.rmtree relative to an already
+# validated directory descriptor so it never re-resolves the archive path.
+requires-python = ">=3.13"
 # PyYAML, and only for the one-shot broadcast migration, which reads the API
 # token fk-cli logged in with out of ~/.frikanalen.yaml. Every command an SSH
 # session can reach imports the standard library and nothing else -- those run
