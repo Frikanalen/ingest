@@ -18322,13 +18322,6 @@ components:
           format: date-time
           nullable: true
           description: Time the original video for the program was uploaded
-        ogvUrl:
-          type: string
-          nullable: true
-          readOnly: true
-        largeThumbnailUrl:
-          type: string
-          readOnly: true
       required:
       - categories
       - createdTime
@@ -18336,9 +18329,7 @@ components:
       - durationSec
       - files
       - id
-      - largeThumbnailUrl
       - name
-      - ogvUrl
       - organization
       - series
       - updatedTime
@@ -18452,13 +18443,6 @@ components:
           format: date-time
           nullable: true
           description: Time the original video for the program was uploaded
-        ogvUrl:
-          type: string
-          nullable: true
-          readOnly: true
-        largeThumbnailUrl:
-          type: string
-          readOnly: true
       required:
       - categories
       - createdTime
@@ -18466,9 +18450,7 @@ components:
       - durationSec
       - files
       - id
-      - largeThumbnailUrl
       - name
-      - ogvUrl
       - series
       - updatedTime
     VideoCreateRequest:
