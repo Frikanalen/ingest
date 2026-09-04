@@ -81,7 +81,7 @@ def interpret(command: str, returncode: int | None, stdout: bytes, stderr: bytes
     if returncode == 0:
         return _parse(command, stdout)
 
-    message = _refusal(command, returncode, stderr)
+    message = _refusal(command, returncode, stdout, stderr)
     if returncode == ALREADY_EXISTS:
         raise FileAlreadyArchived(message)
     if returncode == NOT_FOUND:
@@ -102,12 +102,25 @@ def _parse(command: str, stdout: bytes) -> dict:
     return result
 
 
-def _refusal(command: str, returncode: int | None, stderr: bytes) -> str:
+def _refusal(command: str, returncode: int | None, stdout: bytes, stderr: bytes) -> str:
     """The sentence to raise, preferring the far end's own.
 
-    It already names the path and what was wrong with it. The command is added
-    only when there was nothing on stderr -- a process killed by a signal, say
-    -- because otherwise there would be nothing at all to go and look at.
+    It already names the path and what was wrong with it. Stderr first,
+    because that is where everything in this protocol deliberately explains
+    itself, and where a refusal that made it as far as `fk-archive` will be.
+
+    Stdout is read only when stderr was empty, and is worth reading because
+    not everything that can answer an SSH request observes the convention.
+    The forced command is run through the account's login shell, so a shell
+    that will not run it answers instead -- and `nologin` prints its sentence
+    to stdout before exiting 1. Quoting it turns "exited with 1 and said
+    nothing" back into the sentence that says why.
+
+    The command is added only when both were empty -- `/bin/false` as that
+    shell, or a process killed by a signal -- because otherwise there would be
+    nothing at all to go and look at.
     """
-    said = stderr.decode("utf-8", "replace").strip()
-    return said or f"{command} exited with {returncode} and said nothing"
+    for stream in (stderr, stdout):
+        if said := stream.decode("utf-8", "replace").strip():
+            return said
+    return f"{command} exited with {returncode} and said nothing"
