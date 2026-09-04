@@ -53,7 +53,6 @@ def test_an_unknown_setting_is_refused_rather_than_ignored(tmp_path: Path):
         'root = "relative/path"\nmanager = "m"\n',
         'root = "/a"\n',
         'root = "/a"\nmanager = ""\n',
-        'root = "/a"\nmanager = "m"\nsftp_server = "sftp-server"\n',
     ],
 )
 def test_an_unusable_profile_says_what_is_wrong_with_it(tmp_path: Path, body: str):

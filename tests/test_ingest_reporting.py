@@ -7,7 +7,6 @@ that now carry that news back.
 """
 
 import shutil
-from pathlib import PurePosixPath
 
 import pytest
 import pytest_asyncio
@@ -82,7 +81,7 @@ def archive(ssh_server, archive_root) -> SshArchiveStore:
             host=ssh_server.host,
             port=ssh_server.port,
             username=ssh_server.username,
-            dir=PurePosixPath(archive_root),
+            dir=archive_root,
             private_key_file=ssh_server.client_key_file,
             known_hosts_file=ssh_server.known_hosts_file,
         )

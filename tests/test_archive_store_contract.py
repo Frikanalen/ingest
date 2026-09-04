@@ -1,11 +1,15 @@
 """What both archives must agree on.
 
-The two backends are meant to be interchangeable, and until now they quietly
-were not: publishing over an existing file overwrote it locally and failed over
-SFTP, so a backfill -- which republishes by definition -- would have passed in
-development and failed against file01. Every test here runs against both stores
-so that a divergence like that shows up as a failure rather than as a surprise
-in production.
+The two backends are meant to be interchangeable, and they have quietly not
+been before: publishing over an existing file once overwrote it locally and
+failed against file01, so a backfill -- which republishes by definition --
+would have passed in development and failed in production. Every test here runs
+against both stores so that a divergence like that shows up as a failure rather
+than as a surprise.
+
+They share their read half outright now, so what these exercise is mostly the
+mutations: those are a local rename here and a privileged command there, and
+nothing but this says the two answer alike.
 """
 
 from pathlib import PurePosixPath
@@ -52,7 +56,7 @@ async def store(request, tmp_path, archive_root):
                 host=server.host,
                 port=server.port,
                 username=server.username,
-                dir=PurePosixPath(archive_root),
+                dir=archive_root,
                 private_key_file=server.client_key_file,
                 known_hosts_file=server.known_hosts_file,
             )
@@ -135,7 +139,7 @@ async def test_get_leaves_no_partial_file_behind(store, tmp_path, source_file):
 
 @pytest.mark.asyncio
 async def test_get_of_a_missing_file_raises_file_not_found(store, tmp_path):
-    """A row pointing at nothing is a condition to report, not an SFTP detail."""
+    """A row pointing at nothing is a condition callers act on, not an errno."""
     async with store.open() as archive:
         with pytest.raises(FileNotFoundError):
             await archive.get(PurePosixPath("99999/original/gone.mp4"), tmp_path / "gone.mp4")

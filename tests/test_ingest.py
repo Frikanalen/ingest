@@ -14,7 +14,6 @@ archive.
 import re
 import shutil
 import subprocess
-from pathlib import PurePosixPath
 
 import pytest
 import pytest_asyncio
@@ -81,7 +80,7 @@ def archive(ssh_server, archive_root) -> SshArchiveStore:
             host=ssh_server.host,
             port=ssh_server.port,
             username=ssh_server.username,
-            dir=PurePosixPath(archive_root),
+            dir=archive_root,
             private_key_file=ssh_server.client_key_file,
             known_hosts_file=ssh_server.known_hosts_file,
         )
@@ -152,9 +151,7 @@ def uploaded_file_with_tone(upload_dir, color_bars_video_with_tone):
 @pytest_asyncio.fixture
 async def ingested_with_tone(archive, django_api, work_dir, uploaded_file_with_tone):
     metadata = await MetadataExtractor().do_probe(uploaded_file_with_tone)
-    await Ingester(archive=archive, django_api=django_api).ingest(
-        VIDEO_ID, uploaded_file_with_tone, metadata
-    )
+    await Ingester(archive=archive, django_api=django_api).ingest(VIDEO_ID, uploaded_file_with_tone, metadata)
     await drain_one(archive, django_api, work_dir)
 
 

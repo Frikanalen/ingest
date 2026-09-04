@@ -1,11 +1,11 @@
 """The env-var contract for choosing an archive.
 
-FK_ARCHIVE_HOST is the switch: without it the archive is a local directory and
-FK_ARCHIVE_DIR keeps its original meaning; with it, FK_ARCHIVE_DIR becomes a
-path on the archive host.
+FK_ARCHIVE_HOST is the switch: without it the archive is a local directory
+ingest writes to; with it, FK_ARCHIVE_DIR is where the archive is mounted
+read-only and the host is asked to perform every mutation.
 """
 
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import pytest
 
@@ -64,7 +64,7 @@ def test_archive_host_selects_ssh(monkeypatch):
 
     assert archive == SshArchiveSettings(
         host="file01",
-        dir=PurePosixPath("/tank/media"),
+        dir=Path("/tank/media"),
         username="ingest",
         private_key_file=Path("/etc/ingest/ssh/id_ed25519"),
         known_hosts_file=Path("/etc/ingest/ssh/known_hosts"),
@@ -78,7 +78,7 @@ def test_ssh_archive_has_usable_defaults(monkeypatch):
 
     assert isinstance(archive, SshArchiveSettings)
     assert archive.port == 22
-    assert archive.dir == PurePosixPath("/archive/media")
+    assert archive.dir == Path("/archive/media")
 
 
 def test_unknown_archive_settings_are_rejected(monkeypatch):
@@ -92,6 +92,8 @@ def test_the_deployed_environment_parses(monkeypatch, tmp_path):
 
     Mirrors chart/templates/_helpers.tpl; update both together.
     """
+    mount = tmp_path / "archive"
+    mount.mkdir()
     private_key_file = tmp_path / "id_ed25519"
     private_key_file.touch()
     known_hosts_file = tmp_path / "known_hosts"
@@ -101,7 +103,9 @@ def test_the_deployed_environment_parses(monkeypatch, tmp_path):
         "FK_ARCHIVE_HOST": "file01",
         "FK_ARCHIVE_PORT": "22",
         "FK_ARCHIVE_USERNAME": "ingest",
-        "FK_ARCHIVE_DIR": "/archive/media",
+        # /archive/media in the chart; a path that exists here, because this is
+        # now the mount point and unusable_reason() checks the volume is there.
+        "FK_ARCHIVE_DIR": str(mount),
         "FK_ARCHIVE_PRIVATE_KEY_FILE": str(private_key_file),
         "FK_ARCHIVE_KNOWN_HOSTS_FILE": str(known_hosts_file),
         "FK_ARCHIVE_REQUIRED": "true",

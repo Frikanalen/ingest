@@ -8,15 +8,15 @@ from pathlib import Path, PurePosixPath
 
 from app.archive_store.base import (
     TRASH_DIR,
-    ArchiveEntry,
+    TRASH_STAMP_FORMAT,
     ArchiveError,
     ArchiveSession,
     ArchiveStore,
     FileAlreadyArchived,
     check_removable,
     trash_path,
-    trash_stamp,
 )
+from app.archive_store.directory import DirectoryReader
 
 logger = getLogger(__name__)
 
@@ -40,15 +40,14 @@ def staging_path(destination: PurePosixPath) -> PurePosixPath:
     return SPOOL_DIR / destination
 
 
-class LocalArchiveSession(ArchiveSession):
-    def __init__(self, root: Path):
-        self.root = root
+class LocalArchiveSession(DirectoryReader, ArchiveSession):
+    """The development archive: one directory, read and written in place.
 
-    def resolve(self, destination: PurePosixPath) -> Path:
-        return self.root / destination
-
-    async def exists(self, destination: PurePosixPath) -> bool:
-        return self.resolve(destination).exists()
+    Deliberately as strict as the storage host about what it will accept, since
+    it is what code gets written against. A local archive that published over a
+    file, or trashed one, would let something be written here that file01 then
+    declines to run.
+    """
 
     async def put(self, source: Path, destination: PurePosixPath) -> None:
         target = self.resolve(destination)
@@ -80,24 +79,6 @@ class LocalArchiveSession(ArchiveSession):
             staged.unlink(missing_ok=True)
             self.tidy_spool(staged.parent)
 
-    async def list_dir(self, directory: PurePosixPath) -> list[ArchiveEntry]:
-        resolved = self.resolve(directory)
-        if not resolved.is_dir():
-            return []
-
-        entries = [ArchiveEntry(path=directory / child.name, is_dir=child.is_dir()) for child in resolved.iterdir()]
-        return sorted(entries, key=lambda entry: entry.path)
-
-    async def get(self, source: PurePosixPath, destination: Path) -> None:
-        origin = self.resolve(source)
-        staged = destination.with_name(destination.name + ".part")
-
-        logger.info("Copying %s to %s", origin, destination)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-
-        await asyncio.to_thread(shutil.copy2, origin, staged)
-        staged.replace(destination)
-
     async def trash(self, path: PurePosixPath) -> PurePosixPath:
         """Rename `path` under `.trash/<stamp>/`, the way fk-archive does.
 
@@ -111,7 +92,7 @@ class LocalArchiveSession(ArchiveSession):
         if not origin.exists():
             raise FileNotFoundError(f"{path} is not in the archive")
 
-        destination = trash_path(path, self._unique_stamp(trash_stamp(datetime.now(UTC))))
+        destination = trash_path(path, self._unique_stamp(datetime.now(UTC).strftime(TRASH_STAMP_FORMAT)))
         target = self.resolve(destination)
 
         logger.info("Trashing %s to %s", origin, target)

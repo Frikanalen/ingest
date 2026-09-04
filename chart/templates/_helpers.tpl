@@ -57,6 +57,41 @@ Where the archive SSH credentials are mounted.
 {{- end }}
 
 {{/*
+The archive, mounted read-only, and the volume behind it.
+
+Defined once and used by both Deployments: every pod reads the archive, and a
+pod that has it at a different path than FK_ARCHIVE_DIR reads an empty one.
+
+Read-only is not tidiness. The engine publishes by asking `fk-archive` on the
+storage host to do it, under an account of its own, precisely so that no ingest
+process holds write access to the archive -- see archive-utils/. A read-write
+mount hands that access straight back, and ingest logs a warning at startup if
+it finds one.
+
+Both are used inside the blocks that already ask whether the deployed archive
+is in play, so neither repeats the condition.
+*/}}
+{{- define "ingest.archiveMount" -}}
+- name: archive
+  mountPath: {{ .Values.archive.dir }}
+  readOnly: true
+{{- end }}
+
+{{- define "ingest.archiveVolume" -}}
+- name: archive
+  {{- with .Values.archive.mount.existingClaim }}
+  persistentVolumeClaim:
+    claimName: {{ . }}
+    readOnly: true
+  {{- else }}
+  nfs:
+    server: {{ .Values.archive.mount.nfs.server | quote }}
+    path: {{ .Values.archive.mount.nfs.path | quote }}
+    readOnly: true
+  {{- end }}
+{{- end }}
+
+{{/*
 tusd's arguments.
 
 tusd runs beside ingest in the same pod, so it reaches the hook endpoint over
@@ -132,8 +167,14 @@ How ingest authenticates to django-api. Shared by everything that talks to it.
 {{/*
 Where finished files go, and anything else the deployment wants to set.
 
-Only FK_ARCHIVE_HOST switches ingest from a local archive to SSH; without it
-the remaining archive settings are inert.
+Only FK_ARCHIVE_HOST switches ingest from a local archive to the one on the
+storage host; without it the remaining archive settings are inert.
+
+FK_ARCHIVE_DIR is where the archive is mounted in the container, not a path on
+the archive host. Writes never name a root at all -- `fk-archive` looks it up
+by profile -- so this and the profile's `root` no longer have to spell the same
+string; the mount has to be of that directory, which is ingest.archiveVolume's
+business.
 */}}
 {{- define "ingest.archiveEnv" -}}
 {{- if .Values.archive.ssh.enabled }}

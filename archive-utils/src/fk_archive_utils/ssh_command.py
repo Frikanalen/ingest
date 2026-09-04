@@ -6,8 +6,12 @@ Installed as the forced command on the ingest account's authorised key:
 
 sshd runs this instead of whatever the client asked for, and puts what the
 client asked for in SSH_ORIGINAL_COMMAND. Everything it will dispatch to is
-here, and it is two things: a read-only SFTP server, and `fk-archive` by way
-of sudo.
+here, and it is one thing: `fk-archive` by way of sudo.
+
+One thing, because reads do not come this way. The archive is exported
+read-only over NFS and the engine mounts it, so a backfill fetching an
+original never opens an SSH channel at all -- which leaves this key with no
+reason to reach a file descriptor on the storage host, and no way to.
 
 This is not the security boundary -- it runs as the unprivileged ingest
 account, and sudoers is what actually decides which command may be run as the
@@ -15,11 +19,9 @@ archive account. What it removes is the step before that: without it, an
 account that can exec anything at all is an account a stolen key can run
 arbitrary code as, on the host holding every video Frikanalen has.
 
-The SFTP half is why the split exists. The ingest engine still reads from the
-archive constantly -- a backfill fetches the original before it can rebuild
-anything -- and `-R` gives it every one of those reads with no way to write.
-The writes go through the sudo half instead, where each one is a named
-mutation rather than an open file descriptor.
+What it adds is the profile. `fk-archive` takes it as its first argument and
+this supplies it, so a key issued for staging cannot name production's archive
+however it is invoked.
 """
 
 import os
@@ -40,18 +42,12 @@ FK_ARCHIVE = "/usr/bin/fk-archive"
 #: anyone but root can write.
 SUDO = "/usr/bin/sudo"
 
-#: What sshd's `Subsystem sftp` line can be set to. The client does not choose
-#: this -- sshd substitutes its own configured command for a subsystem request
-#: -- so this is a check that the request really was for SFTP rather than a
-#: gate on anything the caller controls.
-SFTP_SERVERS = frozenset({"sftp-server", "internal-sftp", "sftp"})
-
 
 def resolve(original_command: str, profile: Profile) -> list[str]:
     """The argv to exec for `original_command`, or a refusal.
 
-    Separated from the exec so the dispatch table is testable as a function
-    from a string to a command line, which is the whole of what it decides.
+    Separated from the exec so the dispatch is testable as a function from a
+    string to a command line, which is the whole of what it decides.
     """
     try:
         tokens = shlex.split(original_command)
@@ -62,12 +58,6 @@ def resolve(original_command: str, profile: Profile) -> list[str]:
         raise UsageError("this account runs archive commands and nothing else; there is no shell here")
 
     requested = Path(tokens[0]).name
-
-    if requested in SFTP_SERVERS:
-        # -R is read-only: the server refuses open-for-write, rename, remove,
-        # mkdir and setstat outright, so this half of the account cannot alter
-        # the archive however the client asks.
-        return [profile.sftp_server, "-R"]
 
     if requested == "fk-archive":
         # The profile is supplied here rather than taken from the request, so

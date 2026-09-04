@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path, PurePosixPath
 
 
@@ -24,11 +23,6 @@ TRASH_DIR = PurePosixPath(".trash")
 #: --older-than` parses back out of it. Both archives spell it the same way,
 #: because the tool that purges the trash reads it off the name.
 TRASH_STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
-
-
-def trash_stamp(when: datetime) -> str:
-    """The name of the directory a removal made at `when` goes under."""
-    return when.strftime(TRASH_STAMP_FORMAT)
 
 
 def check_removable(path: PurePosixPath) -> PurePosixPath:
@@ -78,16 +72,55 @@ class ArchiveEntry:
         return self.path.name
 
 
-class ArchiveSession(ABC):
-    """A live connection to the archive, held for the duration of one job.
+class ArchiveReader(ABC):
+    """Everything the archive can be asked, and nothing it can be asked to do.
 
-    Destinations are always relative to the archive root, so callers never need
-    to know whether the archive is a local directory or another host.
+    Reading and writing arrive by different routes in a deployment -- the
+    archive is mounted read-only and mutated by asking a privileged command --
+    so they are different interfaces here too. A caller that only looks at the
+    archive says so by taking this, and then holds nothing it could alter the
+    archive with even by mistake.
+
+    Paths are always relative to the archive root, so callers never need to
+    know whether the archive is a local directory or a mounted export.
     """
 
     @abstractmethod
     async def exists(self, destination: PurePosixPath) -> bool:
         """Whether anything already occupies `destination`."""
+
+    @abstractmethod
+    async def list_dir(self, directory: PurePosixPath) -> list[ArchiveEntry]:
+        """What is directly inside `directory`, sorted by path.
+
+        A directory that does not exist lists as empty rather than raising:
+        every caller is asking a question about the archive's contents, and
+        "nothing there" is an answer to that question rather than an error.
+        """
+
+    @abstractmethod
+    async def get(self, source: PurePosixPath, destination: Path) -> None:
+        """Copy the archived file `source` out to the local path `destination`.
+
+        Copied rather than read in place, and staged under a temporary name
+        while it is: ffmpeg reads its input many times over the course of a
+        job, and a mount that hiccups an hour into an encode should cost a
+        retry of the copy rather than the encode.
+        """
+
+    async def assert_absent(self, destination: PurePosixPath) -> None:
+        """Raise FileAlreadyArchived if `destination` is already taken."""
+        if await self.exists(destination):
+            raise FileAlreadyArchived(f"{destination} already exists in the archive")
+
+
+class ArchiveSession(ArchiveReader, ABC):
+    """A reader that can also be asked to change what it reads.
+
+    Held for the duration of one job. In a deployment the two halves reach the
+    archive by different routes and as different accounts, which is the reason
+    the interfaces are separate -- see `SshArchiveSession`.
+    """
 
     @abstractmethod
     async def put(self, source: Path, destination: PurePosixPath) -> None:
@@ -103,24 +136,6 @@ class ArchiveSession(ABC):
         whole format directory instead, because a new profile can emit a
         different set of files and overwriting one by one would leave the old
         profile's leftovers beside the new output forever.
-        """
-
-    @abstractmethod
-    async def list_dir(self, directory: PurePosixPath) -> list[ArchiveEntry]:
-        """What is directly inside `directory`, sorted by path.
-
-        A directory that does not exist lists as empty rather than raising:
-        every caller is asking a question about the archive's contents, and
-        "nothing there" is an answer to that question rather than an error.
-        """
-
-    @abstractmethod
-    async def get(self, source: PurePosixPath, destination: Path) -> None:
-        """Copy the archived file `source` out to the local path `destination`.
-
-        The reverse of put(), and staged the same way for the same reason: a
-        transfer that dies partway must not leave something that later reads as
-        a complete original.
         """
 
     @abstractmethod
@@ -142,11 +157,6 @@ class ArchiveSession(ABC):
         landed. A move it could compose out of would be a move it could point
         anywhere.
         """
-
-    async def assert_absent(self, destination: PurePosixPath) -> None:
-        """Raise FileAlreadyArchived if `destination` is already taken."""
-        if await self.exists(destination):
-            raise FileAlreadyArchived(f"{destination} already exists in the archive")
 
 
 class ArchiveStore(ABC):

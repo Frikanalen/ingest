@@ -29,11 +29,12 @@ class LocalArchiveSettings(BaseModel):
 
 
 class SshArchiveSettings(BaseModel):
-    """An archive on another host, read over SSH and mutated through it.
+    """An archive read off a mount and mutated by asking the host that owns it.
 
-    The account named here has no write access to the archive. Reads go to a
-    read-only SFTP server; every mutation is a request to `fk-archive`, which
-    the storage host runs under sudo as the account that owns the media. See
+    The account named here has no write access to the archive. Reads come off
+    the archive's NFS export, mounted read-only into this container; every
+    mutation is a request to `fk-archive`, which the storage host runs under
+    sudo as the account that owns the media. See
     `app/archive_store/fk_archive.py`.
     """
 
@@ -42,13 +43,14 @@ class SshArchiveSettings(BaseModel):
     host: str = Field(description="Host serving the archive, e.g. file01")
     port: int = Field(default=22, description="SSH port on the archive host")
     username: str = Field(default="ingest", description="SSH user to log in as")
-    dir: PurePosixPath = Field(
-        default=PurePosixPath("/archive/media"),
-        description=(
-            "Directory on the archive host holding the archive. This is the path ingest reads from; "
-            "writes are relative to the root the fk-archive profile on that host declares, so the two "
-            "must name the same directory."
-        ),
+    # A local path, unlike before: reads come off the mount rather than from
+    # the storage host's own filesystem. It no longer has to spell the same
+    # string as the profile's `root` over there -- it has to be a mount *of*
+    # that directory, which is the chart's business rather than something two
+    # settings could be compared to check.
+    dir: Path = Field(
+        default=Path("/archive/media"),
+        description="Where the archive is mounted, read-only, in this container",
     )
     private_key_file: Path | None = Field(default=None, description="SSH private key to authenticate with")
     known_hosts_file: Path | None = Field(default=None, description="known_hosts file used to verify the archive host")
@@ -70,6 +72,12 @@ class SshArchiveSettings(BaseModel):
         developer's own ~/.ssh would make the archive depend on whoever happens
         to be running the process.
         """
+        if not self.dir.is_dir():
+            # An unmounted volume looks exactly like an empty archive from the
+            # read side: every video observes as having nothing archived, and a
+            # worker would cheerfully rebuild the lot. Caught at startup, where
+            # it is one pod failing to come up rather than a night of that.
+            return f"the archive is not mounted at {self.dir}"
         if self.private_key_file is None:
             return "no SSH private key configured"
         if not self.private_key_file.is_file():

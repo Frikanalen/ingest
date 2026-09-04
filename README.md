@@ -66,12 +66,14 @@ Serving it needs HTTP range requests, CORS, and `application/dash+xml` on the `.
 
 ## Archive
 
-The archive is either a local directory or a directory on another host reached over SSH. Setting `FK_ARCHIVE_HOST` selects the latter, and `FK_ARCHIVE_DIR` then refers to a path on that host.
+The archive is either a local directory ingest writes to, or the deployed one, which it **reads off a read-only mount and mutates by asking the host that owns it**. Setting `FK_ARCHIVE_HOST` selects the latter; `FK_ARCHIVE_DIR` is then where that mount appears in the container.
+
+Reading and writing arriving by different routes is the whole shape of it, and it is why `ArchiveReader` and `ArchiveSession` are separate interfaces in [`base.py`](app/archive_store/base.py). A listing, a `stat` and one copy of the original per job are filesystem calls against the mount, so nothing on the read path needs the archive host to be up, or a key, or a connection at all. Everything that changes the archive is a request to a named command — see [Writing without write access](#writing-without-write-access).
 
 | Setting | Meaning |
 | --- | --- |
-| `FK_ARCHIVE_DIR` | Where finished files go. A local path, or a path on `FK_ARCHIVE_HOST` — see [Writing without write access](#writing-without-write-access). |
-| `FK_ARCHIVE_HOST` | Archive host. Unset means archive locally. |
+| `FK_ARCHIVE_DIR` | Where the archive is. A local directory, or — with `FK_ARCHIVE_HOST` — where the archive is mounted read-only in this container. |
+| `FK_ARCHIVE_HOST` | Archive host, asked to perform every mutation. Unset means archive locally. |
 | `FK_ARCHIVE_PORT` | SSH port, default `22`. |
 | `FK_ARCHIVE_USERNAME` | SSH user, default `ingest`. |
 | `FK_ARCHIVE_PRIVATE_KEY_FILE` | SSH private key to authenticate with. |
@@ -82,19 +84,27 @@ The archive is either a local directory or a directory on another host reached o
 
 Files are staged below the archive's `.spool/` directory and only appear at
 their destination once complete, so an interrupted transfer cannot leave a
-truncated file that later looks like a finished one. Over SSH that staging
-happens on the far side of the connection — see below.
+truncated file that later looks like a finished one. In a deployment that
+staging happens on the far side of the connection — see below.
+
+**The mount must be read-only, and it must be a mount of the directory the
+`fk-archive` profile on the storage host calls its root.** Ingest warns at
+startup if it finds the archive mounted read-write, since that hands back
+exactly the write access the rest of this arrangement exists to remove. It
+refuses to start if the archive is not mounted at all: an unmounted volume
+reads as an archive holding nothing, every video then observes as having no
+media, and a worker would set about rebuilding the lot.
 
 Both SSH credentials must be given explicitly — ingest will not reach for the running user's `~/.ssh`, and it never disables host key verification. If either is missing, ingest logs a warning and archives to `FK_ARCHIVE_FALLBACK_DIR` instead, so you can run it locally without setting up SSH at all. **Set `FK_ARCHIVE_REQUIRED=true` anywhere that actually archives over SSH**: otherwise a secret that fails to mount leaves ingest quietly writing to scratch space, where files are lost on restart.
 
 ### Writing without write access
 
-**The SSH account has no write access to the archive.** It reads over SFTP,
-which the storage host serves read-only, and every mutation is a request to
-[`fk-archive`](archive-utils/), a command that host runs under sudo as the
-account owning the media. A stolen key or a bug in the engine can therefore ask
-for a file to be published or a directory to be trashed, and cannot do anything
-else to the archive at all.
+**The SSH account has no write access to the archive, and no read access
+either.** Reads do not go over the connection at all — they come off the mount
+— and every mutation is a request to [`fk-archive`](archive-utils/), a command
+the storage host runs under sudo as the account owning the media. A stolen key
+can therefore ask for a file to be published or a directory to be trashed, and
+cannot do anything else on that host at all.
 
 The two mutations ingest performs are the two verbs that command has:
 
@@ -117,12 +127,14 @@ no way to sweep either. Its side of the deal is [`fk_archive.py`](app/archive_st
 which is the whole of what crosses the boundary: how a request is spelled, and
 how the exit code and the line of JSON that come back are read.
 
-**`FK_ARCHIVE_DIR` is the path ingest reads from, and the archive root is not
-an argument to any mutation** — `fk-archive` looks it up by profile name, which
-is what lets one sudoers line pin it, and what stops staging naming production's
-archive however it is invoked. So `FK_ARCHIVE_DIR` and `root` in
-`/etc/fk-archive-utils/profiles.d/<profile>.toml` have to be the same directory;
-pointing them at different ones publishes files ingest then cannot find.
+**The archive root is not an argument to any mutation** — `fk-archive` looks it
+up by profile name, which is what lets one sudoers line pin it, and what stops
+staging naming production's archive however it is invoked. `FK_ARCHIVE_DIR` no
+longer has to spell the same string as `root` in
+`/etc/fk-archive-utils/profiles.d/<profile>.toml`, as it did when reads went
+over SFTP: it has to be a *mount of* that directory, which is the chart's
+business rather than something two settings can be compared to check. Point
+them at different trees and ingest publishes files it then cannot find.
 
 Renaming archived media is not among the mutations. `ArchiveSession` has no
 `move`, and neither does `fk-archive`: moving a file inside a video happens once
@@ -287,7 +299,7 @@ Scaling down to zero stops uploads being processed. It does not fail them — th
 
 Scaling down mid-encode costs the encode. `SIGTERM` makes a worker stop claiming and finish the job it holds, but only within `terminationGracePeriodSeconds`; anything still running when that elapses is killed, and its lease expires so another worker picks the video up later. The default is an hour, which is also how long a node drain will wait for a worker.
 
-The SSH credentials come from a Kubernetes secret created outside the chart, by the `ingest_archive_account` role in the [infra](https://github.com/Frikanalen/infra) repository. The private key is generated on first run and stored only in that secret, so it never passes through Git or the vault. That role's README covers rotation, and the `authorized_keys` line that pins the key to `fk-archive-ssh <profile>` as a forced command — which is what supplies the profile ingest never sends, and what leaves the key with a read-only SFTP server and `fk-archive` and nothing else.
+The SSH credentials come from a Kubernetes secret created outside the chart, by the `ingest_archive_account` role in the [infra](https://github.com/Frikanalen/infra) repository. The private key is generated on first run and stored only in that secret, so it never passes through Git or the vault. That role's README covers rotation, and the `authorized_keys` line that pins the key to `fk-archive-ssh <profile>` as a forced command — which is what supplies the profile ingest never sends, and what leaves the key with `fk-archive` and nothing else.
 
 ## Requirements
 
@@ -376,9 +388,10 @@ scripts/generate-hook-types.sh
 uv run python -m pytest
 ```
 
-The SSH archive is tested against an in-process server shaped like the storage
-host: a read-only SFTP server, and the real `fk_archive_utils` behind an exec
-request. `archive-utils/src` is on the test path for that reason and no other —
+The deployed archive is tested against an in-process server shaped like the
+storage host: the real `fk_archive_utils` behind an exec request, with the
+archive itself a directory both ends can see, as the mount makes it.
+`archive-utils/src` is on the test path for that reason and no other —
 it is not a dependency of this package and must not become one. The two ship
 separately and agree only on a command line, an exit code and a line of JSON, so
 a stand-in for `fk-archive` would be free to keep agreeing with an engine that
