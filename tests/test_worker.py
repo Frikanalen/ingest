@@ -212,7 +212,24 @@ async def test_a_job_claimed_while_draining_is_left_to_its_lease(worker, django_
     assert await worker.run_once() is True
 
     django_api.get_files_for_video.assert_not_awaited()
-    django_api.report_ingest_state.assert_not_awaited()
+    django_api.release_ingest_job.assert_awaited_once_with(VIDEO_ID)
+
+
+@pytest.mark.asyncio
+async def test_a_claim_that_cannot_be_handed_back_still_exits(worker, django_api):
+    """The lease is the backstop and expires either way; failing the handover
+    is no reason to turn a tidy exit into a failed one."""
+
+    async def claim_then_drain(*args, **kwargs):
+        worker.drain()
+        return job()
+
+    django_api.claim_ingest_job.side_effect = claim_then_drain
+    django_api.release_ingest_job.side_effect = RuntimeError("django-api is down")
+
+    assert await worker.run_once() is True
+
+    django_api.get_files_for_video.assert_not_awaited()
 
 
 @pytest.mark.asyncio
