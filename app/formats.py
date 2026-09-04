@@ -31,13 +31,11 @@ DESIRED_FORMATS = (
 #: listing it there would make every finished video in the catalogue read as
 #: incomplete forever.
 #:
-#: A plain string rather than a VideoFileVariantEnum member because django-api
-#: has no such member yet. Everything downstream takes a str -- the template
-#: lookup, the archive path -- and VideoFileVariantEnum is a str enum, so a
-#: comparison against a registered row's variant is true either way. When the
-#: schema gains it, this becomes VideoFileVariantEnum.DASH_PREVIEW and nothing
-#: else here changes.
-DASH_PREVIEW = "dash_preview"
+#: Named here rather than used inline, because "the preview" is a decision this
+#: module owns: which variant stands in for the ladder is the same kind of
+#: statement as which formats a converged video has, even though this one is
+#: deliberately not on that list.
+DASH_PREVIEW = VideoFileVariantEnum.DASH_PREVIEW
 
 #: What a file registered before profiles carried revisions reads as. No
 #: template may claim it -- ProfileMetadata numbers revisions from 1 -- so it

@@ -7221,6 +7221,7 @@ paths:
           - broadcast
           - cloudflare_id
           - dash
+          - dash_preview
           - large_thumb
           - med_thumb
           - original
@@ -7240,6 +7241,7 @@ paths:
           * `srt` - SubRip subtitles
           * `cloudflare_id` - Cloudflare Stream identifier
           * `dash` - MPEG-DASH manifest
+          * `dash_preview` - Transient low-quality MPEG-DASH manifest
           * `webm_med` - Medium-quality WebM
       - in: query
         name: video_id
@@ -18650,6 +18652,7 @@ components:
       - srt
       - cloudflare_id
       - dash
+      - dash_preview
       - webm_med
       type: string
       description: |-
@@ -18663,6 +18666,7 @@ components:
         * `srt` - SubRip subtitles
         * `cloudflare_id` - Cloudflare Stream identifier
         * `dash` - MPEG-DASH manifest
+        * `dash_preview` - Transient low-quality MPEG-DASH manifest
         * `webm_med` - Medium-quality WebM
     VideoFiles:
       type: object
@@ -18686,6 +18690,8 @@ components:
         cloudflareId:
           $ref: '#/components/schemas/VideoFileLink'
         dash:
+          $ref: '#/components/schemas/VideoFileLink'
+        dashPreview:
           $ref: '#/components/schemas/VideoFileLink'
         webmMed:
           $ref: '#/components/schemas/VideoFileLink'

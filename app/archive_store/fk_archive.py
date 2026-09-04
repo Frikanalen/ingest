@@ -60,7 +60,11 @@ def delete_variant(variant: str, video_id: str) -> str:
     outside its own allowlist, so there is no path here for a caller to get
     wrong or for this engine to point somewhere it should not.
     """
-    return f"{COMMAND} delete-variant {shlex.quote(variant)} {shlex.quote(video_id)}"
+    # str() on the variant, not because it is not one: VideoFileVariantEnum is
+    # a str enum, so it survives shlex.quote() unchanged and only renders as
+    # its value because Enum.__format__ says so. What crosses this boundary is
+    # a command line, and it should not depend on that.
+    return f"{COMMAND} delete-variant {shlex.quote(str(variant))} {shlex.quote(str(video_id))}"
 
 
 def interpret(command: str, returncode: int | None, stdout: bytes, stderr: bytes) -> dict:
