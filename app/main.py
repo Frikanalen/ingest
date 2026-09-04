@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from pydantic import ValidationError
 from starlette.middleware.cors import CORSMiddleware
 
+from app.api.formats.routes import create_router as create_formats_router
 from app.api.health.routes import router as internal_router
 from app.api.hooks.routes import router as hooks_router
 from app.util.lifespan import lifespan
@@ -39,6 +40,13 @@ def create_app(settings: IngestAppSettings | None = None) -> FastAPI:
 
     app.include_router(internal_router, prefix="/internal")
     app.include_router(hooks_router, prefix="/tusdHooks")
+    # The one thing here that is reachable from outside the cluster. Mounted
+    # under its own prefix rather than beside the hooks so that the ingress can
+    # name one exact path and reach nothing else; see app/api/formats/routes.py.
+    app.include_router(
+        create_formats_router(settings.image if settings else ""),
+        prefix="/ingest-api",
+    )
 
     if debug:
         # Imported here so that watchdog stays unloaded when debug is off.

@@ -1,4 +1,4 @@
-{{- if and .Values.tusd.enabled .Values.ingress.enabled }}
+{{- if .Values.ingress.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -14,16 +14,20 @@ metadata:
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   rules:
-    # Only tusd is exposed. Ingest's own endpoints are the tusd hooks and a
-    # health check, which are reached over the pod's loopback.
+    # Two paths reach the pod, and nothing else does. Ingest's own endpoints
+    # are otherwise the tusd hooks and a health check, reached over the pod's
+    # loopback -- /tusdHooks in particular is what starts an ingest, so no rule
+    # here may be able to reach it.
     #
     # This shares a host with the frontend, which serves /. Traefik prefers the
     # more specific prefix, the same way /graphics and /api already coexist
-    # there. The path is tusd's own base path and is passed through unstripped,
-    # so tusd sees the URLs it advertises.
+    # there.
     - host: {{ .Values.ingress.hostname | quote }}
       http:
         paths:
+          {{- if .Values.tusd.enabled }}
+          # tusd's own base path, passed through unstripped so tusd sees the
+          # URLs it advertises.
           - path: {{ .Values.tusd.basePath }}
             pathType: Prefix
             backend:
@@ -31,6 +35,20 @@ spec:
                 name: {{ include "ingest.uploadFullname" . }}
                 port:
                   number: {{ .Values.tusd.port }}
+          {{- end }}
+          # What the deployed image can build, for whoever is deciding what to
+          # queue -- see app/api/formats/routes.py. Exact, not Prefix: this is
+          # the only rule pointing at ingest's own HTTP port, and a prefix here
+          # would put the rest of the application, hooks included, on the
+          # public internet. Keep the path in step with the router's prefix in
+          # app/main.py; nothing checks that they agree.
+          - path: /ingest-api/formats
+            pathType: Exact
+            backend:
+              service:
+                name: {{ include "ingest.uploadFullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
   tls:
     - hosts:
         - {{ .Values.ingress.hostname | quote }}

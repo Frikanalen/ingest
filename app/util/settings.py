@@ -108,6 +108,13 @@ class IngestAppSettings(BaseSettings):
     port: int = Field(default=8000, description="Port for the FastAPI server")
     host: str = Field(default="0.0.0.0", description="Host for the FastAPI server")
 
+    # Observability only: nothing is decided on the strength of it. It is
+    # reported by /ingest-api/formats so that an operator queueing work knows
+    # which image answered -- the upload pod and the worker pool roll
+    # separately, and a sweep run mid-rollout can plan against a revision half
+    # the pool cannot build yet. Empty where the deployment did not say.
+    image: str = Field(default="", description="Image this process is running, as the deployment named it")
+
     # Everything gated on this is a developer's convenience, not part of
     # serving tusd, and at least two of them are actively unwanted in a
     # deployment: FastAPI's debug mode returns tracebacks to the caller, and
