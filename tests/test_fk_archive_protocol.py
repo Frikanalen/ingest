@@ -79,6 +79,28 @@ def test_an_unknown_exit_code_is_not_mistaken_for_a_refusal_we_know():
     assert not isinstance(raised.value, FileAlreadyArchived)
 
 
+def test_a_failure_that_spoke_on_stdout_is_quoted_rather_than_dropped():
+    """The login shell answers when it will not run the forced command.
+
+    sshd runs the forced command through the account's shell, and `nologin`
+    says why on stdout before exiting 1 -- so a message read off stderr alone
+    reports the one failure the engine cannot see past as silence.
+    """
+    with pytest.raises(ArchiveError, match="This account is currently not available"):
+        fk_archive.interpret("fk-archive publish x", 1, b"This account is currently not available.\n", b"")
+
+
+def test_stderr_is_still_what_a_refusal_is_read_off():
+    """Both streams together only happen when something is misbehaving.
+
+    Everything here explains itself on stderr; stdout carries the JSON of a
+    success. Should a failing command manage both, the sentence wins over the
+    half-written object.
+    """
+    with pytest.raises(ArchiveError, match="the archive said no"):
+        fk_archive.interpret("fk-archive publish x", 1, b'{"operation": ', b"fk-archive: the archive said no")
+
+
 def test_a_channel_that_closed_without_a_status_says_which_command_it_was():
     """There is no stderr to quote, so the request is all there is to go on."""
     with pytest.raises(ArchiveError, match="fk-archive trash 12345"):
