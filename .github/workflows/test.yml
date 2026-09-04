@@ -20,11 +20,17 @@ jobs:
         uses: actions/checkout@v7
 
       # The runner image does not ship ffmpeg, and the suite shells out to
-      # ffmpeg/ffprobe to build its fixture videos and to probe them.
+      # ffmpeg/ffprobe to build its fixture videos and to probe them. These are
+      # the same pinned binaries the Dockerfile puts in the image, rather than
+      # whatever apt has, so the tests exercise the encoder production runs.
+      # The image is scratch, so the binaries come out of a stopped container
+      # rather than by running one.
       - name: Install ffmpeg
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg
+          cid=$(docker create mwader/static-ffmpeg:9.0.1)
+          docker cp "$cid:/ffmpeg" /usr/local/bin/ffmpeg
+          docker cp "$cid:/ffprobe" /usr/local/bin/ffprobe
+          docker rm "$cid"
           ffmpeg -version | head -1
           ffprobe -version | head -1
 
