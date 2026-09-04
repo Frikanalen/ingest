@@ -24,7 +24,6 @@ ships as a separate command precisely so the ingest account's sudoers rule can
 leave it out.
 """
 
-import hashlib
 import os
 import shutil
 import stat
@@ -58,7 +57,6 @@ class Result:
     #: undone by hand.
     destination: str | None = None
     bytes_written: int | None = None
-    sha256: str | None = None
 
 
 def publish(
@@ -67,7 +65,6 @@ def publish(
     stream,
     *,
     expected_size: int,
-    expected_sha256: str | None = None,
 ) -> Result:
     """Take a file on stdin and publish it at `destination`.
 
@@ -81,21 +78,20 @@ def publish(
     ingest account needs no write access to the storage host at all.
 
     The staging is still real, just on this side of the fence: bytes land in
-    `.spool/`, are checked against the size (and hash, if one was given) the
-    caller promised, and are only linked into the published tree once they are
-    all there. An interrupted transfer leaves nothing a reader can see, which
-    is what the read-only NFS export to the playout hosts requires.
+    `.spool/`, are checked against the size the caller promised, and are only
+    linked into the published tree once they are all there. An interrupted
+    transfer leaves nothing a reader can see, which is what the read-only NFS
+    export to the playout hosts requires.
 
     `expected_size` is not optional, because it is the only thing that can tell
     a complete transfer apart from a connection that dropped: a truncated
-    stream ends exactly like a whole one.
+    stream ends exactly like a whole one. It is also the only check made on the
+    content, and deliberately: SSH already carries its own integrity check, and
+    a digest the sender computes from the same bytes it then sends agrees with
+    itself whatever went wrong before it was read.
     """
     if expected_size < 0:
         raise UsageError("--size must not be negative")
-    if expected_sha256 is not None:
-        expected_sha256 = expected_sha256.strip().lower()
-        if len(expected_sha256) != 64 or not all(c in "0123456789abcdef" for c in expected_sha256):
-            raise UsageError("--sha256 must be 64 hexadecimal characters")
 
     with (
         SafeRoot(profile.root) as archive,
@@ -103,12 +99,10 @@ def publish(
     ):
         staged = f"incoming-{os.getpid()}-{os.urandom(8).hex()}"
         try:
-            written, digest = _receive(stream, staged, spool, profile)
+            written = _receive(stream, staged, spool, profile)
 
             if written != expected_size:
                 raise TransferError(f"expected {expected_size} bytes, received {written}")
-            if expected_sha256 is not None and digest != expected_sha256:
-                raise TransferError(f"expected sha256 {expected_sha256}, received {digest}")
 
             with archive.directory(destination.parent, create=True, mode=profile.dir_mode) as parent:
                 try:
@@ -125,11 +119,11 @@ def publish(
             with suppress(FileNotFoundError):
                 os.unlink(staged, dir_fd=spool)
 
-    return Result("publish", str(destination), bytes_written=written, sha256=digest)
+    return Result("publish", str(destination), bytes_written=written)
 
 
-def _receive(stream, staged: str, spool: int, profile: Profile) -> tuple[int, str]:
-    """Write the stream into the spool, and say how much arrived and its hash.
+def _receive(stream, staged: str, spool: int, profile: Profile) -> int:
+    """Write the stream into the spool, and say how much of it arrived.
 
     O_EXCL against a name nothing else can predict, so this cannot be pointed
     at an existing file, and O_NOFOLLOW so it cannot be pointed through a
@@ -137,12 +131,10 @@ def _receive(stream, staged: str, spool: int, profile: Profile) -> tuple[int, st
     """
     fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, profile.file_mode, dir_fd=spool)
     written = 0
-    hasher = hashlib.sha256()
     try:
         with open(fd, "wb", closefd=False) as sink:
             while chunk := stream.read(CHUNK_BYTES):
                 sink.write(chunk)
-                hasher.update(chunk)
                 written += len(chunk)
         # The mode passed to open() is masked by the process umask, which sudo
         # inherits from whatever invoked it. Set it outright so the playout
@@ -151,7 +143,7 @@ def _receive(stream, staged: str, spool: int, profile: Profile) -> tuple[int, st
         os.fsync(fd)
     finally:
         os.close(fd)
-    return written, hasher.hexdigest()
+    return written
 
 
 def move(profile: Profile, source: ArchivePath, destination: ArchivePath) -> Result:

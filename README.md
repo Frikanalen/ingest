@@ -58,7 +58,7 @@ Publishing order matters because the archive is exported read-only to the playou
 
 `dash` is an adaptive VP9/Opus ladder — 1080p, 720p and 360p, none of them upscaled past the source — played back over MSE by a browser-side player. It is one FFmpeg invocation: the source is decoded once, padded to 16:9, and split into the three renditions in a single pass.
 
-Segments live inside one file per representation, addressed by byte range from the manifest (`-single_file 1`), rather than as a file each. A one-hour video is five files instead of several thousand, which is what makes DASH viable over an archive reached by SFTP. The cost is a manifest that grows with duration, by roughly 120 KB per hour; it compresses well, and if it ever becomes a problem the fix is rewriting the manifest into on-demand `SegmentBase` form.
+Segments live inside one file per representation, addressed by byte range from the manifest (`-single_file 1`), rather than as a file each. A one-hour video is five files instead of several thousand, which is what makes DASH viable over a remote archive at all: publishing is one privileged command per file, so a ladder of segments would be a command apiece. The cost is a manifest that grows with duration, by roughly 120 KB per hour; it compresses well, and if it ever becomes a problem the fix is rewriting the manifest into on-demand `SegmentBase` form.
 
 Keyframes are pinned to wall-clock time rather than a GOP length in frames, so renditions stay aligned for switching whatever frame rate is uploaded. A source with no audio track gets no audio adaptation set, since an adaptation set with no representation in it is not valid DASH.
 
@@ -70,7 +70,7 @@ The archive is either a local directory or a directory on another host reached o
 
 | Setting | Meaning |
 | --- | --- |
-| `FK_ARCHIVE_DIR` | Where finished files go. A local path, or a path on `FK_ARCHIVE_HOST`. |
+| `FK_ARCHIVE_DIR` | Where finished files go. A local path, or a path on `FK_ARCHIVE_HOST` — see [Writing without write access](#writing-without-write-access). |
 | `FK_ARCHIVE_HOST` | Archive host. Unset means archive locally. |
 | `FK_ARCHIVE_PORT` | SSH port, default `22`. |
 | `FK_ARCHIVE_USERNAME` | SSH user, default `ingest`. |
@@ -80,36 +80,68 @@ The archive is either a local directory or a directory on another host reached o
 | `FK_ARCHIVE_REQUIRED` | Fail startup instead of falling back. Set this in deployments. |
 | `FK_WORK_DIR` | Local scratch space for transcoding. Defaults to the system temporary directory. |
 
-Files are transferred below the archive's `.spool/` directory and renamed into
-place once complete, so an interrupted transfer cannot leave a truncated file
-that later looks like a finished one.
+Files are staged below the archive's `.spool/` directory and only appear at
+their destination once complete, so an interrupted transfer cannot leave a
+truncated file that later looks like a finished one. Over SSH that staging
+happens on the far side of the connection — see below.
 
 Both SSH credentials must be given explicitly — ingest will not reach for the running user's `~/.ssh`, and it never disables host key verification. If either is missing, ingest logs a warning and archives to `FK_ARCHIVE_FALLBACK_DIR` instead, so you can run it locally without setting up SSH at all. **Set `FK_ARCHIVE_REQUIRED=true` anywhere that actually archives over SSH**: otherwise a secret that fails to mount leaves ingest quietly writing to scratch space, where files are lost on restart.
 
 ### Writing without write access
 
-The SSH account described above has write access to the whole archive, which is
-far more than ingest needs: `ArchiveSession` only ever performs four mutations,
-and two of them — purging the trash, and collecting a video the catalogue has dropped — are an operator's rather than the engine's.
+**The SSH account has no write access to the archive.** It reads over SFTP,
+which the storage host serves read-only, and every mutation is a request to
+[`fk-archive`](archive-utils/), a command that host runs under sudo as the
+account owning the media. A stolen key or a bug in the engine can therefore ask
+for a file to be published or a directory to be trashed, and cannot do anything
+else to the archive at all.
 
-[`archive-utils/`](archive-utils/) is those four mutations packaged as
-`fk-archive-utils`, a Debian package installed on the storage host. Ingest asks
-it to publish a file, move a file within a video, or trash a directory, over
-SSH through a single sudoers rule, and the account it logs in as needs no write
-access to the archive at all. Reads stay on SFTP, read-only.
+The two mutations ingest performs are the two verbs that command has:
 
-It also holds the two whole-archive operations that are nobody's job to queue:
-`fk-archive-gc`, which reclaims media for videos the catalogue has dropped, and
-`fk-archive-migrate-broadcast`, the one-shot migration of a video's source out
-of the directory the previous system kept it in. Both compare the archive
-against the catalogue and are run by an operator on the storage host.
+| Mutation | Who asks for it | How |
+| --- | --- | --- |
+| publish | the upload hook (`original/`), the format producer (`dash/`, `*_thumb/`), the programme-image ingest (`images/`) | `fk-archive publish <video-id>/<category>/<file> --size N`, with the bytes on stdin |
+| trash | superseding an upload, replacing a rebuilt format | `fk-archive trash <video-id>[/<category>]` |
 
-The package is built and released by
-[`.github/workflows/archive-utils.yml`](.github/workflows/archive-utils.yml)
-and installed by `roles/fk_archive_utils` in the infra repository. **The engine
-does not speak it yet** — `SshArchiveSession` still writes over SFTP, and the
-cutover is gated on that changing. `archive-utils/README.md` has the design;
-the infra role's README has the order to deploy it in.
+Publishing sends the file up the command's standard input rather than into a
+spool ingest fills, because a spool ingest can write to is a spool whose files
+ingest *owns* — and a rename does not change that, so every file it ever
+published would stay writable by it. The far end stages the bytes in `.spool/`,
+checks them against the length promised in `--size`, and links them into the
+published tree only once all of them have arrived. `--size` is what tells a
+complete transfer apart from a connection that dropped: a truncated stream ends
+exactly like a whole one.
+
+`.spool/` and the trash therefore belong to the archive account, and ingest has
+no way to sweep either. Its side of the deal is [`fk_archive.py`](app/archive_store/fk_archive.py),
+which is the whole of what crosses the boundary: how a request is spelled, and
+how the exit code and the line of JSON that come back are read.
+
+**`FK_ARCHIVE_DIR` is the path ingest reads from, and the archive root is not
+an argument to any mutation** — `fk-archive` looks it up by profile name, which
+is what lets one sudoers line pin it, and what stops staging naming production's
+archive however it is invoked. So `FK_ARCHIVE_DIR` and `root` in
+`/etc/fk-archive-utils/profiles.d/<profile>.toml` have to be the same directory;
+pointing them at different ones publishes files ingest then cannot find.
+
+Renaming archived media is not among the mutations. `ArchiveSession` has no
+`move`, and neither does `fk-archive`: moving a file inside a video happens once
+per video, ever, as a migration off the layout the previous system used, and
+that is [`fk-archive-migrate-broadcast`](archive-utils/README.md#the-broadcast-migration),
+run by an operator. Nor is deleting: only `fk-archive-purge-trash` unlinks
+anything, and it ships as a separate command precisely so the ingest account's
+sudoers rule can leave it out.
+
+The package also holds the two whole-archive operations that are nobody's job to
+queue: `fk-archive-gc`, which reclaims media for videos the catalogue has
+dropped, and the broadcast migration above. Both compare the archive against the
+catalogue and are run by an operator on the storage host.
+
+It is built and released by
+[`.github/workflows/archive-utils.yml`](.github/workflows/archive-utils.yml) and
+installed by `roles/fk_archive_utils` in the infra repository.
+`archive-utils/README.md` has the design and the exit-code table; the infra
+role's README has the order to deploy it in.
 
 ## Reconciling the catalogue
 
@@ -255,7 +287,7 @@ Scaling down to zero stops uploads being processed. It does not fail them — th
 
 Scaling down mid-encode costs the encode. `SIGTERM` makes a worker stop claiming and finish the job it holds, but only within `terminationGracePeriodSeconds`; anything still running when that elapses is killed, and its lease expires so another worker picks the video up later. The default is an hour, which is also how long a node drain will wait for a worker.
 
-The SSH credentials come from a Kubernetes secret created outside the chart, by the `ingest_archive_account` role in the [infra](https://github.com/Frikanalen/infra) repository. The private key is generated on first run and stored only in that secret, so it never passes through Git or the vault. That role's README covers the `authorized_keys` restrictions on the archive host and rotation.
+The SSH credentials come from a Kubernetes secret created outside the chart, by the `ingest_archive_account` role in the [infra](https://github.com/Frikanalen/infra) repository. The private key is generated on first run and stored only in that secret, so it never passes through Git or the vault. That role's README covers rotation, and the `authorized_keys` line that pins the key to `fk-archive-ssh <profile>` as a forced command — which is what supplies the profile ingest never sends, and what leaves the key with a read-only SFTP server and `fk-archive` and nothing else.
 
 ## Requirements
 
@@ -342,4 +374,18 @@ scripts/generate-hook-types.sh
 
 ```shell
 uv run python -m pytest
+```
+
+The SSH archive is tested against an in-process server shaped like the storage
+host: a read-only SFTP server, and the real `fk_archive_utils` behind an exec
+request. `archive-utils/src` is on the test path for that reason and no other —
+it is not a dependency of this package and must not become one. The two ship
+separately and agree only on a command line, an exit code and a line of JSON, so
+a stand-in for `fk-archive` would be free to keep agreeing with an engine that
+had drifted away from it.
+
+`archive-utils/` has its own suite, which a run from here does not collect:
+
+```shell
+cd archive-utils && uv run pytest
 ```

@@ -42,7 +42,7 @@ class OrderRecordingSession(ArchiveSession):
     async def get(self, source: PurePosixPath, destination: Path) -> None:
         raise NotImplementedError
 
-    async def move(self, source: PurePosixPath, destination: PurePosixPath) -> None:
+    async def trash(self, path: PurePosixPath) -> PurePosixPath:
         raise NotImplementedError
 
 

@@ -29,7 +29,13 @@ class LocalArchiveSettings(BaseModel):
 
 
 class SshArchiveSettings(BaseModel):
-    """An archive on another host, written over SSH."""
+    """An archive on another host, read over SSH and mutated through it.
+
+    The account named here has no write access to the archive. Reads go to a
+    read-only SFTP server; every mutation is a request to `fk-archive`, which
+    the storage host runs under sudo as the account that owns the media. See
+    `app/archive_store/fk_archive.py`.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -37,7 +43,12 @@ class SshArchiveSettings(BaseModel):
     port: int = Field(default=22, description="SSH port on the archive host")
     username: str = Field(default="ingest", description="SSH user to log in as")
     dir: PurePosixPath = Field(
-        default=PurePosixPath("/archive/media"), description="Directory on the archive host to store archived files in"
+        default=PurePosixPath("/archive/media"),
+        description=(
+            "Directory on the archive host holding the archive. This is the path ingest reads from; "
+            "writes are relative to the root the fk-archive profile on that host declares, so the two "
+            "must name the same directory."
+        ),
     )
     private_key_file: Path | None = Field(default=None, description="SSH private key to authenticate with")
     known_hosts_file: Path | None = Field(default=None, description="known_hosts file used to verify the archive host")

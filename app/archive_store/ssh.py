@@ -1,3 +1,4 @@
+import asyncio
 import getpass
 import os
 import stat
@@ -9,13 +10,12 @@ from time import monotonic
 
 import asyncssh
 
+from app.archive_store import fk_archive
 from app.archive_store.base import (
     ArchiveEntry,
     ArchiveError,
     ArchiveSession,
     ArchiveStore,
-    FileAlreadyArchived,
-    staging_path,
 )
 from app.util.pretty_duration import pretty_duration
 from app.util.settings import SshArchiveSettings
@@ -24,6 +24,11 @@ logger = getLogger(__name__)
 
 # Stands in for the account running the process when the system cannot name it.
 FALLBACK_LOCAL_USERNAME = "ingest"
+
+#: How much of a file is read and handed to the channel at a time. Large
+#: enough that a 20 GB original is not a hundred thousand round trips through
+#: a thread, small enough to be nothing next to the pod's memory limit.
+CHUNK_BYTES = 1024 * 1024
 
 
 def ensure_local_username() -> None:
@@ -50,43 +55,80 @@ def ensure_local_username() -> None:
 
 
 class SshArchiveSession(ArchiveSession):
-    def __init__(self, sftp: asyncssh.SFTPClient, root: PurePosixPath):
+    """The archive on another host, read over SFTP and mutated by command.
+
+    The two halves reach the storage host down the same connection and arrive
+    as different accounts. Reads go to an SFTP server the far end runs
+    read-only, so this session has no way to write through it however it asks.
+    Writes are requests to `fk-archive`, which sudo runs as the account that
+    owns the media -- so a mutation is a named operation the far end agreed to
+    perform, rather than a file descriptor this process holds.
+
+    That split is why the session keeps the connection as well as the SFTP
+    client: `put` and `trash` need a channel of their own, and the connection
+    is the thing that opens one.
+    """
+
+    def __init__(self, connection: asyncssh.SSHClientConnection, sftp: asyncssh.SFTPClient, root: PurePosixPath):
+        self.connection = connection
         self.sftp = sftp
         self.root = root
 
     def resolve(self, destination: PurePosixPath) -> PurePosixPath:
+        """Where `destination` is on the storage host, for reading.
+
+        Only the read half needs this. `fk-archive` looks the archive root up
+        by profile and never accepts one as an argument, so a mutation names a
+        path relative to a root this process does not get to choose -- which
+        means `FK_ARCHIVE_DIR` and the profile's `root` on the storage host
+        have to be the same directory. They are the two ends of one archive,
+        and pointing them at different ones publishes files this session then
+        cannot find.
+        """
         return self.root / destination
 
     async def exists(self, destination: PurePosixPath) -> bool:
         return await self.sftp.exists(self.resolve(destination))
 
     async def put(self, source: Path, destination: PurePosixPath) -> None:
-        target = self.resolve(destination)
-        staged = self.resolve(staging_path(destination))
-        size = source.stat().st_size
+        """Publish `source` by streaming it to `fk-archive publish`.
 
-        logger.info("Uploading %s (%d bytes) to %s", source, size, target)
-        await self.sftp.makedirs(staged.parent, exist_ok=True)
-        await self.sftp.makedirs(target.parent, exist_ok=True)
+        The bytes go up the command's standard input rather than into a spool
+        this process fills, because a spool the ingest account can write to is
+        a spool whose files it owns -- and a rename does not change that, so
+        every file ever published would stay writable by us, which is the whole
+        of the permission this arrangement exists to remove.
+
+        The size is measured here and promised in the request. The far end
+        refuses a stream of any other length, which is the only thing that can
+        tell a complete transfer from a connection that dropped: a truncated
+        stream ends exactly like a whole one.
+        """
+        size = source.stat().st_size
+        logger.info("Publishing %s (%d bytes) as %s", source, size, destination)
 
         started = monotonic()
-        await self.sftp.put(source, staged)
-
-        # A plain SFTP rename fails rather than overwriting, so a file that
-        # appeared under us since assert_absent() is not silently destroyed.
-        # The staged copy is deliberately left in the spool when it does fail:
-        # nothing in the published tree changed, and the bytes are still there
-        # to look at.
-        await self._rename(staged, target, destination)
-        await self.tidy_spool(staged.parent)
-
+        await self._run(fk_archive.publish(destination, size=size), stdin=source)
         elapsed = monotonic() - started
+
         logger.info(
-            "Uploaded %s in %s (%.1f MB/s)",
-            target,
+            "Published %s in %s (%.1f MB/s)",
+            destination,
             pretty_duration(elapsed),
             size / elapsed / 1e6 if elapsed else 0.0,
         )
+
+    async def trash(self, path: PurePosixPath) -> PurePosixPath:
+        logger.info("Trashing %s", path)
+        result = await self._run(fk_archive.trash(path))
+
+        destination = result.get("destination")
+        if destination is None:
+            # Where it went is the only reason a caller logs the result at all:
+            # putting it back is a rename from there, and a removal nobody can
+            # name the far side of is one nobody can undo.
+            raise ArchiveError(f"the archive trashed {path} but did not say where it went: {result}")
+        return PurePosixPath(destination)
 
     async def list_dir(self, destination: PurePosixPath) -> list[ArchiveEntry]:
         resolved = self.resolve(destination)
@@ -97,18 +139,14 @@ class SshArchiveSession(ArchiveSession):
         if not await self.sftp.isdir(resolved):
             return []
 
-        entries = []
-        for entry in await self.sftp.readdir(resolved):
-            if entry.filename in (".", ".."):
-                continue
-            is_dir = stat.S_ISDIR(entry.attrs.permissions or 0)
-            entries.append(
-                ArchiveEntry(
-                    path=destination / entry.filename,
-                    is_dir=is_dir,
-                    size=0 if is_dir else (entry.attrs.size or 0),
-                )
+        entries = [
+            ArchiveEntry(
+                path=destination / entry.filename,
+                is_dir=stat.S_ISDIR(entry.attrs.permissions or 0),
             )
+            for entry in await self.sftp.readdir(resolved)
+            if entry.filename not in (".", "..")
+        ]
         return sorted(entries, key=lambda entry: entry.path)
 
     async def get(self, source: PurePosixPath, destination: Path) -> None:
@@ -140,45 +178,52 @@ class SshArchiveSession(ArchiveSession):
             size / elapsed / 1e6 if elapsed else 0.0,
         )
 
-    async def move(self, source: PurePosixPath, destination: PurePosixPath) -> None:
-        origin = self.resolve(source)
-        target = self.resolve(destination)
+    async def _run(self, command: str, *, stdin: Path | None = None) -> dict:
+        """Ask the storage host to do one thing, and read what it says back.
 
-        logger.info("Moving %s to %s", origin, target)
-        await self.sftp.makedirs(target.parent, exist_ok=True)
-        await self._rename(origin, target, destination)
-
-    async def _rename(self, origin: PurePosixPath, target: PurePosixPath, destination: PurePosixPath) -> None:
-        """Rename within the archive, in this codebase's own vocabulary.
-
-        SFTP reports an occupied destination as a generic failure, which a
-        caller cannot tell apart from a full disk or a permission problem
-        without knowing about asyncssh. Asking afterwards is what turns it back
-        into the one condition callers actually handle.
+        The channel is opened in binary, because half of what goes up it is a
+        video file. What comes back is small either way: one line of JSON, or a
+        sentence and an exit code.
         """
         try:
-            await self.sftp.rename(origin, target)
-        except asyncssh.SFTPError as e:
-            if await self.sftp.exists(target):
-                raise FileAlreadyArchived(f"{destination} already exists in the archive") from e
-            raise
+            async with self.connection.create_process(command, encoding=None) as process:
+                if stdin is not None:
+                    await self._send(stdin, process.stdin)
+                else:
+                    process.stdin.write_eof()
+                completed = await process.wait()
+        except asyncssh.ChannelOpenError as e:
+            raise ArchiveError(f"the archive host would not run {command}: {e}") from e
 
-    async def tidy_spool(self, directory: PurePosixPath) -> None:
-        """Remove the staging directories the transfer just emptied.
+        return fk_archive.interpret(command, completed.returncode, completed.stdout, completed.stderr)
 
-        Best effort: a directory still holding something belongs to a
-        concurrent job, and leaving it is harmless.
+    @staticmethod
+    async def _send(source: Path, sink: asyncssh.SSHWriter) -> None:
+        """Stream `source` into the command's standard input.
+
+        Read in a thread, because the file is on local disk and can be
+        gigabytes; written with a drain between chunks, so the channel's flow
+        control rather than this process's memory decides how much is in
+        flight.
+
+        A broken pipe here is not the failure to report. The far end refuses a
+        malformed destination in its argument parser, before it has read a byte
+        of the file, so the first thing this notices about that refusal is that
+        nobody is reading any more. What went wrong is the exit code, which is
+        still to come -- so this stops sending and lets wait() say.
         """
-        while directory != self.root:
-            try:
-                await self.sftp.rmdir(directory)
-            except asyncssh.SFTPError:
-                return
-            directory = directory.parent
+        try:
+            with source.open("rb") as handle:
+                while chunk := await asyncio.to_thread(handle.read, CHUNK_BYTES):
+                    sink.write(chunk)
+                    await sink.drain()
+            sink.write_eof()
+        except (BrokenPipeError, ConnectionResetError, asyncssh.Error):
+            logger.debug("The archive stopped reading %s before it was sent in full", source)
 
 
 class SshArchiveStore(ArchiveStore):
-    """Archive on another host, written over SSH."""
+    """Archive on another host, read over SSH and mutated through it."""
 
     def __init__(self, settings: SshArchiveSettings):
         reason = settings.unusable_reason()
@@ -216,7 +261,7 @@ class SshArchiveStore(ArchiveStore):
             asyncssh.connect(**self.connect_options()) as connection,
             connection.start_sftp_client() as sftp,
         ):
-            yield SshArchiveSession(sftp, self.settings.dir)
+            yield SshArchiveSession(connection, sftp, self.settings.dir)
 
     def __str__(self) -> str:
         settings = self.settings

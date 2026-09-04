@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 
 
@@ -13,8 +13,6 @@ class FileAlreadyArchived(ArchiveError):
     """Something already occupies the destination in the archive."""
 
 
-SPOOL_DIR = PurePosixPath(".spool")
-
 #: Where anything removed from the published tree is parked. A rename rather
 #: than a delete, so an hour of deciding the rule was wrong costs a rename back
 #: rather than a restore from backup. Purged separately, once someone has read
@@ -22,22 +20,35 @@ SPOOL_DIR = PurePosixPath(".spool")
 TRASH_DIR = PurePosixPath(".trash")
 
 
-def staging_path(destination: PurePosixPath) -> PurePosixPath:
-    """Where a file is transferred before it is published at `destination`.
+#: How a trash directory is stamped, and what `fk-archive-purge-trash
+#: --older-than` parses back out of it. Both archives spell it the same way,
+#: because the tool that purges the trash reads it off the name.
+TRASH_STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 
-    Staging happens outside the published tree, so an interrupted transfer
-    cannot leave a partial file where readers see it — the archive is exported
-    read-only to the playout hosts, and a half-written video appearing there is
-    worse than one that never appears.
 
-    It stays inside the archive root because publishing is a rename, and rename
-    cannot cross a filesystem boundary. Somewhere tidier but separately mounted
-    would fail with EXDEV.
+def trash_stamp(when: datetime) -> str:
+    """The name of the directory a removal made at `when` goes under."""
+    return when.strftime(TRASH_STAMP_FORMAT)
+
+
+def check_removable(path: PurePosixPath) -> PurePosixPath:
+    """Refuse anything that is not a whole video or one directory inside one.
+
+    Those are the only two things anything has ever asked to remove: a video
+    goes when the catalogue no longer has a row for it, and a directory goes
+    when an upload supersedes the media under it or a format is rebuilt.
+
+    Restated from `fk-archive`, which refuses the same shapes in its argument
+    parser before it looks at the archive at all. Restated rather than left to
+    the far end because a local archive that accepted a file path would let
+    code be written against it that file01 then declines to run.
     """
-    return SPOOL_DIR / destination
+    if len(path.parts) not in (1, 2):
+        raise ArchiveError(f"{path} is neither a video nor a directory inside one, so it cannot be trashed")
+    return path
 
 
-def trash_path(path: PurePosixPath, when: datetime) -> PurePosixPath:
+def trash_path(path: PurePosixPath, stamp: str) -> PurePosixPath:
     """Where `path` goes when it is taken out of the published tree.
 
     Stamped with the time it was trashed, which is what lets the same path be
@@ -46,22 +57,21 @@ def trash_path(path: PurePosixPath, when: datetime) -> PurePosixPath:
     intact underneath it, and putting a thing back is a rename to where the
     name already says it came from.
     """
-    return TRASH_DIR / when.strftime("%Y%m%dT%H%M%SZ") / path
+    return TRASH_DIR / stamp / path
 
 
 @dataclass(frozen=True)
 class ArchiveEntry:
     """One name directly inside a directory in the archive.
 
-    Carries the type and size that the listing already had to look at, since
-    over SFTP asking again per entry is a round trip apiece.
+    Carries whether it is a directory, because that is the one thing every
+    caller asks and the listing had to look at anyway. Nothing asks how big a
+    file is, so nothing goes and finds out.
     """
 
-    #: Archive-relative, so it can be handed straight back to get() or move().
+    #: Archive-relative, so it can be handed straight back to get() or trash().
     path: PurePosixPath
     is_dir: bool
-    #: Bytes. Zero for a directory, whose own size means nothing here.
-    size: int
 
     @property
     def name(self) -> str:
@@ -114,32 +124,29 @@ class ArchiveSession(ABC):
         """
 
     @abstractmethod
-    async def move(self, source: PurePosixPath, destination: PurePosixPath) -> None:
-        """Rename `source` to `destination` within the archive.
+    async def trash(self, path: PurePosixPath) -> PurePosixPath:
+        """Take `path` out of the published tree, and say where it went.
 
-        Missing parents are created. Raises FileAlreadyArchived rather than
-        replacing anything at `destination`.
+        A rename into `trash_path()`, never a delete: nothing in this codebase
+        has a way to destroy archived media, so a rule that turns out to be
+        wrong costs a rename back rather than a restore from backup. Purging is
+        a separate and deliberate act, and lives on the storage host.
 
-        Not a general facility, despite the name: `trash()` is its only caller,
-        and nothing here should acquire a second one. Renaming archived media
-        is not something ingest has any reason to do.
+        `path` is a whole video or one directory inside one, which is all
+        anything has ever asked to remove. Raises FileNotFoundError if there is
+        nothing there.
+
+        Implemented per backend rather than built on a general rename, because
+        one of the two backends has no general rename to build on: the SSH
+        archive asks a privileged command to do this and is told where it
+        landed. A move it could compose out of would be a move it could point
+        anywhere.
         """
 
     async def assert_absent(self, destination: PurePosixPath) -> None:
         """Raise FileAlreadyArchived if `destination` is already taken."""
         if await self.exists(destination):
             raise FileAlreadyArchived(f"{destination} already exists in the archive")
-
-    async def trash(self, path: PurePosixPath) -> PurePosixPath:
-        """Take `path` out of the published tree, and say where it went.
-
-        Built on move() so both archives cannot drift on what deletion means,
-        and so nothing in this codebase has a way to actually destroy archived
-        media — purging the trash is a separate, deliberate act.
-        """
-        destination = trash_path(path, datetime.now(UTC))
-        await self.move(path, destination)
-        return destination
 
 
 class ArchiveStore(ABC):
