@@ -198,6 +198,24 @@ async def test_draining_wakes_the_worker_immediately(worker, django_api):
 
 
 @pytest.mark.asyncio
+async def test_a_job_claimed_while_draining_is_left_to_its_lease(worker, django_api):
+    """SIGTERM can land after the loop has decided to ask and before the claim
+    comes back. Starting hours of work with only the grace period left to do it
+    in is how an encode gets killed partway, which is the one way to lose it."""
+
+    async def claim_then_drain(*args, **kwargs):
+        worker.drain()
+        return job()
+
+    django_api.claim_ingest_job.side_effect = claim_then_drain
+
+    assert await worker.run_once() is True
+
+    django_api.get_files_for_video.assert_not_awaited()
+    django_api.report_ingest_state.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_the_original_is_never_republished(worker, django_api, archive_root, color_bars_video):
     """The source is read, not rewritten; put() would refuse anyway."""
     original = archive_root / VIDEO_ID / "original" / "source.mp4"

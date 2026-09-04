@@ -98,6 +98,17 @@ class Worker:
         logger.addFilter(VideoIdFilter(video_id))
         logger.info("Claimed video %s", video_id)
 
+        if self.draining:
+            # SIGTERM landed while this claim was in flight. Starting the job
+            # now would mean starting hours of work with only the grace period
+            # left to do it in, and being killed partway is the one outcome
+            # that actually loses the encoding -- so let it go. The lease
+            # expires and a worker that has time for it claims it again, which
+            # costs a lease timeout rather than however long we would have got
+            # through before SIGKILL.
+            logger.info("Drained mid-claim; releasing video %s to its lease", video_id)
+            return True
+
         await self._work(video_id, job.kind)
         return True
 

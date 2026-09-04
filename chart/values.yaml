@@ -152,6 +152,31 @@ workers:
   # raise it if losing an encode to a drain matters more than the wait.
   terminationGracePeriodSeconds: 3600
 
+  # Replace a worker by retiring one first, never by adding one alongside.
+  #
+  # The default RollingUpdate rounds to maxSurge 1 / maxUnavailable 0 at two
+  # replicas, which deadlocks a pool this size: nothing may be terminated
+  # until the replacement is Ready, the replacement cannot schedule until the
+  # CPU the outgoing worker reserves is released, and because the outgoing
+  # worker is never sent SIGTERM it does not release it. The rollout then sits
+  # there indefinitely rather than resolving slowly.
+  #
+  # Surging is the wrong shape here in any case. Workers are fungible and
+  # claim their own work, so a replacement adds nothing until the old one has
+  # gone -- and an idle worker exits within milliseconds of SIGTERM, so making
+  # room first is nearly free whenever the queue is quiet.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+
+  # A rollout must be allowed to take as long as draining does. The default is
+  # 600s against a grace period of an hour, so any worker that sees out a real
+  # encode trips ProgressDeadlineExceeded and reports the app as degraded for
+  # no reason. Keep this comfortably above terminationGracePeriodSeconds.
+  progressDeadlineSeconds: 4200
+
   work:
     mountPath: /work
     # Holds one video's original plus its derivatives. Bigger than the ingest
@@ -159,13 +184,22 @@ workers:
     emptyDir:
       sizeLimit: 100Gi
 
-  # Pure batch, so ask for real CPU: unlike the ingest pod there is nothing
-  # latency-sensitive here to protect, and a worker that gets the floor of CPU
-  # shares just makes the backfill take proportionally longer. Still no
-  # limits.cpu -- see the note on the ingest pod's resources below.
+  # Sized for the pool's real duty cycle, which is idle punctuated by bursts.
+  #
+  # A request is reserved around the clock whether or not there is a job, so
+  # asking for what a ladder can use at peak takes replicaCount x that out of
+  # the cluster permanently to cover a burst that happens occasionally. It is
+  # also what made rollouts fail to schedule.
+  #
+  # Nothing is given up by asking for less. There is deliberately no
+  # limits.cpu -- see the note on the ingest pod's resources below -- so a
+  # burst still bursts into every idle core on the node; the request only sets
+  # what is guaranteed when the node is contended, and losing that race just
+  # makes an encode take longer. If bursts start queueing rather than running
+  # slowly, the answer is more workers, not a fatter reservation each.
   resources:
     requests:
-      cpu: "4"
+      cpu: "2"
       # A ladder's encoder buffers, sized by resolution and not by duration --
       # see the note on the ingest pod's resources below. Nothing a worker
       # holds grows with the length of what it is encoding: ffmpeg's progress

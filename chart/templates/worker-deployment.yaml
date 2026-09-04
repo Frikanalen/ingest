@@ -12,6 +12,13 @@ spec:
   # also safe to overshoot -- the scheduler will leave the surplus Pending
   # rather than overcommit the nodes.
   replicas: {{ .Values.workers.replicaCount }}
+  # Long enough for a worker to see out the job it holds, or a rollout that
+  # waits for one is reported as a failure. See the note in values.yaml.
+  progressDeadlineSeconds: {{ .Values.workers.progressDeadlineSeconds }}
+  {{- with .Values.workers.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "ingest.workerSelectorLabels" . | nindent 6 }}
