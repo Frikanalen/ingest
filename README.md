@@ -6,6 +6,7 @@ It exposes these application endpoints:
 
 - `POST /tusdHooks/` handles tusd's `pre-create` and `post-finish` hooks. `pre-create` validates the upload metadata and assigns its storage path; `post-finish` starts the ingest job.
 - `GET /internal/isAlive` is the health check.
+- `GET /ingest-api/formats` reports what this deployment can build: each desired variant, the revision of the template currently producing it, and the image answering. It is the only endpoint reachable from outside the cluster — see [Publishing the format revisions](#publishing-the-format-revisions).
 - `GET /watchFolder/tusFiles` and `GET /watchFolder/archive` stream directory listings as server-sent events for debugging. Filesystem changes do not start ingest jobs. **Only mounted when `FK_DEBUG` is set** — see [Debug mode](#debug-mode).
 
 For a completed upload the hook checks the media with FFprobe, copies the source file from `FK_TUSD_DIR` to `<archive>/<video-id>/original/<filename>`, registers it along with the video's duration and upload time, and queues an ingest job. Then it returns. The uploaded file is removed from `FK_TUSD_DIR` at that point, because the archive now holds the same bytes and the queued job reads from there; a failure before the file is archived leaves it in place for a retry.
@@ -197,13 +198,32 @@ It is guarded twice, because its subject is the entire archive: the catalogue re
 
 ## Deployment
 
-`chart/` holds the Helm chart. It deploys two things: the `-upload` Deployment, which runs tusd alongside ingest in the same pod so tusd reaches the hook endpoint over the pod's loopback and the two share the upload volume rather than passing files across a network; and the `-workers` Deployment, which drains the ingest queue and is described under [Queue workers](#queue-workers). Only tusd is exposed, through an ingress on the upload hostname; ingest's own endpoints stay cluster-internal.
+`chart/` holds the Helm chart. It deploys two things: the `-upload` Deployment, which runs tusd alongside ingest in the same pod so tusd reaches the hook endpoint over the pod's loopback and the two share the upload volume rather than passing files across a network; and the `-workers` Deployment, which drains the ingest queue and is described under [Queue workers](#queue-workers). Two paths are exposed through an ingress on the upload hostname — tusd, and the read-only `/ingest-api/formats` — and the rest of ingest's endpoints stay cluster-internal.
 
 Because one pod owns the upload volume, the upload Deployment runs a single replica with the `Recreate` strategy. Going multi-replica would need `ReadWriteMany` storage and session affinity, since a resumed upload has to reach the pod holding its partial file.
 
 tusd is served at `/upload` on the main site — `https://frikanalen.no/upload`, `https://staging.frikanalen.no/upload` — sharing the host with the frontend at `/` and the API at `/api`, so no upload subdomain is needed per environment. The ingress path is tusd's own `basePath` and is passed through unstripped, so tusd sees the URLs it advertises.
 
 `FK_UPLOAD_URL` in the Django settings must point at that same URL, since it is handed to the frontend as a video's `uploadUrl`.
+
+### Publishing the format revisions
+
+`GET /ingest-api/formats` answers what a converged video looks like *here, now*:
+
+```json
+{
+  "image": "ghcr.io/frikanalen/ingest:v1.2.3",
+  "formats": { "large_thumb": 1, "med_thumb": 1, "small_thumb": 1, "dash": 1 }
+}
+```
+
+It exists because deciding which videos to queue happens outside this repository, and that decision needs one thing only this repository holds: which revision of each format the deployed image produces. `DESIRED_FORMATS` and the revision each template carries are declared in `app/formats.py`; a second copy of them in the tool that queues work is the half that would rot, since bumping a revision here would silently need a matching edit there. So it is published rather than copied, and read live rather than stored — if the pod is not answering, a caller gets a connection error instead of a plausible answer from whenever it last spoke.
+
+It is unauthenticated, because reading it grants nothing: queueing work still goes through django-api under the operator's own token, so the whole exposure is that a stranger may learn which revision of DASH we are on.
+
+The ingress rule for it is `pathType: Exact`, deliberately. It is the only rule pointing at ingest's own HTTP port, and a prefix rule there would put the rest of the application — `/tusdHooks` included, which is what starts an ingest — on the public internet. The path is repeated in `chart/templates/ingress.yaml` and in the router's prefix in `app/main.py`, and nothing checks that the two agree.
+
+`image` is reported because the upload pod and the worker pool are separate Deployments off one image. Mid-rollout this endpoint can answer with a revision that part of the pool cannot build yet, and a job queued at that revision is claimed, re-planned against the older template, rebuilt at the older revision, and left stale with nothing to queue it again. Printing the image an operator planned against is what makes "run the sweep once the rollout has settled" checkable rather than folklore.
 
 #### Upgrading past the rename
 

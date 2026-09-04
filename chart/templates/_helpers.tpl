@@ -159,6 +159,18 @@ the remaining archive settings are inert.
 {{- end }}
 
 {{/*
+The ingest image, named once.
+
+Both Deployments run it and the upload pod reports it over
+/ingest-api/formats, so an operator can tell which image answered a question
+about format revisions. That is only worth anything if the string reported is
+the string running, hence one definition rather than three.
+*/}}
+{{- define "ingest.image" -}}
+{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.Version }}
+{{- end }}
+
+{{/*
 Environment for the ingest container.
 
 The order is the order it has always been in, so that splitting these helpers
@@ -167,6 +179,10 @@ out for the worker pool does not roll the upload pod for no reason.
 {{- define "ingest.env" -}}
 - name: FK_PORT
   value: {{ .Values.service.port | quote }}
+# Observability only. Reported by /ingest-api/formats so that a sweep run
+# mid-rollout can be told apart from one run against a settled deployment.
+- name: FK_IMAGE
+  value: {{ include "ingest.image" . | quote }}
 {{ include "ingest.apiEnv" . }}
 - name: FK_TUSD_DIR
   value: {{ .Values.uploads.mountPath | quote }}
