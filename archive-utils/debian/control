@@ -23,16 +23,17 @@ Depends:
 Description: privileged mutations of a Frikanalen media archive
  The ingest engine writes into the media archive over SSH. Rather than giving
  the account it logs in as write access to the archive, this package installs
- the two mutations it actually performs -- publish a file, trash a directory --
- as commands that run as the account owning the archive, reached through a
- single sudoers rule.
+ the three mutations it actually performs -- publish a file, trash a directory,
+ or delete one explicitly allowed regenerable variant -- as commands that run
+ as the account owning the archive, reached through a single sudoers rule.
  .
  Two more ship as operator tools with their own entry points, deliberately
  outside what that rule grants: fk-archive-purge-trash, which is the only thing
- here that deletes anything, and fk-archive-migrate-broadcast, a one-shot
- migration of a video's source out of the directory the previous system kept it
- in.
+ here that may destroy material which cannot be rebuilt from the original, and
+ fk-archive-migrate-broadcast, a one-shot migration of a video's source out of
+ the directory the previous system kept it in.
  .
  Every command validates the paths it is given against the archive's namespace,
  traverses it without following symbolic links, and refuses to overwrite
- anything. Removal is a rename into .trash/.
+ anything. General removal is a rename into .trash/; permanent variant deletion
+ is restricted by an allowlist.
