@@ -1,6 +1,6 @@
 # Ingest
 
-Ingest handles tusd uploads for Frikanalen by validating metadata, archiving source files, generating derivative media, and updating the Django API. A worker converges any video it is handed toward the same declaration of what a video should have, so a fresh upload and one archived years ago are the same job — see [Reconciling the catalogue](#reconciling-the-catalogue). Deciding *which* videos to hand it is an operator's, from [`scripts/`](scripts/).
+Ingest handles tusd uploads for Frikanalen by validating metadata, archiving source files, generating derivative media, and updating the Django API. A worker converges any video it is handed toward the same declaration of what a video should have, so a fresh upload and one archived years ago are the same job — see [Reconciling the catalogue](#reconciling-the-catalogue). Deciding *which* videos to hand it is an operator's, and is `fk archive` in fk-cli.
 
 It exposes these application endpoints:
 
@@ -117,7 +117,7 @@ Ingest is not only a hook handler. What a video is *supposed* to have is declare
 
 They converge on it by running the same code. Once the hook has archived the original, an upload is a video like any other: a worker observes it, plans the difference against the desired state, and applies the plan — the same `CHORES` whatever put the job on the queue. The upload path holds no list of formats of its own, so a format added to `DESIRED_FORMATS` or a template whose revision moves reaches both paths or neither. It is also how a freshly uploaded video gets its `framerate`, which the hook works out anyway for DASH segmentation and previously had nowhere to put.
 
-**Deciding which videos need converging is not ingest's.** It is an operator's, done from a terminal, and it lives in [`scripts/`](scripts/) — see [Queueing the work](#queueing-the-work). Ingest converges the video it was handed; nothing in `app/` looks at the catalogue as a whole or puts anything but an upload on the queue.
+**Deciding which videos need converging is not ingest's.** It is an operator's, done from a terminal, and it lives in fk-cli — see [Queueing the work](#queueing-the-work). Ingest converges the video it was handed; nothing in `app/` looks at the catalogue as a whole or puts anything but an upload on the queue.
 
 That matters because "this video has DASH" and "this video has *current* DASH" are different statements. Each template carries a `revision`, and `profileRevision` on the videofile row records which one produced the file. Revisions number from 1, so 0 means "registered before any of this was recorded" — which is what every pre-existing row reads as, and therefore as stale. Changing a profile is then: edit the template, bump its revision, and everything built by the old one becomes due for a rebuild without anybody keeping a list.
 
@@ -128,7 +128,7 @@ That matters because "this video has DASH" and "this video has *current* DASH" a
 | `metadata` | `duration`, `framerate` and R.128 loudness, re-derived from the original |
 | `formats` | Derivatives that are missing, or built by a superseded profile |
 
-That is the whole set, and there is deliberately no second list for one caller to run instead: `CHORES` in `app/converge/chores.py` is what it means to converge a video, and both the worker draining the queue and the terminal deciding what to put on it read it. A chore that reached one path and not the other is precisely the drift this arrangement exists to prevent — which is why the queue-side tools name a chore rather than reimplementing its question.
+That is the whole set, and there is deliberately no second list for one caller to run instead: `CHORES` in `app/converge/chores.py` is what it means to converge a video. A chore that reached one path and not the other is precisely the drift this arrangement exists to prevent, which is why the questions the queue side asks are answered from here — the desired formats and their revisions are published at [`/ingest-api/formats`](#publishing-the-format-revisions) rather than reimplemented by whoever is deciding what to queue.
 
 Both are about a video that exists, which is the constraint that keeps every chore queueable: an ingest job belongs to a video, so anything a chore can decide is something a worker can be handed. Media belonging to a video the catalogue has *deleted* fits neither half of that, and is [`fk-archive-gc`](archive-utils/README.md#garbage-collection)'s on the storage host.
 
@@ -142,28 +142,20 @@ Each is a pure function from an observed `VideoState` to the actions that would 
 
 ### Queueing the work
 
-Two tools, one per chore, and neither of them does any of the work:
+Two commands, one per chore, in [fk-cli](https://github.com/Frikanalen/fk-cli). Neither of them does any of the work:
 
 ```bash
-uv run scripts/scan-metadata.py     # videos whose duration, frame rate or loudness is missing
-uv run scripts/backfill.py          # videos whose formats are missing or built by an old profile
+fk archive refresh-metadata     # videos whose duration, frame rate or loudness is missing
+fk archive backfill             # videos whose formats are missing or built by an old profile
 ```
 
-Both print what they found and change nothing. `--apply` puts those videos in the queue, at priority 0 so a member's upload is always claimed ahead of them:
+Both print what they found and change nothing. `--apply` puts those videos in the queue, at priority 0 so a member's upload is always claimed ahead of them.
 
-```bash
-uv run scripts/backfill.py --limit 50          # look at fifty of them
-uv run scripts/backfill.py 12345               # look at one
-uv run scripts/backfill.py --apply             # queue the whole catalogue's worth
-```
+**They need an API token and nothing else** — no SSH key, no archive, no ingest configuration. That is a property rather than an economy: a plan's *actions* fall out of the videofile rows alone, and only its notes — a row whose file is missing, media nothing claims — need the archive in front of them. So the decision of what to queue is a catalogue question, and the worker that claims a video reads the archive and decides again before it does anything. Nothing there can hand a worker a stale instruction.
 
-**They need an API token and nothing else** — no SSH key, no archive, no ingest configuration. That is a property rather than an economy: a plan's *actions* fall out of the videofile rows alone, and only its notes — a row whose file is missing, media nothing claims — need the archive in front of them. So the decision of what to queue is a catalogue question, and the worker that claims a video reads the archive and decides again before it does anything. Nothing here can hand a worker a stale instruction.
+They live in fk-cli rather than here because they talk to django-api and to nothing this repository has. An operator queueing work has a token and that binary; ingest is a Kubernetes deployment, and there is no checkout on the laptop for a script to be run from. What they do need from here is what a converged video looks like *at the deployed revision*, and that is published at [`/ingest-api/formats`](#publishing-the-format-revisions) rather than read out of a working tree — so a sweep can no longer plan against a template the pool has not got yet.
 
-The token comes from `~/.frikanalen.yaml`, which is what fk-cli logs in with, for the environment that file has selected; `--environment`, `--config` and `--api-url` override that. Not ingest's own `FK_*` settings, which describe a deployment rather than a person.
-
-Run them from a checkout at roughly the revision the workers are deployed at. They read `DESIRED_FORMATS` and the template revisions out of the working tree to decide what counts as stale, so a checkout ahead of the pool queues videos the pool then finds nothing to do about — harmless, but it takes a claim to discover.
-
-They look at the catalogue, and only the catalogue. Nothing here reads the archive root, because an archived directory the catalogue has dropped is not either tool's subject — there is no job to queue for a video with no row, and that is [`fk-archive-gc`](archive-utils/README.md#garbage-collection)'s on the storage host.
+They look at the catalogue, and only the catalogue. Nothing there reads the archive root, because an archived directory the catalogue has dropped is not either command's subject — there is no job to queue for a video with no row, and that is [`fk-archive-gc`](archive-utils/README.md#garbage-collection)'s on the storage host.
 
 `--apply` leaves alone any video ingest is working on right now, since overwriting that job would reset somebody's upload under them. Nothing it can queue takes media out of the published tree, so there is no confirmation to give.
 

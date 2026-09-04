@@ -1,11 +1,8 @@
-Two unrelated things live here.
+Code generation, run by hand and committed: generate-client.sh and
+update-schema.sh for the django-api client, and generate-hook-types.sh, which
+is just a lil' hack that takes the hook request/response types from the tusd
+source, generates a JSON Schema from them, and turns that into a Pydantic file.
 
-scan-metadata.py and backfill.py are the operator tools that put videos on
-the ingest queue, sharing fk_queue/. They talk to django-api and nothing
-else; the README at the repository root describes them.
-
-Everything else is code generation, run by hand and committed:
-generate-client.sh and update-schema.sh for the django-api client, and
-generate-hook-types.sh, which is just a lil' hack that takes the hook
-request/response types from the tusd source, generates a JSON Schema from
-them, and turns that into a Pydantic file.
+The operator tools that put videos on the ingest queue used to live here too.
+They are `fk archive` in fk-cli now: they needed an API token and nothing this
+repository has, and an operator has that binary already.

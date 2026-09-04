@@ -35,10 +35,7 @@ dev = [
 
 [tool.ruff]
 line-length = 120
-# `scripts/` holds the queue-side tools, which import each other by top-level
-# name the way they do when run. Without this ruff takes `fk_queue` for a
-# third-party package and sorts its imports away from `app`'s.
-src = [".", "scripts"]
+src = ["."]
 # Generated code files. These are committed, but they are the output of
 # scripts/generate-hook-types.sh, so any lint fixed here is undone by the next
 # regeneration. Both previous entries named paths that no longer exist; these
@@ -70,9 +67,7 @@ extend-select = [
 known-third-party = ["frikanalen_django_api_client"]
 
 [tool.pytest.ini_options]
-# `scripts/` too: the queue-side tools live there and are imported by their
-# tests the same way they import each other when run.
-pythonpath = [".", "scripts"]
+pythonpath = ["."]
 # archive-utils/ is a package of its own, with its own pyproject, its own
 # tests and no dependency on this one. Without this, a pytest run from the
 # repository root collects it too, under a rootdir where its imports do not
