@@ -2,19 +2,42 @@ import asyncio
 import shutil
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from logging import getLogger
 from pathlib import Path, PurePosixPath
 
 from app.archive_store.base import (
+    TRASH_DIR,
     ArchiveEntry,
     ArchiveError,
     ArchiveSession,
     ArchiveStore,
     FileAlreadyArchived,
-    staging_path,
+    check_removable,
+    trash_path,
+    trash_stamp,
 )
 
 logger = getLogger(__name__)
+
+#: Where a copy lands before it is published. Named here rather than in the
+#: interface because the SSH archive's spool is on the far side of the fence
+#: and is the privileged command's business: nothing in this process stages
+#: anything there, and nothing in this process could.
+SPOOL_DIR = PurePosixPath(".spool")
+
+
+def staging_path(destination: PurePosixPath) -> PurePosixPath:
+    """Where a file is copied before it is published at `destination`.
+
+    Staging happens outside the published tree, so an interrupted copy cannot
+    leave a partial file where readers see it.
+
+    It stays inside the archive root because publishing is a rename, and rename
+    cannot cross a filesystem boundary. Somewhere tidier but separately mounted
+    would fail with EXDEV.
+    """
+    return SPOOL_DIR / destination
 
 
 class LocalArchiveSession(ArchiveSession):
@@ -39,32 +62,30 @@ class LocalArchiveSession(ArchiveSession):
         await asyncio.to_thread(shutil.copy2, source, staged)
 
         # Checked, not atomic: POSIX rename replaces silently, and there is no
-        # portable no-clobber rename to reach for. The SSH archive gets this for
-        # free from SFTP and is the one that matters; here the check is what
+        # portable no-clobber rename to reach for. The SSH archive gets this
+        # properly -- fk-archive links the name into place, and link(2) fails
+        # with EEXIST -- and is the one that matters; here the check is what
         # keeps the two backends answering the same way, so a republish fails in
-        # development exactly as it would against file01. The failed transfer is
-        # left in the spool rather than cleaned up, which is also what SFTP does.
-        if target.exists():
-            raise FileAlreadyArchived(f"{destination} already exists in the archive")
-
-        staged.replace(target)
-        self.tidy_spool(staged.parent)
+        # development exactly as it would against file01.
+        try:
+            if target.exists():
+                raise FileAlreadyArchived(f"{destination} already exists in the archive")
+            staged.replace(target)
+        finally:
+            # Cleared whichever way this went, which is what fk-archive does
+            # with its own staged copy: on success the published file is the
+            # same bytes, and on failure the caller still holds what it was
+            # sending, so a partial here would only fill a directory nobody
+            # ever looks in.
+            staged.unlink(missing_ok=True)
+            self.tidy_spool(staged.parent)
 
     async def list_dir(self, directory: PurePosixPath) -> list[ArchiveEntry]:
         resolved = self.resolve(directory)
         if not resolved.is_dir():
             return []
 
-        entries = []
-        for child in resolved.iterdir():
-            is_dir = child.is_dir()
-            entries.append(
-                ArchiveEntry(
-                    path=directory / child.name,
-                    is_dir=is_dir,
-                    size=0 if is_dir else child.stat().st_size,
-                )
-            )
+        entries = [ArchiveEntry(path=directory / child.name, is_dir=child.is_dir()) for child in resolved.iterdir()]
         return sorted(entries, key=lambda entry: entry.path)
 
     async def get(self, source: PurePosixPath, destination: Path) -> None:
@@ -77,16 +98,45 @@ class LocalArchiveSession(ArchiveSession):
         await asyncio.to_thread(shutil.copy2, origin, staged)
         staged.replace(destination)
 
-    async def move(self, source: PurePosixPath, destination: PurePosixPath) -> None:
-        origin = self.resolve(source)
+    async def trash(self, path: PurePosixPath) -> PurePosixPath:
+        """Rename `path` under `.trash/<stamp>/`, the way fk-archive does.
+
+        Each call gets a stamp directory it created itself, which is what makes
+        the rename into it safe without a no-clobber rename: nothing else can
+        already be inside a directory this call has just made. That is also how
+        the privileged command does it, and the two are meant to be
+        indistinguishable from a caller's side.
+        """
+        origin = self.resolve(check_removable(path))
+        if not origin.exists():
+            raise FileNotFoundError(f"{path} is not in the archive")
+
+        destination = trash_path(path, self._unique_stamp(trash_stamp(datetime.now(UTC))))
         target = self.resolve(destination)
 
-        if target.exists():
-            raise FileAlreadyArchived(f"{destination} already exists in the archive")
-
-        logger.info("Moving %s to %s", origin, target)
+        logger.info("Trashing %s to %s", origin, target)
         target.parent.mkdir(parents=True, exist_ok=True)
         origin.rename(target)
+        return destination
+
+    def _unique_stamp(self, base: str) -> str:
+        """A stamp directory this call owns outright.
+
+        Two removals in the same second are ordinary -- superseding an upload
+        trashes every format directory in a row -- so the second one takes
+        `<stamp>.1`. Purging reads the timestamp off the front of the name, so
+        a suffix costs it nothing.
+        """
+        trash = self.resolve(TRASH_DIR)
+        trash.mkdir(parents=True, exist_ok=True)
+        for suffix in range(1000):
+            candidate = base if suffix == 0 else f"{base}.{suffix}"
+            try:
+                (trash / candidate).mkdir()
+            except FileExistsError:
+                continue
+            return candidate
+        raise ArchiveError(f"could not find an unused trash directory for {base}")
 
     def tidy_spool(self, directory: Path) -> None:
         """Remove the staging directories the transfer just emptied.

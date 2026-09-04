@@ -67,11 +67,11 @@ def uploaded_file(tmp_path, color_bars_video):
 
 
 @pytest_asyncio.fixture
-async def ssh_server(tmp_path):
+async def ssh_server(tmp_path, archive_root):
     keys = tmp_path / "keys"
     keys.mkdir()
 
-    async with run_ssh_server(keys) as server:
+    async with run_ssh_server(keys, archive_root) as server:
         yield server
 
 

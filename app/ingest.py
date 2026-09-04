@@ -203,10 +203,10 @@ class Ingester:
 
         try:
             self.logger.info("Storing original file at %s", destination)
-            # Kept as an assertion rather than dropped now that the supersede
-            # above has cleared the way: if anything is still at the
-            # destination, something wrote there between the two steps, and
-            # refusing is better than publishing over a file we never looked at.
+            # Asked first, though put() would refuse an occupied destination
+            # anyway: the refusal it saves is the one that would arrive after
+            # twenty gigabytes had already crossed the wire. What the check is
+            # for is a file that appeared between the supersede above and here.
             await archive.assert_absent(destination)
             await archive.put(original_file, destination)
         except Exception as e:

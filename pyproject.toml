@@ -35,7 +35,10 @@ dev = [
 
 [tool.ruff]
 line-length = 120
-src = ["."]
+# `archive-utils/src` is the storage host's package, which the test SSH server
+# runs so that the two halves of the archive protocol are checked against each
+# other rather than against a double.
+src = [".", "archive-utils/src"]
 # Generated code files. These are committed, but they are the output of
 # scripts/generate-hook-types.sh, so any lint fixed here is undone by the next
 # regeneration. Both previous entries named paths that no longer exist; these
@@ -67,7 +70,13 @@ extend-select = [
 known-third-party = ["frikanalen_django_api_client"]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+# `archive-utils/src` is not a dependency of this package and must never
+# become one: it is what runs on the storage host, as the account that owns
+# every video. It is on the test path because the SSH archive is now a client
+# of it, and the fixture that stands in for file01 runs the real thing -- the
+# two agree on a command line, an exit code and a line of JSON, and a double
+# here would be free to keep agreeing with an engine that had drifted.
+pythonpath = [".", "archive-utils/src"]
 # archive-utils/ is a package of its own, with its own pyproject, its own
 # tests and no dependency on this one. Without this, a pytest run from the
 # repository root collects it too, under a rootdir where its imports do not

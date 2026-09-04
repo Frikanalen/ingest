@@ -6,9 +6,9 @@ import asyncssh
 import pytest
 import pytest_asyncio
 
-from app.archive_store import ArchiveError, FileAlreadyArchived, SshArchiveStore, create_archive_store
-from app.archive_store.base import SPOOL_DIR, staging_path
+from app.archive_store import ArchiveError, FileAlreadyArchived, SshArchiveStore, create_archive_store, fk_archive
 from app.util.settings import SshArchiveSettings
+from fk_archive_utils.archive_path import SPOOL_DIR
 from tests.utils.ssh_server import run_ssh_server
 
 DESTINATION = PurePosixPath("12345/original/example_video.mp4")
@@ -29,11 +29,11 @@ def archive_root(tmp_path):
 
 
 @pytest_asyncio.fixture
-async def ssh_server(tmp_path):
+async def ssh_server(tmp_path, archive_root):
     keys = tmp_path / "keys"
     keys.mkdir()
 
-    async with run_ssh_server(keys) as server:
+    async with run_ssh_server(keys, archive_root) as server:
         yield server
 
 
@@ -61,11 +61,12 @@ async def test_put_uploads_and_creates_missing_parents(store, archive_root, sour
 
 @pytest.mark.asyncio
 async def test_put_leaves_no_partial_file_behind(store, archive_root, source_file):
+    """The spool is on the far side of the fence now, and is emptied there."""
     async with store.open() as archive:
         await archive.put(source_file, DESTINATION)
 
     assert sorted(p.name for p in (archive_root / DESTINATION).parent.iterdir()) == ["example_video.mp4"]
-    assert not list((archive_root / SPOOL_DIR).rglob("*.mp4"))
+    assert not list((archive_root / SPOOL_DIR).iterdir())
 
 
 @pytest.mark.asyncio
@@ -95,11 +96,11 @@ async def test_assert_absent_rejects_an_occupied_destination(store, source_file)
 
 @pytest.mark.asyncio
 async def test_put_refuses_to_overwrite_a_file_that_appeared_mid_job(store, archive_root, source_file):
-    """The publishing rename must fail rather than clobber a racing writer.
+    """Publishing must fail rather than clobber a racing writer.
 
-    Reported as FileAlreadyArchived rather than as whatever SFTP error the
-    server chose, so callers can tell an occupied destination apart from a full
-    disk without knowing anything about asyncssh.
+    Reported as FileAlreadyArchived rather than as the exit code it arrived as,
+    so callers can tell an occupied destination apart from a full disk without
+    knowing anything about the command on the far end.
     """
     target = archive_root / DESTINATION
     target.parent.mkdir(parents=True)
@@ -113,8 +114,9 @@ async def test_put_refuses_to_overwrite_a_file_that_appeared_mid_job(store, arch
 
 
 @pytest.mark.asyncio
-async def test_a_failed_publish_leaves_nothing_in_the_published_tree(store, archive_root, source_file):
-    """A leftover transfer is parked in the spool, never beside the real file."""
+async def test_a_failed_publish_leaves_nothing_behind_at_either_end(store, archive_root, source_file):
+    """Not even in the spool. The sender still has the file, so a partial copy
+    on the archive host would only fill a directory nobody looks in."""
     target = archive_root / DESTINATION
     target.parent.mkdir(parents=True)
     target.write_bytes(b"someone got here first")
@@ -123,8 +125,52 @@ async def test_a_failed_publish_leaves_nothing_in_the_published_tree(store, arch
         with pytest.raises(FileAlreadyArchived):
             await archive.put(source_file, DESTINATION)
 
-    assert (archive_root / staging_path(DESTINATION)).exists()
+    assert not list((archive_root / SPOOL_DIR).iterdir())
     assert sorted(p.name for p in target.parent.iterdir()) == ["example_video.mp4"]
+
+
+@pytest.mark.asyncio
+async def test_the_archive_refuses_every_write_over_sftp(store, archive_root):
+    """The read half is `sftp-server -R`, and this is what that buys.
+
+    Asserted rather than assumed, because it is the guarantee every other test
+    here rests on: the puts above only prove the mutation went through the
+    privileged command if there was no other way for it to have gone.
+    """
+    async with store.open() as archive:
+        with pytest.raises(asyncssh.SFTPError):
+            await archive.sftp.mkdir(str(archive_root / "12345"))
+
+        with pytest.raises(asyncssh.SFTPError):
+            await archive.sftp.open(str(archive_root / "smuggled"), "wb")
+
+    assert sorted(p.name for p in archive_root.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_arrives_as_the_sentence_the_archive_wrote(store, source_file):
+    """The exit code decides the exception; stderr is what says why."""
+    async with store.open() as archive:
+        with pytest.raises(ArchiveError, match="must be <video-id>/<category>/<filename>"):
+            await archive.put(source_file, PurePosixPath("12345/original/nested/example_video.mp4"))
+
+
+@pytest.mark.asyncio
+async def test_a_transfer_of_the_wrong_length_publishes_nothing(store, archive_root, source_file, monkeypatch):
+    """The promised size is the only thing that can spot a dropped connection.
+
+    Provoked by promising a length the transfer will not match, which is what a
+    connection dying partway looks like from the archive's side.
+    """
+    honest = fk_archive.publish
+    monkeypatch.setattr(fk_archive, "publish", lambda destination, *, size: honest(destination, size=size + 1))
+
+    async with store.open() as archive:
+        with pytest.raises(ArchiveError, match="received"):
+            await archive.put(source_file, DESTINATION)
+
+    assert not (archive_root / DESTINATION).exists()
+    assert not list((archive_root / SPOOL_DIR).iterdir())
 
 
 @pytest.mark.asyncio

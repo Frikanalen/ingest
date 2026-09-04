@@ -3,7 +3,7 @@ from pathlib import PurePosixPath
 import pytest
 
 from app.archive_store import ArchiveError, FileAlreadyArchived, LocalArchiveStore, create_archive_store
-from app.archive_store.base import SPOOL_DIR
+from app.archive_store.local import SPOOL_DIR
 from app.util.settings import LocalArchiveSettings
 
 DESTINATION = PurePosixPath("12345/original/example_video.mp4")

@@ -23,8 +23,8 @@ VIDEO_ID = "12345"
 DESIRED = DesiredState(formats={VideoFileVariantEnum.DASH: 2, VideoFileVariantEnum.LARGE_THUMB: 1})
 
 
-def entry(path: str, is_dir: bool = False, size: int = 1024) -> ArchiveEntry:
-    return ArchiveEntry(path=PurePosixPath(path), is_dir=is_dir, size=size)
+def entry(path: str, is_dir: bool = False) -> ArchiveEntry:
+    return ArchiveEntry(path=PurePosixPath(path), is_dir=is_dir)
 
 
 def registered(

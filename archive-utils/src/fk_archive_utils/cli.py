@@ -51,11 +51,6 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="bytes the caller is about to send; a transfer of any other length is refused",
     )
-    publish.add_argument(
-        "--sha256",
-        help="optional content hash, checked before anything is published",
-    )
-
     trash = verbs.add_parser("trash", help="move a video, or one directory in one, into .trash/")
     trash.add_argument("path")
 
@@ -97,7 +92,6 @@ def _dispatch(args: argparse.Namespace, profile: Profile, stdin) -> operations.R
                 parse_file_path(args.destination, what="destination"),
                 stdin,
                 expected_size=args.size,
-                expected_sha256=args.sha256,
             )
         case "trash":
             return operations.trash(profile, parse_removable_path(args.path, what="path"))

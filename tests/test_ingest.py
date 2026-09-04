@@ -66,11 +66,11 @@ def uploaded_file(upload_dir, color_bars_video):
 
 
 @pytest_asyncio.fixture
-async def ssh_server(tmp_path):
+async def ssh_server(tmp_path, archive_root):
     keys = tmp_path / "keys"
     keys.mkdir()
 
-    async with run_ssh_server(keys) as server:
+    async with run_ssh_server(keys, archive_root) as server:
         yield server
 
 
@@ -254,9 +254,15 @@ async def test_archives_nothing_but_the_finished_files(ingested, archive_root):
 
 
 @pytest.mark.asyncio
-async def test_leaves_no_spool_behind(ingested, archive_root):
-    """The staging tree is swept as transfers finish, not left to accumulate."""
-    assert sorted(str(p.relative_to(archive_root)) for p in archive_root.iterdir()) == [VIDEO_ID]
+async def test_leaves_nothing_in_the_spool(ingested, archive_root):
+    """The staging tree is emptied as transfers finish, not left to accumulate.
+
+    `.spool/` itself stays. It belongs to the archive account, which creates it
+    once and publishes every file through it; ingest no longer has anything to
+    sweep there, and could not sweep it if it did.
+    """
+    assert sorted(str(p.relative_to(archive_root)) for p in archive_root.iterdir()) == [".spool", VIDEO_ID]
+    assert list((archive_root / ".spool").iterdir()) == []
 
 
 @pytest.mark.asyncio

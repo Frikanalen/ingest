@@ -1,3 +1,9 @@
 upload/
 archive/
 .venv
+
+# The storage host's package, not this image's. It runs as the account that
+# owns every video, under sudo, on file01 -- ingest reaches it over SSH and has
+# no use for a copy. Kept out so nothing in here can be mistaken for something
+# this container is able to run.
+archive-utils/

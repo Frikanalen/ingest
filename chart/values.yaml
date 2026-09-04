@@ -19,6 +19,12 @@ archive:
   # Where finished files are deposited. With archive.ssh.enabled this is a path
   # on the archive host; otherwise it is a path inside the container, which is
   # only useful for development.
+  #
+  # Over SSH this is the path ingest *reads* from. Writes name a path relative
+  # to whatever root the fk-archive profile on the archive host declares, so
+  # this and `root` in /etc/fk-archive-utils/profiles.d/<profile>.toml have to
+  # be the same directory. Pointing them at different ones publishes files
+  # ingest then cannot find.
   dir: /archive/media
 
   ssh:
@@ -235,7 +241,8 @@ resources:
     # A backstop against a runaway, not a working limit. This pod no longer
     # transcodes -- it archives the original and queues a job, and the workers
     # do the rest -- so the ladder's ~1Gi apiece is their problem now, bounded
-    # by their replica count. What is left here is ffprobe and an SFTP put.
+    # by their replica count. What is left here is ffprobe and streaming the
+    # original up to fk-archive.
     memory: "4Gi"
 
 podAnnotations:

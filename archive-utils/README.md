@@ -92,10 +92,17 @@ Streaming through the privileged command instead means the archive account
 creates the file itself. Ingest needs no writable directory on file01.
 
 The staging is still real, just on the far side of the fence: bytes land in
-`.spool/`, are checked against `--size` (and `--sha256`, if given), and are
-linked into the published tree only once all of them have arrived. `--size` is
-required because it is the only thing that tells a complete transfer apart from
-a connection that dropped — a truncated stream ends exactly like a whole one.
+`.spool/`, are checked against `--size`, and are linked into the published tree
+only once all of them have arrived. `--size` is required because it is the only
+thing that tells a complete transfer apart from a connection that dropped — a
+truncated stream ends exactly like a whole one.
+
+The length is also the only check made on the content, and deliberately so.
+SSH already carries its own integrity check over every byte of the transfer,
+and a digest the sender computes from the same bytes it then sends agrees with
+itself whatever happened to them beforehand — so a hash here would cost a full
+pass over every 20 GB original to restate something the transport has already
+established.
 
 ## Garbage collection
 

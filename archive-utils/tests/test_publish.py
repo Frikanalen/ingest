@@ -1,4 +1,3 @@
-import hashlib
 import io
 import os
 import stat
@@ -23,7 +22,6 @@ def test_publishes_the_bytes_it_was_given(profile, archive_root: Path):
 
     assert (archive_root / "12/original/a.mov").read_bytes() == CONTENT
     assert result.bytes_written == len(CONTENT)
-    assert result.sha256 == hashlib.sha256(CONTENT).hexdigest()
 
 
 def test_creates_the_parents_the_destination_names(profile, archive_root: Path):
@@ -54,25 +52,6 @@ def test_a_short_transfer_publishes_nothing(profile, archive_root: Path):
         do_publish(profile, expected_size=999999)
 
     assert not (archive_root / "12/original").exists()
-
-
-def test_a_transfer_that_does_not_hash_as_promised_publishes_nothing(profile, archive_root: Path):
-    with pytest.raises(TransferError, match="sha256"):
-        do_publish(profile, expected_sha256="0" * 64)
-
-    assert not (archive_root / "12/original").exists()
-
-
-def test_the_hash_is_checked_when_it_is_given(profile, archive_root: Path):
-    do_publish(profile, expected_sha256=hashlib.sha256(CONTENT).hexdigest().upper())
-
-    assert (archive_root / "12/original/a.mov").exists()
-
-
-@pytest.mark.parametrize("bad", ["deadbeef", "z" * 64])
-def test_a_hash_that_is_not_a_hash_is_a_usage_error(profile, bad):
-    with pytest.raises(UsageError, match="sha256"):
-        do_publish(profile, expected_sha256=bad)
 
 
 def test_a_negative_size_is_a_usage_error(profile):
