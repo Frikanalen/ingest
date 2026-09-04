@@ -130,10 +130,14 @@ workers:
 
   # Member uploads are drained by this pool, so it must not be zero: a video
   # whose job nobody claims sits at `pending` indefinitely, and nothing in
-  # ingest will notice or complain. Two is enough for a burst of a few
-  # simultaneous uploads; raise it here rather than with `kubectl scale`,
-  # which the next `helm upgrade` reverts to whatever this says.
-  replicaCount: 2
+  # ingest will notice or complain.
+  #
+  # Three, for the three nodes -- a fixed pool sized to the cluster, until
+  # there is a queue-depth metric to scale on. Note that this is a count and
+  # not a placement: nothing here says one per node, so the scheduler is free
+  # to put two on the same one. Raise it here rather than with `kubectl
+  # scale`, which the next `helm upgrade` reverts to whatever this says.
+  replicaCount: 3
 
   # Which queue this pool serves. Every job's source is the archive now -- the
   # hook archives the original before it queues anything -- so this is about
@@ -152,6 +156,37 @@ workers:
   # raise it if losing an encode to a drain matters more than the wait.
   terminationGracePeriodSeconds: 3600
 
+  # Replace a worker by retiring one first, never by adding one alongside.
+  #
+  # The default RollingUpdate rounds to maxSurge 1 / maxUnavailable 0 at two
+  # replicas, which deadlocks a pool this size: nothing may be terminated
+  # until the replacement is Ready, the replacement cannot schedule until the
+  # CPU the outgoing worker reserves is released, and because the outgoing
+  # worker is never sent SIGTERM it does not release it. The rollout then sits
+  # there indefinitely rather than resolving slowly.
+  #
+  # Surging is the wrong shape here in any case. Workers are fungible and
+  # claim their own work, so a replacement adds nothing until the old one has
+  # gone -- and an idle worker exits within milliseconds of SIGTERM, so making
+  # room first is nearly free whenever the queue is quiet.
+  #
+  # Two at a time, so a deploy that catches every worker mid-encode is two
+  # drains long rather than three. What it costs is capacity during a rollout:
+  # one worker is guaranteed, not three. That is the right trade for a queue
+  # that waits patiently -- a job nobody is free to claim is claimed a little
+  # later, which is not the same kind of problem as an upload path being down.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 2
+
+  # A rollout must be allowed to take as long as draining does. The default is
+  # 600s against a grace period of an hour, so any worker that sees out a real
+  # encode trips ProgressDeadlineExceeded and reports the app as degraded for
+  # no reason. Keep this comfortably above terminationGracePeriodSeconds.
+  progressDeadlineSeconds: 4200
+
   work:
     mountPath: /work
     # Holds one video's original plus its derivatives. Bigger than the ingest
@@ -159,13 +194,22 @@ workers:
     emptyDir:
       sizeLimit: 100Gi
 
-  # Pure batch, so ask for real CPU: unlike the ingest pod there is nothing
-  # latency-sensitive here to protect, and a worker that gets the floor of CPU
-  # shares just makes the backfill take proportionally longer. Still no
-  # limits.cpu -- see the note on the ingest pod's resources below.
+  # Sized for the pool's real duty cycle, which is idle punctuated by bursts.
+  #
+  # A request is reserved around the clock whether or not there is a job, so
+  # asking for what a ladder can use at peak takes replicaCount x that out of
+  # the cluster permanently to cover a burst that happens occasionally. It is
+  # also what made rollouts fail to schedule.
+  #
+  # Nothing is given up by asking for less. There is deliberately no
+  # limits.cpu -- see the note on the ingest pod's resources below -- so a
+  # burst still bursts into every idle core on the node; the request only sets
+  # what is guaranteed when the node is contended, and losing that race just
+  # makes an encode take longer. If bursts start queueing rather than running
+  # slowly, the answer is more workers, not a fatter reservation each.
   resources:
     requests:
-      cpu: "4"
+      cpu: "2"
       # A ladder's encoder buffers, sized by resolution and not by duration --
       # see the note on the ingest pod's resources below. Nothing a worker
       # holds grows with the length of what it is encoding: ffmpeg's progress
@@ -173,6 +217,22 @@ workers:
       memory: "1Gi"
     limits:
       memory: "4Gi"
+
+  # Prefer a worker per node rather than two on one and none on another. Each
+  # holds a whole encode's scratch space and saturates what CPU it is given,
+  # so stacking them makes them contend for one node's disk and cores while
+  # another sits idle.
+  #
+  # Soft on purpose. DoNotSchedule would make this a rollout's problem the
+  # moment a node is cordoned or full -- a replacement with nowhere to go that
+  # satisfies the constraint stays Pending, which is the deadlock this pool
+  # already had once. ScheduleAnyway spreads when it can and places the pod
+  # regardless when it cannot.
+  topologySpread:
+    enabled: true
+    maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
 
   # Batch work is a reasonable thing to keep off the nodes serving the site.
   nodeSelector: {}

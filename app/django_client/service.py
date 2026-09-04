@@ -111,6 +111,18 @@ class DjangoApiService:
             ),
         )
 
+    async def release_ingest_job(self, video_id: str):
+        """Put a claimed job back in the queue without working it.
+
+        Claimable means waiting or leased-out-and-silent, so reporting the
+        state back to `pending` is the whole of an un-claim: the row keeps the
+        worker that took it, and the next claim overwrites that. Without this
+        the video is still recovered -- the lease expires and someone takes it
+        again -- but the queue stalls on it for the length of the lease for no
+        reason, when we know right now that we are not going to do it.
+        """
+        return await self.report_ingest_state(video_id, IngestStateEnum.PENDING)
+
     async def get_ingest_job(self, video_id: str):
         """How far ingest has got with this video.
 

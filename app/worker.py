@@ -98,6 +98,14 @@ class Worker:
         logger.addFilter(VideoIdFilter(video_id))
         logger.info("Claimed video %s", video_id)
 
+        if self.draining:
+            # SIGTERM landed while this claim was in flight. Starting the job
+            # now would mean starting hours of work with only the grace period
+            # left to do it in, and being killed partway is the one outcome
+            # that actually loses the encoding -- so hand it straight back.
+            await self._release(video_id)
+            return True
+
         await self._work(video_id, job.kind)
         return True
 
@@ -141,6 +149,19 @@ class Worker:
         else:
             await reporter.state(IngestStateEnum.DONE, percentage_done=100)
             logger.info("Finished video %s", video_id)
+
+    async def _release(self, video_id: str) -> None:
+        """Hand a claim back, best-effort.
+
+        Failing to give it back is not worth staying alive to retry: the lease
+        is the backstop, and expires whether or not this call lands. Raising
+        here would only turn a tidy exit into a failed one.
+        """
+        logger.info("Drained mid-claim; returning video %s to the queue", video_id)
+        try:
+            await self.django_api.release_ingest_job(video_id)
+        except Exception:
+            logger.exception("Could not return video %s to the queue; leaving it to the lease", video_id)
 
     async def _fail(self, reporter: IngestReporter, code: IngestErrorCode, error: Exception) -> None:
         """Record the failure and carry on to the next job.
