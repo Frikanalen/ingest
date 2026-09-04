@@ -8,6 +8,7 @@ Build-Depends:
  pybuild-plugin-pyproject,
  python3-all,
  python3-setuptools,
+ sudo,
 Standards-Version: 4.7.0
 Homepage: https://github.com/Frikanalen/ingest
 Rules-Requires-Root: no
@@ -25,7 +26,10 @@ Description: privileged mutations of a Frikanalen media archive
  the account it logs in as write access to the archive, this package installs
  the three mutations it actually performs -- publish a file, trash a directory,
  or delete one explicitly allowed regenerable variant -- as commands that run
- as the account owning the archive, reached through a single sudoers rule.
+ as the account owning the archive, reached through a single sudoers rule. That
+ rule ships with the package, as a conffile under /etc/sudoers.d: without it
+ fk-archive is installed but unreachable, since an SSH session has no password
+ to give sudo.
  .
  Two more ship as operator tools with their own entry points, deliberately
  outside what that rule grants: fk-archive-purge-trash, which is the only thing

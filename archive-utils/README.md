@@ -93,6 +93,15 @@ Staging therefore cannot name production's archive however it is invoked. Had
 the root been a `--root` option, that rule would have had to trust the caller
 not to.
 
+That line is not left to the deployment to remember. The package installs
+`/etc/sudoers.d/fk-archive-utils` as a conffile, carrying a rule for each
+profile this project runs; a host with only one of the two accounts gets a rule
+that never matches. Without it `fk-archive` is installed but unreachable, and
+the failure is quiet in the worst way — sudo asks an SSH session for a password
+it has no way to supply, and every publish fails with `sudo: a password is
+required`. What the deployment still owns is the profile: a `<name>.toml` that
+does not exist means a rule that grants access to an archive nobody named.
+
 ## Publishing takes the bytes on stdin
 
 `fk-archive prod publish 12/original/a.mov --size 4823` reads the file from
