@@ -285,7 +285,7 @@ The old Service and Ingress go with the upgrade; Helm removes them itself, since
 
 It has no Service and no ingress. Workers reach out to django-api and to the archive; nothing reaches in, so there is no endpoint to protect.
 
-Capacity is `replicas`, and nothing else — a worker asks for a job only when it is free, so no dispatcher has to know how many there are. **It must not be zero**: member uploads are drained by this pool, and a job nobody claims sits at `pending` indefinitely with nothing to notice or complain. It ships at two, which covers a burst of a few simultaneous uploads; scale it up for a backfill:
+Capacity is `replicas`, and nothing else — a worker asks for a job only when it is free, so no dispatcher has to know how many there are. **It must not be zero**: member uploads are drained by this pool, and a job nobody claims sits at `pending` indefinitely with nothing to notice or complain. It ships at three, one for each node in the cluster — though that is a count and not a placement, and nothing stops the scheduler putting two of them on the same node. Scale it up for a backfill:
 
 ```bash
 kubectl scale deployment/ingest-workers --replicas=6
