@@ -14,6 +14,7 @@ from app.archive_store.base import (
     ArchiveError,
     ArchiveSession,
     ArchiveStore,
+    check_deletable,
 )
 from app.archive_store.directory import DirectoryReader
 from app.util.pretty_duration import pretty_duration
@@ -135,6 +136,18 @@ class SshArchiveSession(DirectoryReader, ArchiveSession):
             # name the far side of is one nobody can undo.
             raise ArchiveError(f"the archive trashed {path} but did not say where it went: {result}")
         return PurePosixPath(destination)
+
+    async def delete_variant(self, variant: str, video_id: str) -> bool:
+        """Destroy one variant outright. False means it was already gone.
+
+        The far side reports an absent variant as a success rather than as a
+        missing path, which is what keeps this idempotent: exit 4 would arrive
+        here as FileNotFoundError and a retry could never finish.
+        """
+        check_deletable(variant)
+        logger.info("Deleting %s of video %s", variant, video_id)
+        result = await self._run(fk_archive.delete_variant(variant, video_id))
+        return bool(result.get("deleted"))
 
     async def _run(self, command: str, *, stdin: Path | None = None) -> dict:
         """Ask the storage host to do one thing, and read what it says back.

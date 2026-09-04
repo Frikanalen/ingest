@@ -52,6 +52,17 @@ def trash(path: PurePosixPath) -> str:
     return f"{COMMAND} trash {shlex.quote(str(path))}"
 
 
+def delete_variant(variant: str, video_id: str) -> str:
+    """Ask for one deletable variant of one video to be destroyed.
+
+    Two arguments rather than a path, because that is the whole of what the far
+    side accepts: it builds the path from them itself and refuses any variant
+    outside its own allowlist, so there is no path here for a caller to get
+    wrong or for this engine to point somewhere it should not.
+    """
+    return f"{COMMAND} delete-variant {shlex.quote(variant)} {shlex.quote(video_id)}"
+
+
 def interpret(command: str, returncode: int | None, stdout: bytes, stderr: bytes) -> dict:
     """What the command reported, or the exception its exit code names.
 

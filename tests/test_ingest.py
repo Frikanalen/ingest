@@ -22,7 +22,7 @@ from frikanalen_django_api_client.models import IngestKindEnum, VideoFileVariant
 from app.api.hooks.metadata import MetadataExtractor
 from app.archive_store import SshArchiveStore
 from app.archive_store.ssh import SshArchiveSession
-from app.formats import current_revision
+from app.formats import DASH_PREVIEW, current_revision
 from app.ingest import Ingester
 from app.media.loudness.measure import measure_loudness
 from app.util.settings import SshArchiveSettings
@@ -286,10 +286,39 @@ async def test_registers_archive_relative_paths_with_django(ingested, django_api
         VideoFileVariantEnum.LARGE_THUMB: f"{VIDEO_ID}/large_thumb/example_video.jpg",
         VideoFileVariantEnum.MED_THUMB: f"{VIDEO_ID}/med_thumb/example_video.jpg",
         VideoFileVariantEnum.SMALL_THUMB: f"{VIDEO_ID}/small_thumb/example_video.jpg",
+        # Registered while it stands in for the ladder, and unregistered again
+        # once the ladder lands: this is everything that was ever registered,
+        # not what the video is left holding.
+        DASH_PREVIEW: f"{VIDEO_ID}/dash_preview/manifest.mpd",
         # Only the manifest: the media it names is reached through it, never
         # on its own.
         VideoFileVariantEnum.DASH: f"{VIDEO_ID}/dash/manifest.mpd",
     }
+
+
+@pytest.mark.asyncio
+async def test_the_preview_is_published_before_the_ladder_it_stands_in_for(ingested, django_api):
+    """The whole point of it. A preview registered after the ladder is a
+    preview nobody could have watched while they were waiting for one."""
+    order = [call.kwargs["file_format"] for call in django_api.create_video_file.call_args_list]
+
+    assert order.index(DASH_PREVIEW) < order.index(VideoFileVariantEnum.DASH)
+
+
+@pytest.mark.asyncio
+async def test_the_preview_is_destroyed_once_the_ladder_is_registered(ingested, archive_root):
+    """Destroyed rather than trashed, and gone from the published tree.
+
+    Checked against the archive itself rather than against the call, because
+    what matters is that nothing is left under the video for a reader to find
+    -- and that `.trash/` has not collected a preview it would make an operator
+    read past.
+    """
+    assert not (archive_root / VIDEO_ID / DASH_PREVIEW).exists()
+    assert (archive_root / VIDEO_ID / "dash" / "manifest.mpd").exists()
+
+    trashed = archive_root / ".trash"
+    assert not trashed.exists() or not list(trashed.rglob(DASH_PREVIEW))
 
 
 @pytest.mark.asyncio

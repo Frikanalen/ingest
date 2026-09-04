@@ -18,10 +18,15 @@ from app.formats import UNTRACKED_REVISION
 class Action:
     """One step toward the desired state.
 
-    Every one of them derives something from the video's source file, which is
-    why `Applier` simply fetches it once for any plan that has work in it. An
-    action that did not need the original would want that decision back.
+    Most of them derive something from the video's source file, which is why
+    `Applier` fetches it once for any plan that needs it at all. `needs_source`
+    is what "at all" means: an action that says no is one a plan can be made
+    entirely of without a multi-gigabyte transfer nothing reads.
     """
+
+    #: Whether carrying this out requires the video's original. Only false for
+    #: an action whose whole subject is media the archive already holds.
+    needs_source: bool = True
 
     def describe(self) -> str:
         raise NotImplementedError
@@ -61,3 +66,35 @@ class RefreshMetadata(Action):
 
     def describe(self) -> str:
         return f"refresh {', '.join(self.fields)} from the original"
+
+
+@dataclass(frozen=True)
+class RetirePreview(Action):
+    """Destroy the preview, now that the ladder it stood in for is registered.
+
+    Destroyed rather than trashed, which is the one place this codebase does
+    that. `.trash/` exists so an operator can look at what was removed before
+    `fk-archive-purge-trash` finishes the job, and a preview per upload would
+    bury the things that reading is for. It is safe to make an exception of
+    because a preview is regenerable from the original and was built to be
+    thrown away -- see `app.formats.DASH_PREVIEW`.
+
+    Carries no row id. The preview it retires may have been registered minutes
+    earlier by the same plan, whose row id nothing here could have known when
+    the plan was made, so the applier reads the rows back instead.
+
+    Planned last, and only ever after the `dash` that supersedes it. `Applier`
+    runs actions in order and lets exceptions through, so a ladder that fails
+    stops the plan before this runs and the preview survives exactly the
+    failure it exists for.
+    """
+
+    video_id: str
+    #: Where the preview lives, for the log. The archive is told the variant
+    #: and the video id, not a path.
+    directory: PurePosixPath
+
+    needs_source = False
+
+    def describe(self) -> str:
+        return f"retire {self.directory}, now superseded by dash"

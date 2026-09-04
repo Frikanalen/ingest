@@ -4,11 +4,13 @@ The plan says what; this says how. Kept apart from the chores because deciding
 and doing have very different testability: one is arithmetic over observed
 state, the other moves gigabytes between hosts.
 
-The source file is fetched once, for any plan that has work in it, and read
-from the archive rather than from anything the plan carried -- so a directory
-this same plan has already swapped out is reflected. A plan with no actions
-fetches nothing, which matters because that is exactly the case where there may
-be no original to fetch.
+The source file is fetched once, for any plan holding an action that says it
+needs one, and read from the archive rather than from anything the plan carried
+-- so a directory this same plan has already swapped out is reflected. A plan
+with no actions fetches nothing, which matters because that is exactly the case
+where there may be no original to fetch; so does a plan made only of actions
+about media the archive already holds, which is what keeps retiring a preview
+from costing a transfer the size of the video.
 """
 
 from dataclasses import replace
@@ -18,9 +20,10 @@ from tempfile import TemporaryDirectory
 
 from app.api.hooks.metadata import MetadataExtractor
 from app.archive_store import ArchiveSession
-from app.converge.actions import Action, ProduceFormat, RefreshMetadata
+from app.converge.actions import Action, ProduceFormat, RefreshMetadata, RetirePreview
 from app.converge.chores import ORIGINAL_DIR, Plan
 from app.django_client.service import DjangoApiService
+from app.formats import DASH_PREVIEW
 from app.media.produce import FormatProducer, SourceMedia
 from app.media.segmentation import segmentation_for
 from app.runner import ProgressCallback
@@ -65,11 +68,13 @@ class Applier:
         measuring the same file's loudness twice.
         """
         with TemporaryDirectory(dir=self.work_dir, prefix=f"apply-{plan.video_id}-") as scratch:
-            # Once, up front, for any plan that has work in it: every action
-            # there is derives something from the source file. A plan with no
-            # actions fetches nothing, which is the case where there may well
-            # be no original to fetch.
-            if plan.actions and source is None:
+            # Once, up front, for any plan that has an action needing it. Most
+            # do -- they derive something from the source file -- but not all:
+            # retiring a preview is about media the archive already holds, and
+            # a plan that is only that must not pull down an original nothing
+            # will read. A plan with no actions fetches nothing either, which
+            # is the case where there may well be no original to fetch.
+            if source is None and any(action.needs_source for action in plan.actions):
                 source = await self._fetch_source(plan.video_id, Path(scratch))
 
             for action in plan.actions:
@@ -121,8 +126,35 @@ class Applier:
                 assert source is not None, "refreshing metadata needs the original"
                 await self._refresh(fields, video_id, file_id, source)
 
+            case RetirePreview(directory=directory):
+                await self._retire_preview(video_id, directory)
+
             case _:
                 raise NotImplementedError(f"no way to apply {action!r}")
+
+    async def _retire_preview(self, video_id: str, directory: PurePosixPath) -> None:
+        """Destroy the preview, then drop the rows that named it.
+
+        Archive first, matching every other removal in this codebase: reversed,
+        a failure between the two would destroy the record of media it then
+        failed to remove. This way a run interrupted anywhere in here is
+        finished by the retry -- the delete is idempotent on the far side, and
+        the rows are read back rather than carried in the plan, because the
+        preview may have been registered by this same plan minutes ago and its
+        id could not have been known when the plan was made.
+        """
+        deleted = await self.archive.delete_variant(DASH_PREVIEW, video_id)
+        logger.info(
+            "video %s: %s",
+            video_id,
+            f"removed {directory}" if deleted else f"{directory} was already gone",
+        )
+
+        registered = await self.django_api.get_files_for_video(video_id)
+        for row in registered.results or []:
+            if row.variant == DASH_PREVIEW:
+                logger.info("Unregistering videofile %s: the preview it names has been retired", row.id)
+                await self.django_api.delete_video_file(row.id)
 
     async def _refresh(self, fields: tuple[str, ...], video_id: str, file_id: int, source: SourceMedia) -> None:
         if "duration" in fields:

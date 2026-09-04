@@ -43,6 +43,9 @@ class RecordingSession(ArchiveSession):
     async def trash(self, path: PurePosixPath) -> PurePosixPath:
         raise NotImplementedError
 
+    async def delete_variant(self, variant: str, video_id: str) -> bool:
+        raise NotImplementedError
+
 
 @pytest.fixture
 def producer() -> FormatProducer:
