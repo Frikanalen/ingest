@@ -42,6 +42,22 @@ def check_removable(path: PurePosixPath) -> PurePosixPath:
     return path
 
 
+#: Variants `delete_variant` may destroy. Restated from `fk-archive`, which
+#: refuses everything else in its own argument parser: a local archive that
+#: accepted more would let code be written against it that file01 then declines
+#: to run. Kept an allowlist for the same reason it is one there -- the failure
+#: mode of a list of protected names is that a variant added later is
+#: destroyable by default and nobody comes back to this line.
+DELETABLE_VARIANTS = frozenset({"dash_preview"})
+
+
+def check_deletable(variant: str) -> str:
+    """Refuse a variant that must not be destroyed rather than trashed."""
+    if variant not in DELETABLE_VARIANTS:
+        raise ArchiveError(f"{variant} is not a variant that may be destroyed; trash it instead")
+    return variant
+
+
 def trash_path(path: PurePosixPath, stamp: str) -> PurePosixPath:
     """Where `path` goes when it is taken out of the published tree.
 
@@ -142,10 +158,13 @@ class ArchiveSession(ArchiveReader, ABC):
     async def trash(self, path: PurePosixPath) -> PurePosixPath:
         """Take `path` out of the published tree, and say where it went.
 
-        A rename into `trash_path()`, never a delete: nothing in this codebase
-        has a way to destroy archived media, so a rule that turns out to be
-        wrong costs a rename back rather than a restore from backup. Purging is
-        a separate and deliberate act, and lives on the storage host.
+        A rename into `trash_path()`, never a delete: nothing here can destroy
+        anything that cannot be rebuilt from the original, so a rule that turns
+        out to be wrong costs a rename back rather than a restore from backup.
+        Purging is a separate and deliberate act, and lives on the storage host.
+
+        The one exception is `delete_variant`, which is confined by an
+        allowlist to media built to be thrown away -- see DELETABLE_VARIANTS.
 
         `path` is a whole video or one directory inside one, which is all
         anything has ever asked to remove. Raises FileNotFoundError if there is
@@ -156,6 +175,24 @@ class ArchiveSession(ArchiveReader, ABC):
         archive asks a privileged command to do this and is told where it
         landed. A move it could compose out of would be a move it could point
         anywhere.
+        """
+
+    @abstractmethod
+    async def delete_variant(self, variant: str, video_id: str) -> bool:
+        """Destroy one variant of one video outright, and say if it was there.
+
+        The only thing here that does not go through `.trash/`, and confined to
+        DELETABLE_VARIANTS because of it. That directory is where an operator
+        looks before `fk-archive-purge-trash` finishes the job, and a preview
+        per upload would bury the removals that reading it is for. Making an
+        exception is safe only for media that is regenerable from the original
+        and was built to be discarded.
+
+        Takes a variant and a video id rather than a path, because that is the
+        whole of what the far side accepts: it builds the path itself, so no
+        caller can name anything else. Idempotent -- False means it was already
+        gone, which is the requested end state and so not a failure. That is
+        what makes the retire step safe to plan again after a partial run.
         """
 
 

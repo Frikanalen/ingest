@@ -13,6 +13,7 @@ from app.archive_store.base import (
     ArchiveSession,
     ArchiveStore,
     FileAlreadyArchived,
+    check_deletable,
     check_removable,
     trash_path,
 )
@@ -99,6 +100,25 @@ class LocalArchiveSession(DirectoryReader, ArchiveSession):
         target.parent.mkdir(parents=True, exist_ok=True)
         origin.rename(target)
         return destination
+
+    async def delete_variant(self, variant: str, video_id: str) -> bool:
+        """Destroy one variant outright. False means it was already gone.
+
+        The development counterpart of the privileged command, and refusing the
+        same variants for the same reason: a rule enforced only on file01 is a
+        rule this half of the codebase could be written against and then fail
+        against in production.
+        """
+        check_deletable(variant)
+        target = self.resolve(PurePosixPath(video_id) / variant)
+        if not target.exists():
+            return False
+
+        logger.info("Deleting %s", target)
+        # rmtree rather than a walk of our own, matching fk-archive: CPython's
+        # is descriptor-based and does not follow symlinks on the way down.
+        await asyncio.to_thread(shutil.rmtree, target)
+        return True
 
     def _unique_stamp(self, base: str) -> str:
         """A stamp directory this call owns outright.

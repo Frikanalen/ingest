@@ -11,10 +11,10 @@ import pytest
 from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.archive_store import ArchiveEntry
-from app.converge.actions import ProduceFormat, RefreshMetadata
+from app.converge.actions import ProduceFormat, RefreshMetadata, RetirePreview
 from app.converge.chores import DesiredState, plan
 from app.converge.state import RegisteredFile, VideoState
-from app.formats import UNTRACKED_REVISION
+from app.formats import DASH_PREVIEW, UNTRACKED_REVISION
 
 VIDEO_ID = "12345"
 
@@ -409,3 +409,106 @@ def test_a_format_absent_from_both_is_produced_without_replacing_anything():
 
     assert produced[VideoFileVariantEnum.DASH].replacing is None
     assert "missing" in produced[VideoFileVariantEnum.DASH].describe()
+
+
+class TestThePreview:
+    """When a stand-in gets built, and when it gets destroyed.
+
+    The preview exists to cover the hours between an upload arriving and its
+    ladder finishing, so every case here is really the same question: is there
+    currently anything this video can be watched with?
+    """
+
+    def test_a_video_with_no_ladder_gets_one_before_the_ladder_is_built(self):
+        state = video(files=(registered(VideoFileVariantEnum.ORIGINAL, "source.mp4"),))
+
+        produced = [a.file_format for a in plan(state, DESIRED).actions if isinstance(a, ProduceFormat)]
+
+        assert DASH_PREVIEW in produced
+        assert produced.index(DASH_PREVIEW) < produced.index(VideoFileVariantEnum.DASH)
+
+    def test_the_thumbnails_still_come_first(self):
+        """They are seconds, and the preview is minutes. Nothing is served by
+        making the still wait behind an encode.
+
+        Against the shipped DESIRED_FORMATS rather than this module's small
+        stand-in, because that is the only thing the ordering is a property of:
+        the preview is inserted immediately before `dash` in whatever order
+        that tuple is iterated, so reordering it there is what would move the
+        thumbnails behind the encode.
+        """
+        state = video(files=(registered(VideoFileVariantEnum.ORIGINAL, "source.mp4"),))
+
+        actions = plan(state, DesiredState.from_templates()).actions
+        produced = [a.file_format for a in actions if isinstance(a, ProduceFormat)]
+
+        for thumb in (
+            VideoFileVariantEnum.LARGE_THUMB,
+            VideoFileVariantEnum.MED_THUMB,
+            VideoFileVariantEnum.SMALL_THUMB,
+        ):
+            assert produced.index(thumb) < produced.index(DASH_PREVIEW)
+
+    def test_a_stale_ladder_is_rebuilt_without_one(self):
+        """A rebuild already has something that plays. Replacing it with a
+        preview for the length of an encode would be a downgrade for a video
+        people are watching right now."""
+        state = video(
+            files=(
+                registered(VideoFileVariantEnum.ORIGINAL, "source.mp4"),
+                registered(VideoFileVariantEnum.DASH, "manifest.mpd", revision=1, file_id=2),
+                registered(VideoFileVariantEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
+            )
+        )
+
+        produced = [a.file_format for a in plan(state, DESIRED).actions if isinstance(a, ProduceFormat)]
+
+        assert produced == [VideoFileVariantEnum.DASH]
+
+    def test_it_is_retired_after_the_ladder_that_supersedes_it(self):
+        """Last, so a ladder that fails takes the plan down before the thing
+        standing in for it is destroyed."""
+        state = video(files=(registered(VideoFileVariantEnum.ORIGINAL, "source.mp4"),))
+
+        actions = plan(state, DESIRED).actions
+
+        assert isinstance(actions[-1], RetirePreview)
+        dash = [i for i, a in enumerate(actions) if isinstance(a, ProduceFormat) and a.file_format == "dash"]
+        assert dash[0] < len(actions) - 1
+
+    def test_a_leftover_preview_is_retired_without_fetching_anything(self):
+        """The retry after a run that published the ladder and then failed to
+        delete the preview. There is no ladder work left, so a plan that
+        insisted on the original would pull down gigabytes to delete a file."""
+        state = video(files=(*video().files, registered(DASH_PREVIEW, "manifest.mpd", revision=1, file_id=9)))
+
+        actions = plan(state, DESIRED).actions
+
+        assert [type(a) for a in actions] == [RetirePreview]
+        assert not any(a.needs_source for a in actions)
+
+    def test_a_converged_video_with_no_preview_is_left_alone(self):
+        assert plan(video(), DESIRED).actions == ()
+
+    def test_nothing_is_destroyed_while_the_ladder_is_unbuildable(self):
+        """No original means no replacement is coming, so the stand-in stays."""
+        state = video(
+            files=(
+                registered(VideoFileVariantEnum.DASH, "manifest.mpd", revision=2, file_id=2),
+                registered(DASH_PREVIEW, "manifest.mpd", revision=1, file_id=9),
+            )
+        )
+
+        assert not any(isinstance(a, RetirePreview) for a in plan(state, DESIRED).actions)
+
+    def test_it_does_not_drive_the_progress_bar(self):
+        """Two encodes reporting into one bar run it to 100 and start it again,
+        which to a member watching is an import that restarted. The ladder owns
+        the bar: it is hours where the preview is minutes."""
+        state = video(files=(registered(VideoFileVariantEnum.ORIGINAL, "source.mp4"),))
+
+        produced = [a for a in plan(state, DESIRED).actions if isinstance(a, ProduceFormat)]
+        drives = {a.file_format: a.drives_progress for a in produced}
+
+        assert drives[DASH_PREVIEW] is False
+        assert drives[VideoFileVariantEnum.DASH] is True
