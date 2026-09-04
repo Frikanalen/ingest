@@ -1,0 +1,28 @@
+# /etc/sudoers.d/fk-archive-utils -- installed by the fk-archive-utils package
+# as a conffile, mode 0440, root:root. Edits made here survive an upgrade; dpkg
+# will ask before replacing a file that has been changed.
+#
+# This is where the package's whole security property is spent: the ingest
+# account may run the three mutations it actually performs against its own
+# archive, and nothing else. Without these rules `fk-archive` is installed but
+# unreachable, and every publish fails with sudo asking for a password that no
+# SSH session can supply.
+#
+# The profile name is matched literally, so the staging key cannot reach
+# production's archive however it is invoked -- which is the whole reason the
+# archive root is a profile lookup rather than an argument. A site that adds a
+# profile adds a line here naming it; one that has neither account gets rules
+# that never match, which is why both ship regardless of which host this is.
+#
+# fk-archive-purge-trash and fk-archive-migrate-broadcast are deliberately
+# absent: one can delete archived material that is not regenerable from the
+# original, and the other is a one-shot migration. Leaving both out of these
+# rules is what lets them end in a wildcard.
+
+# env_reset is Debian's default; restated per command because these are Python
+# programs run through sudo, and PYTHONPATH or PYTHONSTARTUP surviving the
+# transition would be a way to run other code as the archive account.
+Defaults!/usr/bin/fk-archive env_reset, secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+ingest         ALL=(archive-manager)         NOPASSWD: /usr/bin/fk-archive prod *
+ingest-staging ALL=(archive-manager-staging) NOPASSWD: /usr/bin/fk-archive staging *

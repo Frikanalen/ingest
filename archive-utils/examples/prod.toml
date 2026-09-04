@@ -2,7 +2,8 @@
 #
 # Which archive `fk-archive prod ...` acts on, and as whom. The profile name
 # is the filename, and it is the first argument to every command -- which is
-# what lets the sudoers rule pin it. See examples/sudoers.
+# what lets the sudoers rule pin it. See debian/sudoers.d/fk-archive-utils,
+# which the package installs.
 #
 # Nothing in here is secret: the forced-command wrapper runs as the
 # unprivileged ingest account and reads the same file to learn which account
