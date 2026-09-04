@@ -1,19 +1,17 @@
 """A throwaway in-process SSH server, shaped like the storage host.
 
-Two halves, because the storage host has two: an SFTP server that refuses every
-write, and `fk-archive`, which performs the mutations the engine is allowed to
-ask for. Between them they are the whole of what an ingest key can reach on
-file01 -- see `archive-utils/src/fk_archive_utils/ssh_command.py`, which is the
-forced command this stands in for.
+One thing, because the storage host offers the ingest key one thing:
+`fk-archive`, which performs the mutations the engine is allowed to ask for.
+Reads do not come this way at all -- the archive is mounted -- so there is no
+SFTP server here and none over there either. See
+`archive-utils/src/fk_archive_utils/ssh_command.py`, which is the forced
+command this stands in for.
 
-The mutating half runs the real `fk_archive_utils`, not an imitation of it. The
-two packages ship separately and agree only on a command line, an exit code and
-a line of JSON, so a test double here would be free to keep agreeing with an
-engine that had drifted -- which is the one failure this arrangement cannot
-afford, since it would surface as an archive refusing every upload.
-
-Serving the real filesystem (rather than a chroot) keeps the paths under test
-identical to the absolute paths ingest uses against file01.
+It runs the real `fk_archive_utils`, not an imitation of it. The two packages
+ship separately and agree only on a command line, an exit code and a line of
+JSON, so a test double here would be free to keep agreeing with an engine that
+had drifted -- which is the one failure this arrangement cannot afford, since
+it would surface as an archive refusing every upload.
 """
 
 import io
@@ -24,7 +22,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import asyncssh
-from asyncssh.constants import FXF_APPEND, FXF_CREAT, FXF_TRUNC, FXF_WRITE
 
 from fk_archive_utils import cli
 
@@ -41,40 +38,6 @@ class SshServerFixture:
     username: str
     client_key_file: Path
     known_hosts_file: Path
-
-
-class ReadOnlySftpServer(asyncssh.SFTPServer):
-    """The `sftp-server -R` half, which is where every read goes.
-
-    Refusing writes is the property under test, not an economy: the engine is
-    supposed to have no way to alter the archive except by asking, and a
-    fixture that quietly allowed an SFTP write would let a rename creep back
-    into the engine and still pass.
-    """
-
-    #: Enough to fail an open that intends to write anything, in the SFTPv3
-    #: flags asyncssh's client sends.
-    _WRITE_FLAGS = FXF_WRITE | FXF_APPEND | FXF_CREAT | FXF_TRUNC
-
-    def _refuse(self, *args: object, **kwargs: object) -> None:
-        raise asyncssh.SFTPPermissionDenied("the archive is exported read-only to this account")
-
-    def open(self, path: bytes, pflags: int, attrs: asyncssh.SFTPAttrs) -> object:
-        if pflags & self._WRITE_FLAGS:
-            self._refuse()
-        return super().open(path, pflags, attrs)
-
-    write = _refuse
-    setstat = _refuse
-    lsetstat = _refuse
-    fsetstat = _refuse
-    remove = _refuse
-    mkdir = _refuse
-    rmdir = _refuse
-    rename = _refuse
-    posix_rename = _refuse
-    symlink = _refuse
-    link = _refuse
 
 
 def _write_profile(directory: Path, archive_root: Path, name: str) -> Path:
@@ -167,10 +130,9 @@ async def run_ssh_server(
         port=0,
         server_host_keys=[str(host_key_file)],
         authorized_client_keys=str(authorized_keys_file),
-        sftp_factory=ReadOnlySftpServer,
         process_factory=process_factory,
         # Binary, because half of what goes up one of these channels is a video
-        # file. The SFTP half sets this for itself regardless.
+        # file.
         encoding=None,
     )
 

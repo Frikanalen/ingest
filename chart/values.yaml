@@ -27,6 +27,10 @@ archive:
   # ingest then cannot find.
   dir: /archive/media
 
+  # How the archive is written: not directly, but by asking `fk-archive` on the
+  # storage host over SSH. The account this logs in as has no write access to
+  # the archive at all -- see archive-utils/. It is also the switch that selects
+  # the deployed archive over a local directory.
   ssh:
     enabled: true
     host: file01

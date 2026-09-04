@@ -27,15 +27,6 @@ def test_quoted_arguments_survive_intact():
     assert argv[-3:] == ["12/original/a file.mov", "--size", "3"]
 
 
-def test_an_sftp_subsystem_request_gets_a_read_only_server():
-    assert resolve("/usr/lib/openssh/sftp-server", PROFILE) == [PROFILE.sftp_server, "-R"]
-    assert resolve("internal-sftp", PROFILE) == [PROFILE.sftp_server, "-R"]
-
-
-def test_arguments_the_client_attached_to_the_sftp_request_are_dropped():
-    assert resolve("sftp-server -f LOCAL0 -l DEBUG3", PROFILE) == [PROFILE.sftp_server, "-R"]
-
-
 @pytest.mark.parametrize(
     "requested",
     [
@@ -45,6 +36,11 @@ def test_arguments_the_client_attached_to_the_sftp_request_are_dropped():
         "/bin/sh -c 'rm -rf /archive'",
         "scp -t /archive/media",
         "rsync --server .",
+        # Reads come off the NFS export now, so the key has no SFTP half left
+        # to ask for. Refused like anything else it is not allowed to run.
+        "sftp-server",
+        "internal-sftp",
+        "/usr/lib/openssh/sftp-server",
         "fk-archive-purge-trash staging --older-than 0",
         "/usr/bin/fk-archive-purge-trash staging --older-than 0",
     ],

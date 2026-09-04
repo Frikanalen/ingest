@@ -1,7 +1,6 @@
 import asyncio
 import getpass
 import os
-import stat
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from logging import getLogger
@@ -12,11 +11,11 @@ import asyncssh
 
 from app.archive_store import fk_archive
 from app.archive_store.base import (
-    ArchiveEntry,
     ArchiveError,
     ArchiveSession,
     ArchiveStore,
 )
+from app.archive_store.directory import DirectoryReader
 from app.util.pretty_duration import pretty_duration
 from app.util.settings import SshArchiveSettings
 
@@ -54,41 +53,48 @@ def ensure_local_username() -> None:
         os.environ["USER"] = FALLBACK_LOCAL_USERNAME
 
 
-class SshArchiveSession(ArchiveSession):
-    """The archive on another host, read over SFTP and mutated by command.
+def warn_if_writable(mount: Path) -> None:
+    """Say so if the archive was mounted read-write.
 
-    The two halves reach the storage host down the same connection and arrive
-    as different accounts. Reads go to an SFTP server the far end runs
-    read-only, so this session has no way to write through it however it asks.
-    Writes are requests to `fk-archive`, which sudo runs as the account that
-    owns the media -- so a mutation is a named operation the far end agreed to
-    perform, rather than a file descriptor this process holds.
+    Everything in `archive-utils/` exists to take write access away from this
+    process; a mount the kernel would let it write to hands that access back
+    whatever the far end refuses. Said rather than refused because the flag is
+    the mount's report of itself and not every driver fills it in honestly --
+    an archive nobody can reach is worse than one whose posture we could not
+    confirm.
+    """
+    try:
+        writable = not os.statvfs(mount).f_flag & os.ST_RDONLY
+    except OSError as e:  # pragma: no cover - a mount we cannot stat is one unusable_reason() catches
+        logger.debug("Could not tell whether %s is read-only: %s", mount, e)
+        return
 
-    That split is why the session keeps the connection as well as the SFTP
-    client: `put` and `trash` need a channel of their own, and the connection
-    is the thing that opens one.
+    if writable:
+        logger.warning(
+            "The archive at %s is mounted read-write. Ingest publishes through fk-archive and never "
+            "writes there itself, so this grants nothing it needs and removes the guarantee that it "
+            "cannot alter the archive by mistake. Mount it read-only.",
+            mount,
+        )
+
+
+class SshArchiveSession(DirectoryReader, ArchiveSession):
+    """The archive on the storage host: mounted to read, asked to change.
+
+    The two halves arrive by different routes and as different accounts. Reads
+    come off the NFS export, mounted read-only into this pod, so there is no
+    way to write through them however this process asks -- and no connection
+    behind them to fail. Writes are requests to `fk-archive`, which sudo runs
+    as the account that owns the media, so a mutation is a named operation the
+    far end agreed to perform rather than a file descriptor this process holds.
+
+    The connection is therefore only ever the write half's, which is why the
+    session keeps it: `put` and `trash` each need a channel of their own.
     """
 
-    def __init__(self, connection: asyncssh.SSHClientConnection, sftp: asyncssh.SFTPClient, root: PurePosixPath):
+    def __init__(self, connection: asyncssh.SSHClientConnection, root: Path):
+        super().__init__(root)
         self.connection = connection
-        self.sftp = sftp
-        self.root = root
-
-    def resolve(self, destination: PurePosixPath) -> PurePosixPath:
-        """Where `destination` is on the storage host, for reading.
-
-        Only the read half needs this. `fk-archive` looks the archive root up
-        by profile and never accepts one as an argument, so a mutation names a
-        path relative to a root this process does not get to choose -- which
-        means `FK_ARCHIVE_DIR` and the profile's `root` on the storage host
-        have to be the same directory. They are the two ends of one archive,
-        and pointing them at different ones publishes files this session then
-        cannot find.
-        """
-        return self.root / destination
-
-    async def exists(self, destination: PurePosixPath) -> bool:
-        return await self.sftp.exists(self.resolve(destination))
 
     async def put(self, source: Path, destination: PurePosixPath) -> None:
         """Publish `source` by streaming it to `fk-archive publish`.
@@ -129,54 +135,6 @@ class SshArchiveSession(ArchiveSession):
             # name the far side of is one nobody can undo.
             raise ArchiveError(f"the archive trashed {path} but did not say where it went: {result}")
         return PurePosixPath(destination)
-
-    async def list_dir(self, destination: PurePosixPath) -> list[ArchiveEntry]:
-        resolved = self.resolve(destination)
-
-        # Asked before reading rather than caught after: asyncssh raises a
-        # different SFTPError depending on what the server decided the problem
-        # was, and "no such directory" is not a problem here anyway.
-        if not await self.sftp.isdir(resolved):
-            return []
-
-        entries = [
-            ArchiveEntry(
-                path=destination / entry.filename,
-                is_dir=stat.S_ISDIR(entry.attrs.permissions or 0),
-            )
-            for entry in await self.sftp.readdir(resolved)
-            if entry.filename not in (".", "..")
-        ]
-        return sorted(entries, key=lambda entry: entry.path)
-
-    async def get(self, source: PurePosixPath, destination: Path) -> None:
-        origin = self.resolve(source)
-        staged = destination.with_name(destination.name + ".part")
-
-        logger.info("Downloading %s to %s", origin, destination)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-
-        started = monotonic()
-        try:
-            await self.sftp.get(origin, staged)
-        except asyncssh.SFTPError as e:
-            # A missing original is a condition callers act on -- it is what a
-            # videofile row pointing at nothing looks like from here -- so it
-            # arrives as the same exception the local archive raises, rather
-            # than as an asyncssh type only one backend can produce.
-            if not await self.sftp.exists(origin):
-                raise FileNotFoundError(f"{source} is not in the archive") from e
-            raise
-        staged.replace(destination)
-
-        elapsed = monotonic() - started
-        size = destination.stat().st_size
-        logger.info(
-            "Downloaded %s in %s (%.1f MB/s)",
-            origin,
-            pretty_duration(elapsed),
-            size / elapsed / 1e6 if elapsed else 0.0,
-        )
 
     async def _run(self, command: str, *, stdin: Path | None = None) -> dict:
         """Ask the storage host to do one thing, and read what it says back.
@@ -223,7 +181,7 @@ class SshArchiveSession(ArchiveSession):
 
 
 class SshArchiveStore(ArchiveStore):
-    """Archive on another host, read over SSH and mutated through it."""
+    """Archive on the storage host, read off its export and mutated over SSH."""
 
     def __init__(self, settings: SshArchiveSettings):
         reason = settings.unusable_reason()
@@ -234,6 +192,7 @@ class SshArchiveStore(ArchiveStore):
         # name its own user is sorted out before the first upload rather than
         # during it.
         ensure_local_username()
+        warn_if_writable(settings.dir)
 
         self.settings = settings
 
@@ -257,12 +216,12 @@ class SshArchiveStore(ArchiveStore):
     @asynccontextmanager
     async def open(self) -> AsyncIterator[ArchiveSession]:
         logger.info("Connecting to archive host %s", self)
-        async with (
-            asyncssh.connect(**self.connect_options()) as connection,
-            connection.start_sftp_client() as sftp,
-        ):
-            yield SshArchiveSession(connection, sftp, self.settings.dir)
+        async with asyncssh.connect(**self.connect_options()) as connection:
+            yield SshArchiveSession(connection, self.settings.dir)
 
     def __str__(self) -> str:
+        # The connection only, without the archive directory: that is a path in
+        # this container now, and appending it here would read as a path over
+        # there -- which is the confusion this arrangement most invites.
         settings = self.settings
-        return f"{settings.username}@{settings.host}:{settings.port}{settings.dir}"
+        return f"{settings.username}@{settings.host}:{settings.port}"

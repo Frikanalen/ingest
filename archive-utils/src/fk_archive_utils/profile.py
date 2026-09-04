@@ -36,12 +36,7 @@ _NAME_ALPHABET = set("abcdefghijklmnopqrstuvwxyz0123456789-")
 DEFAULT_FILE_MODE = 0o644
 DEFAULT_DIR_MODE = 0o755
 
-#: Debian's out-of-process SFTP server. The wrapper execs this with -R so the
-#: ingest account keeps the read access every backfill needs without keeping
-#: any way to write.
-DEFAULT_SFTP_SERVER = "/usr/lib/openssh/sftp-server"
-
-_SETTINGS = frozenset({"root", "manager", "file_mode", "dir_mode", "sftp_server"})
+_SETTINGS = frozenset({"root", "manager", "file_mode", "dir_mode"})
 
 
 @dataclass(frozen=True)
@@ -55,7 +50,6 @@ class Profile:
     manager: str
     file_mode: int = DEFAULT_FILE_MODE
     dir_mode: int = DEFAULT_DIR_MODE
-    sftp_server: str = DEFAULT_SFTP_SERVER
 
 
 def _mode(data: dict, field: str, name: str, default: int) -> int:
@@ -108,15 +102,10 @@ def load(name: str, *, profile_dir: Path = PROFILE_DIR) -> Profile:
     if not isinstance(manager, str) or not manager:
         raise ProfileError(f"profile {name}: manager must name the account these tools run as")
 
-    sftp_server = data.get("sftp_server", DEFAULT_SFTP_SERVER)
-    if not isinstance(sftp_server, str) or not sftp_server.startswith("/"):
-        raise ProfileError(f"profile {name}: sftp_server must be an absolute path, got {sftp_server!r}")
-
     return Profile(
         name=name,
         root=Path(root),
         manager=manager,
         file_mode=_mode(data, "file_mode", name, DEFAULT_FILE_MODE),
         dir_mode=_mode(data, "dir_mode", name, DEFAULT_DIR_MODE),
-        sftp_server=sftp_server,
     )

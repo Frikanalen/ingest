@@ -1,6 +1,13 @@
 from logging import getLogger
 
-from app.archive_store.base import ArchiveEntry, ArchiveError, ArchiveSession, ArchiveStore, FileAlreadyArchived
+from app.archive_store.base import (
+    ArchiveEntry,
+    ArchiveError,
+    ArchiveReader,
+    ArchiveSession,
+    ArchiveStore,
+    FileAlreadyArchived,
+)
 from app.archive_store.local import LocalArchiveStore
 from app.archive_store.ssh import SshArchiveStore
 from app.util.settings import LocalArchiveSettings, SshArchiveSettings
@@ -8,6 +15,7 @@ from app.util.settings import LocalArchiveSettings, SshArchiveSettings
 __all__ = [
     "ArchiveEntry",
     "ArchiveError",
+    "ArchiveReader",
     "ArchiveSession",
     "ArchiveStore",
     "FileAlreadyArchived",

@@ -12,7 +12,7 @@ import asyncio
 from logging import getLogger
 from pathlib import PurePosixPath
 
-from app.archive_store import ArchiveEntry, ArchiveSession
+from app.archive_store import ArchiveEntry, ArchiveReader
 from app.converge.state import RegisteredFile, VideoState
 from app.django_client.service import DjangoApiService
 
@@ -22,7 +22,7 @@ logger = getLogger(__name__)
 class Observer:
     """Reads the catalogue and the archive; draws no conclusions from either."""
 
-    def __init__(self, archive: ArchiveSession, django_api: DjangoApiService):
+    def __init__(self, archive: ArchiveReader, django_api: DjangoApiService):
         self.archive = archive
         self.django_api = django_api
 
@@ -42,14 +42,11 @@ class Observer:
         )
 
     async def _archived_directories(self, video_id: str) -> dict[str, tuple[ArchiveEntry, ...]]:
-        """Every directory under <id>/, and what is in each.
-
-        The per-directory listings are issued together: over SFTP they pipeline
-        down one connection, so a video costs two round trips rather than one
-        per format.
-        """
+        """Every directory under <id>/, and what is in each."""
         root = PurePosixPath(video_id)
         directories = [entry for entry in await self.archive.list_dir(root) if entry.is_dir]
 
-        contents = await asyncio.gather(*(self.archive.list_dir(entry.path) for entry in directories))
-        return dict(zip((entry.name for entry in directories), contents, strict=True))
+        # In sequence: the archive is a directory this process reads, so these
+        # are `readdir` calls rather than round trips there was anything to be
+        # gained by pipelining.
+        return {entry.name: tuple(await self.archive.list_dir(entry.path)) for entry in directories}

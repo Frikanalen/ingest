@@ -78,6 +78,7 @@ spec:
             - name: archive-ssh
               mountPath: {{ include "ingest.sshMountPath" . }}
               readOnly: true
+            {{- include "ingest.archiveMount" . | nindent 12 }}
             {{- end }}
         {{- if .Values.tusd.enabled }}
         - name: tusd
@@ -122,4 +123,5 @@ spec:
           secret:
             secretName: {{ .Values.archive.ssh.secretName }}
             defaultMode: {{ .Values.archive.ssh.defaultMode }}
+        {{- include "ingest.archiveVolume" . | nindent 8 }}
         {{- end }}

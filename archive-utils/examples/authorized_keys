@@ -2,8 +2,9 @@
 #
 # `restrict` turns off port forwarding, agent forwarding, X11, PTY allocation
 # and user-rc; `command=` replaces whatever the client asked to run with the
-# wrapper, which then allows exactly two things: a read-only SFTP server, and
-# fk-archive by way of sudo. See fk_archive_utils/ssh_command.py.
+# wrapper, which then allows exactly one thing: fk-archive by way of sudo.
+# Reads do not come this way -- the archive is mounted from the NFS export --
+# so there is no SFTP subsystem to allow. See fk_archive_utils/ssh_command.py.
 #
 # The account needs a real shell (/bin/sh is enough) for this to work: sshd
 # runs a forced command through the login shell, so /usr/sbin/nologin would

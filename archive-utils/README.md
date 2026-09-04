@@ -2,14 +2,15 @@
 
 The ingest engine writes into the media archive on file01 over SSH. This
 package is what it writes *through*, so that the account it logs in as needs no
-write access to the archive at all.
+write access to the archive at all. (It does not read through this package, or
+over SSH: the archive is exported read-only over NFS and the engine mounts it.)
 
 ## Why
 
-An SFTP account with write access to `/archive/media` can create, rename and
-delete anything anywhere under the archive root — which is to say, a stolen key
-or a bug in the engine could destroy every video Frikanalen has ever broadcast,
-with nothing between the two to notice.
+An account with write access to `/archive/media` can create, rename and delete
+anything anywhere under the archive root — which is to say, a stolen key or a
+bug in the engine could destroy every video Frikanalen has ever broadcast, with
+nothing between the two to notice.
 
 What the engine actually needs is much smaller than that. Every mutation it
 performs goes through one interface (`ArchiveSession` in the ingest
@@ -42,20 +43,22 @@ here that destroys anything.
 ## How the pieces fit
 
 ```
-ingest pod  ──ssh──▶  ingest@file01
-                        │  forced command: fk-archive-ssh prod
-                        ├─ SFTP subsystem ──▶ sftp-server -R      (every read)
-                        └─ "fk-archive …"  ──▶ sudo -u archive-manager
-                                                  fk-archive prod … (every write)
+ingest pod  ──nfs, ro──▶  /archive/media                       (every read)
+
+ingest pod  ──ssh─────▶  ingest@file01
+                           forced command: fk-archive-ssh prod
+                           └─ "fk-archive …" ──▶ sudo -u archive-manager
+                                                   fk-archive prod … (every write)
 
 operator ───────────▶  sudo fk-archive-gc prod --apply
                        sudo fk-archive-purge-trash prod --older-than 30
                        sudo fk-archive-migrate-broadcast prod --apply
 ```
 
-* **`fk-archive-ssh <profile>`** is the account's forced command. It allows a
-  read-only SFTP server and `fk-archive`, and refuses everything else — so a
-  stolen key cannot run arbitrary code as the ingest account either.
+* **`fk-archive-ssh <profile>`** is the account's forced command. It allows
+  `fk-archive` and refuses everything else, an SFTP subsystem request included
+  — so a stolen key cannot run arbitrary code as the ingest account either, and
+  has no file descriptor on this host to reach for.
 * **`fk-archive <profile> {publish,trash}`** performs one mutation and prints a
   JSON object saying what it did. This is the command sudoers grants.
 * **`fk-archive-gc <profile>`** reclaims media for videos the catalogue no
@@ -248,6 +251,12 @@ sudo apt build-dep .          # or: debhelper dh-python pybuild-plugin-pyproject
 
 Sample configuration is installed to
 `/usr/share/doc/fk-archive-utils/examples/`.
+
+**Upgrading to the version that dropped the SFTP half is not order-free.** The
+forced command in this version refuses an SFTP subsystem request, and an ingest
+that still reads over SFTP has no other way to see the archive — so roll the
+engine onto its NFS mount first, confirm it is reading from there, and install
+this afterwards. Going the other way takes every read out at once.
 
 ## Developing
 

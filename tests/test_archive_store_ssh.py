@@ -44,7 +44,7 @@ def store(ssh_server, archive_root) -> SshArchiveStore:
             host=ssh_server.host,
             port=ssh_server.port,
             username=ssh_server.username,
-            dir=PurePosixPath(archive_root),
+            dir=archive_root,
             private_key_file=ssh_server.client_key_file,
             known_hosts_file=ssh_server.known_hosts_file,
         )
@@ -130,24 +130,6 @@ async def test_a_failed_publish_leaves_nothing_behind_at_either_end(store, archi
 
 
 @pytest.mark.asyncio
-async def test_the_archive_refuses_every_write_over_sftp(store, archive_root):
-    """The read half is `sftp-server -R`, and this is what that buys.
-
-    Asserted rather than assumed, because it is the guarantee every other test
-    here rests on: the puts above only prove the mutation went through the
-    privileged command if there was no other way for it to have gone.
-    """
-    async with store.open() as archive:
-        with pytest.raises(asyncssh.SFTPError):
-            await archive.sftp.mkdir(str(archive_root / "12345"))
-
-        with pytest.raises(asyncssh.SFTPError):
-            await archive.sftp.open(str(archive_root / "smuggled"), "wb")
-
-    assert sorted(p.name for p in archive_root.iterdir()) == []
-
-
-@pytest.mark.asyncio
 async def test_a_refusal_arrives_as_the_sentence_the_archive_wrote(store, source_file):
     """The exit code decides the exception; stderr is what says why."""
     async with store.open() as archive:
@@ -203,7 +185,7 @@ async def test_an_unknown_host_key_is_rejected(ssh_server, archive_root, tmp_pat
             host=ssh_server.host,
             port=ssh_server.port,
             username=ssh_server.username,
-            dir=PurePosixPath(archive_root),
+            dir=archive_root,
             private_key_file=ssh_server.client_key_file,
             known_hosts_file=empty_known_hosts,
         )
@@ -240,7 +222,7 @@ def test_usable_ssh_settings_select_the_ssh_store(ssh_server, archive_root):
         SshArchiveSettings(
             host=ssh_server.host,
             port=ssh_server.port,
-            dir=PurePosixPath(archive_root),
+            dir=archive_root,
             private_key_file=ssh_server.client_key_file,
             known_hosts_file=ssh_server.known_hosts_file,
         )
@@ -278,7 +260,7 @@ async def test_uploads_when_the_local_account_has_no_name(
             host=ssh_server.host,
             port=ssh_server.port,
             username=ssh_server.username,
-            dir=PurePosixPath(archive_root),
+            dir=archive_root,
             private_key_file=ssh_server.client_key_file,
             known_hosts_file=ssh_server.known_hosts_file,
         )
