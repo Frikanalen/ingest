@@ -20,7 +20,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Then, use a final image without uv
 FROM python:3.12
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+
+# ffmpeg, not from apt. Debian trixie ships 7.1, which is two releases behind,
+# and the archive is transcoded once and kept forever -- it is worth doing that
+# with the current encoders. These are statically linked binaries built with
+# libx264, libvpx and the dash muxer, so they bring no shared libraries into
+# the image and nothing here depends on Debian's ffmpeg packaging. Pinned: an
+# ffmpeg change is an encoder change, and those want to be deliberate.
+COPY --from=mwader/static-ffmpeg:9.0.1 /ffmpeg /ffprobe /usr/local/bin/
 
 # It is important to use the image that matches the builder, as the path to the
 # Python executable must be the same, e.g., using `python:3.11-slim-bookworm`
