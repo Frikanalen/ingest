@@ -46,6 +46,17 @@ spec:
       terminationGracePeriodSeconds: {{ .Values.workers.terminationGracePeriodSeconds }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.workers.topologySpread }}
+      {{- if .enabled }}
+      topologySpreadConstraints:
+        - maxSkew: {{ .maxSkew }}
+          topologyKey: {{ .topologyKey }}
+          whenUnsatisfiable: {{ .whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              {{- include "ingest.workerSelectorLabels" $ | nindent 14 }}
+      {{- end }}
+      {{- end }}
       {{- with .Values.workers.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -169,11 +169,17 @@ workers:
   # claim their own work, so a replacement adds nothing until the old one has
   # gone -- and an idle worker exits within milliseconds of SIGTERM, so making
   # room first is nearly free whenever the queue is quiet.
+  #
+  # Two at a time, so a deploy that catches every worker mid-encode is two
+  # drains long rather than three. What it costs is capacity during a rollout:
+  # one worker is guaranteed, not three. That is the right trade for a queue
+  # that waits patiently -- a job nobody is free to claim is claimed a little
+  # later, which is not the same kind of problem as an upload path being down.
   strategy:
     type: RollingUpdate
     rollingUpdate:
       maxSurge: 0
-      maxUnavailable: 1
+      maxUnavailable: 2
 
   # A rollout must be allowed to take as long as draining does. The default is
   # 600s against a grace period of an hour, so any worker that sees out a real
@@ -211,6 +217,22 @@ workers:
       memory: "1Gi"
     limits:
       memory: "4Gi"
+
+  # Prefer a worker per node rather than two on one and none on another. Each
+  # holds a whole encode's scratch space and saturates what CPU it is given,
+  # so stacking them makes them contend for one node's disk and cores while
+  # another sits idle.
+  #
+  # Soft on purpose. DoNotSchedule would make this a rollout's problem the
+  # moment a node is cordoned or full -- a replacement with nowhere to go that
+  # satisfies the constraint stays Pending, which is the deadlock this pool
+  # already had once. ScheduleAnyway spreads when it can and places the pod
+  # regardless when it cannot.
+  topologySpread:
+    enabled: true
+    maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
 
   # Batch work is a reasonable thing to keep off the nodes serving the site.
   nodeSelector: {}
