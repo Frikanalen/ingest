@@ -132,12 +132,14 @@ workers:
   # whose job nobody claims sits at `pending` indefinitely, and nothing in
   # ingest will notice or complain.
   #
-  # Three, for the three nodes -- a fixed pool sized to the cluster, until
-  # there is a queue-depth metric to scale on. Note that this is a count and
-  # not a placement: nothing here says one per node, so the scheduler is free
-  # to put two on the same one. Raise it here rather than with `kubectl
-  # scale`, which the next `helm upgrade` reverts to whatever this says.
-  replicaCount: 3
+  # Four, for the four nodes -- a fixed pool sized to the cluster, until there
+  # is a queue-depth metric to scale on. Keep it in step with the node count
+  # rather than ahead of it: topologySpread below is a hard constraint, so a
+  # replica with no node of its own does not stack onto a busier one, it stays
+  # Pending. Raise it here rather than with `kubectl scale`, which Argo CD
+  # reverts to whatever this says, usually before you have finished reading
+  # the output.
+  replicaCount: 4
 
   # Which queue this pool serves. Every job's source is the archive now -- the
   # hook archives the original before it queues anything -- so this is about
