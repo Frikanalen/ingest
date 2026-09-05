@@ -63,7 +63,7 @@ from app.converge.observe import Observer  # noqa: E402
 from app.django_client.service import DjangoApiService  # noqa: E402
 from app.ingest_reporting import IngestErrorCode, IngestReporter, transcode_progress_reporter  # noqa: E402
 from app.media.produce import PublishFailed, TranscodeFailed  # noqa: E402
-from app.util.logging import VideoIdFilter  # noqa: E402
+from app.util.logging import stamp_video_id  # noqa: E402
 
 
 class Worker:
@@ -131,18 +131,19 @@ class Worker:
             return False
 
         video_id = str(job.video)
-        logger.addFilter(VideoIdFilter(video_id))
-        logger.info("Claimed video %s (%s job)", video_id, job.kind)
+        with stamp_video_id(logger, video_id):
+            logger.info("Claimed video %s (%s job)", video_id, job.kind)
 
-        if self.draining:
-            # SIGTERM landed while this claim was in flight. Starting the job
-            # now would mean starting hours of work with only the grace period
-            # left to do it in, and being killed partway is the one outcome
-            # that actually loses the encoding -- so hand it straight back.
-            await self._release(video_id)
-            return True
+            if self.draining:
+                # SIGTERM landed while this claim was in flight. Starting the
+                # job now would mean starting hours of work with only the grace
+                # period left to do it in, and being killed partway is the one
+                # outcome that actually loses the encoding -- so hand it
+                # straight back.
+                await self._release(video_id)
+                return True
 
-        await self._work(video_id, job.kind)
+            await self._work(video_id, job.kind)
         return True
 
     async def _work(self, video_id: str, kind=None) -> None:
