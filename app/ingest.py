@@ -7,7 +7,7 @@ from frikanalen_django_api_client.models import IngestKindEnum, IngestStateEnum,
 from app.django_client.service import DjangoApiService
 from app.ingest_reporting import IngestErrorCode, IngestReporter
 from app.util.file_name_utils import IMAGES_DIR, original_file_location
-from app.util.logging import VideoIdFilter
+from app.util.logging import stamp_video_id
 
 from .archive_store import ArchiveSession, ArchiveStore
 from .media.ffprobe_schema import FfprobeOutput
@@ -63,40 +63,40 @@ class Ingester:
     async def ingest(
         self, video_id: str, original_file: Path, metadata: FfprobeOutput, reporter: IngestReporter | None = None
     ):
-        self.logger.addFilter(VideoIdFilter(video_id))
-        self.logger.info("Ingesting file with video_id: %s, original_file: %s", video_id, original_file)
+        with stamp_video_id(self.logger, video_id):
+            self.logger.info("Ingesting file with video_id: %s, original_file: %s", video_id, original_file)
 
-        # A caller that already reported the probe passes its reporter in, so
-        # the whole run reads as one sequence of states rather than restarting
-        # partway through.
-        reporter = reporter or IngestReporter(self.django_api, video_id)
+            # A caller that already reported the probe passes its reporter
+            # in, so the whole run reads as one sequence of states rather
+            # than restarting partway through.
+            reporter = reporter or IngestReporter(self.django_api, video_id)
 
-        try:
-            await self.django_api.set_video_uploaded_time(video_id, datetime.now())
-        except Exception as e:
-            self.logger.error("Failed to set video uploaded time: %s", e)
-            await reporter.failed(IngestErrorCode.INTERNAL_ERROR, str(e))
-            raise
+            try:
+                await self.django_api.set_video_uploaded_time(video_id, datetime.now())
+            except Exception as e:
+                self.logger.error("Failed to set video uploaded time: %s", e)
+                await reporter.failed(IngestErrorCode.INTERNAL_ERROR, str(e))
+                raise
 
-        async with self.archive.open() as archive:
-            # Reported before the supersede rather than inside the put, because
-            # taking the previous media out of the published tree is already
-            # the archive being rearranged on this video's behalf, and a member
-            # watching should see that as archiving rather than as a probe that
-            # stopped responding.
-            await reporter.state(IngestStateEnum.ARCHIVING)
-            await self._supersede_previous_media(archive, video_id, reporter)
-            await self._archive_original(archive, video_id, original_file, metadata, reporter)
+            async with self.archive.open() as archive:
+                # Reported before the supersede rather than inside the put,
+                # because taking the previous media out of the published tree
+                # is already the archive being rearranged on this video's
+                # behalf, and a member watching should see that as archiving
+                # rather than as a probe that stopped responding.
+                await reporter.state(IngestStateEnum.ARCHIVING)
+                await self._supersede_previous_media(archive, video_id, reporter)
+                await self._archive_original(archive, video_id, original_file, metadata, reporter)
 
-        await self._enqueue(video_id, reporter)
+            await self._enqueue(video_id, reporter)
 
-        # Only now is the upload redundant, and only because the archive holds
-        # the same bytes: the job that was just queued reads the original from
-        # there, and so does every retry after it. Before this commit the file
-        # was kept until every format had been built, because the upload was
-        # the only source; it no longer is.
-        self.logger.info("Removing uploaded file %s", original_file)
-        original_file.unlink()
+            # Only now is the upload redundant, and only because the archive
+            # holds the same bytes: the job that was just queued reads the
+            # original from there, and so does every retry after it. Before
+            # this commit the file was kept until every format had been built,
+            # because the upload was the only source; it no longer is.
+            self.logger.info("Removing uploaded file %s", original_file)
+            original_file.unlink()
 
     async def _supersede_previous_media(self, archive: ArchiveSession, video_id: str, reporter: IngestReporter) -> None:
         """Take out whatever a previous upload to this id left behind.
