@@ -68,6 +68,12 @@ async def prepare_upload(
         logger.warning("File already exists, deleting!: %s", settings.tusd_dir / new_file)
         (settings.tusd_dir / new_file).unlink()
 
+    logger.info(
+        "Prepared %s upload for video %s at %s",
+        metadata.upload_kind,
+        metadata.video_id,
+        new_file,
+    )
     return HookResponse(ChangeFileInfo=FileInfoChanges(ID=upload_id, Storage={"Path": str(new_file)}))
 
 

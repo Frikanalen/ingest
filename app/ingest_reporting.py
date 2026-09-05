@@ -92,6 +92,18 @@ class IngestReporter:
                 self.video_id,
                 exc_info=True,
             )
+            return
+
+        percentage_done = fields.get("percentage_done")
+        if percentage_done is not None:
+            logger.info(
+                "Updated ingest progress for video %s to %d%% (%s)",
+                self.video_id,
+                percentage_done,
+                state,
+            )
+        else:
+            logger.info("Updated ingest state for video %s to %s", self.video_id, state)
 
 
 def transcode_progress_reporter(reporter: IngestReporter) -> Callable[[float], Awaitable[None]]:
