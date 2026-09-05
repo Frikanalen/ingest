@@ -16,18 +16,54 @@ import signal
 from logging import getLogger
 from pathlib import Path
 
-from frikanalen_django_api_client.models import IngestKindEnum, IngestStateEnum
-
-from app.archive_store import ArchiveError, ArchiveStore
-from app.converge.apply import Applier, SourceUnavailable
-from app.converge.chores import DesiredState, plan
-from app.converge.observe import Observer
-from app.django_client.service import DjangoApiService
-from app.ingest_reporting import IngestErrorCode, IngestReporter, transcode_progress_reporter
-from app.media.produce import PublishFailed, TranscodeFailed
-from app.util.logging import VideoIdFilter
-
 logger = getLogger(__name__)
+
+#: Set by the handler below if a signal arrives before the event loop exists.
+_signalled_during_startup = False
+
+
+def _note_signal_during_startup(signum, _frame) -> None:
+    global _signalled_during_startup
+    _signalled_during_startup = True
+
+
+def _catch_signals_during_startup() -> None:
+    """Install a handler before anything slow happens.
+
+    The container runs this module as PID 1, and the kernel discards a signal
+    sent to PID 1 unless the process has a handler for it -- there is no
+    default action to fall back on. A worker deleted during its own startup
+    therefore never hears about it: the kubelet sends its one SIGTERM, the
+    kernel drops it because `install_drain_handlers` has not run yet, and the
+    pod then sits Terminating for the whole grace period -- an hour here --
+    claiming jobs nobody expects it to take.
+
+    That is not a hypothetical race. A rollout can delete a pod a second after
+    creating it, and the imports below, the archive store and the token fetch
+    all happen before the loop exists to own a handler.
+
+    So take the signal here, where the cost is a boolean, and let
+    `install_drain_handlers` hand it to the worker once there is one.
+    """
+    for received in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(received, _note_signal_during_startup)
+
+
+# Only as the entrypoint: importing this module must not take a test runner's
+# signals away from it.
+if __name__ == "__main__":
+    _catch_signals_during_startup()
+
+from frikanalen_django_api_client.models import IngestKindEnum, IngestStateEnum  # noqa: E402
+
+from app.archive_store import ArchiveError, ArchiveStore  # noqa: E402
+from app.converge.apply import Applier, SourceUnavailable  # noqa: E402
+from app.converge.chores import DesiredState, plan  # noqa: E402
+from app.converge.observe import Observer  # noqa: E402
+from app.django_client.service import DjangoApiService  # noqa: E402
+from app.ingest_reporting import IngestErrorCode, IngestReporter, transcode_progress_reporter  # noqa: E402
+from app.media.produce import PublishFailed, TranscodeFailed  # noqa: E402
+from app.util.logging import VideoIdFilter  # noqa: E402
 
 
 class Worker:
@@ -185,6 +221,13 @@ def install_drain_handlers(worker: Worker) -> None:
     loop = asyncio.get_running_loop()
     for received in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(received, worker.drain)
+
+    # Anything that arrived before the loop existed was caught by
+    # `_catch_signals_during_startup` and is still waiting to be acted on.
+    # Delivering it now is what stops a worker deleted mid-startup from
+    # spending its entire grace period claiming jobs.
+    if _signalled_during_startup:
+        worker.drain()
 
 
 async def _drain_the_queue() -> int:
