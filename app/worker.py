@@ -96,7 +96,7 @@ class Worker:
 
         video_id = str(job.video)
         logger.addFilter(VideoIdFilter(video_id))
-        logger.info("Claimed video %s", video_id)
+        logger.info("Claimed video %s (%s job)", video_id, job.kind)
 
         if self.draining:
             # SIGTERM landed while this claim was in flight. Starting the job

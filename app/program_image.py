@@ -1,6 +1,7 @@
 import asyncio
 import warnings
 from dataclasses import dataclass
+from logging import getLogger
 from pathlib import Path
 
 from frikanalen_django_api_client.models import MediaTypeEnum, RoleEnum
@@ -9,6 +10,8 @@ from PIL import Image, UnidentifiedImageError
 from app.archive_store import ArchiveStore
 from app.django_client.service import DjangoApiService
 from app.util.file_name_utils import program_image_location
+
+logger = getLogger(__name__)
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_DIMENSION = 65_535
@@ -113,6 +116,8 @@ class ProgramImageIngester:
             # tell the two apart. See Ingester._supersede_previous_media.
             if not await archive.exists(destination):
                 await archive.put(uploaded_file, destination)
+            else:
+                logger.info("Programme image %s is already archived; retrying registration", destination)
 
         await self.django_api.create_program_image(
             video_id=video_id,
@@ -123,3 +128,11 @@ class ProgramImageIngester:
             height=metadata.height,
         )
         uploaded_file.unlink()
+        logger.info(
+            "Registered programme image %s for video %s as %s (%dx%d)",
+            destination,
+            video_id,
+            role,
+            metadata.width,
+            metadata.height,
+        )
