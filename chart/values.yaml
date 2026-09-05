@@ -156,30 +156,21 @@ workers:
   # raise it if losing an encode to a drain matters more than the wait.
   terminationGracePeriodSeconds: 3600
 
-  # Replace a worker by retiring one first, never by adding one alongside.
+  # Retire the old pool completely before creating its replacements.
   #
-  # The default RollingUpdate rounds to maxSurge 1 / maxUnavailable 0 at two
-  # replicas, which deadlocks a pool this size: nothing may be terminated
-  # until the replacement is Ready, the replacement cannot schedule until the
-  # CPU the outgoing worker reserves is released, and because the outgoing
-  # worker is never sent SIGTERM it does not release it. The rollout then sits
-  # there indefinitely rather than resolving slowly.
+  # Even with maxSurge 0, RollingUpdate creates a replacement as soon as an old
+  # worker becomes unavailable; it does not wait for that worker's potentially
+  # hour-long graceful termination to release its resources. Those replacements
+  # can consume the capacity temporarily released by the independent upload
+  # pod's Recreate rollout, leaving the public upload endpoint Pending.
   #
-  # Surging is the wrong shape here in any case. Workers are fungible and
-  # claim their own work, so a replacement adds nothing until the old one has
-  # gone -- and an idle worker exits within milliseconds of SIGTERM, so making
-  # room first is nearly free whenever the queue is quiet.
-  #
-  # Two at a time, so a deploy that catches every worker mid-encode is two
-  # drains long rather than three. What it costs is capacity during a rollout:
-  # one worker is guaranteed, not three. That is the right trade for a queue
-  # that waits patiently -- a job nobody is free to claim is claimed a little
-  # later, which is not the same kind of problem as an upload path being down.
+  # Recreate waits for every old worker to terminate before starting any new
+  # worker. The queue can safely wait with no workers, while the independent
+  # upload replacement must not wait on them. Idle workers still exit within
+  # milliseconds; if every worker is encoding, the rollout takes one drain
+  # period rather than two, at the cost of having no processing capacity then.
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 0
-      maxUnavailable: 2
+    type: Recreate
 
   # A rollout must be allowed to take as long as draining does. The default is
   # 600s against a grace period of an hour, so any worker that sees out a real
