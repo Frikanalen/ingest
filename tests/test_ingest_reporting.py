@@ -20,11 +20,12 @@ from app.ingest_reporting import IngestErrorCode, IngestReporter
 from app.util.settings import SshArchiveSettings
 from tests.utils.catalogue import recording_django_api
 from tests.utils.drain import drain_one
+from tests.utils.nvenc import requires_nvenc
 from tests.utils.ssh_server import run_ssh_server
 
 VIDEO_ID = "12345"
 
-pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg missing")
+pytestmark = requires_nvenc
 
 
 @pytest.fixture

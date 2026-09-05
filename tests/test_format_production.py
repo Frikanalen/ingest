@@ -6,7 +6,6 @@ lets a row's existence stand for "this landed in full", and what makes the
 revision it carries safe to act on. These pin it.
 """
 
-import shutil
 from pathlib import Path, PurePosixPath
 from unittest.mock import AsyncMock
 
@@ -18,10 +17,11 @@ from app.api.hooks.metadata import MetadataExtractor
 from app.archive_store import ArchiveEntry, ArchiveSession
 from app.django_client.service import DjangoApiService
 from app.media.produce import FormatProducer, SourceMedia, TranscodeFailed
+from tests.utils.nvenc import requires_nvenc
 
 VIDEO_ID = "12345"
 
-pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg missing")
+pytestmark = requires_nvenc
 
 
 class OrderRecordingSession(ArchiveSession):

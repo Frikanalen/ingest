@@ -6,7 +6,6 @@ from the original must never pull it off the archive.
 """
 
 import logging
-import shutil
 from pathlib import Path, PurePosixPath
 from unittest.mock import AsyncMock
 
@@ -19,6 +18,7 @@ from app.archive_store.base import TRASH_DIR
 from app.converge.actions import ProduceFormat, RefreshMetadata
 from app.converge.apply import Applier, SourceUnavailable
 from app.converge.chores import Plan
+from tests.utils.nvenc import requires_nvenc
 
 VIDEO_ID = "12345"
 ORIGINAL = PurePosixPath(f"{VIDEO_ID}/original/source.mp4")
@@ -108,7 +108,7 @@ async def test_a_missing_original_is_refused_rather_than_guessed(applier, archiv
         await applier.apply(plan_of(RefreshMetadata(fields=("duration",), original_file_id=7)))
 
 
-@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg missing")
+@requires_nvenc
 @pytest.mark.asyncio
 async def test_rebuilding_a_format_swaps_the_directory(applier, archive_root, django_api, color_bars_video):
     """The old revision's files must not survive beside the new ones."""
@@ -131,7 +131,7 @@ async def test_rebuilding_a_format_swaps_the_directory(applier, archive_root, dj
     assert list((archive_root / TRASH_DIR).rglob("leftover-from-v1.jpg"))
 
 
-@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg missing")
+@requires_nvenc
 @pytest.mark.asyncio
 async def test_producing_a_missing_format_registers_it(applier, archive_root, django_api, color_bars_video):
     place(archive_root, ORIGINAL, color_bars_video.read_bytes())
@@ -143,7 +143,7 @@ async def test_producing_a_missing_format_registers_it(applier, archive_root, dj
     assert call.kwargs["profile_revision"] == 1
 
 
-@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg missing")
+@requires_nvenc
 @pytest.mark.asyncio
 async def test_producing_over_output_nothing_claims_replaces_it(applier, archive_root, django_api, color_bars_video):
     """put() refuses to overwrite, so a rebuild into an occupied directory has

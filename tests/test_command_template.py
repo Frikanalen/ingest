@@ -110,11 +110,23 @@ def test_dash_is_a_single_ffmpeg_invocation():
 def test_dash_encodes_an_av1_ladder_and_never_upscales():
     command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args())
 
-    assert command.count("libsvtav1") == 3
+    assert command.count("av1_nvenc") == 3
     # min(rung, ih) rather than a bare height: a 576i upload must not be
     # blown up to 1080p and charged three times for the privilege.
     for rung in (1080, 720, 360):
-        assert f"scale=-2:min({rung}" in command
+        assert f"scale_cuda=-2:min({rung}" in command
+
+
+def test_dash_decodes_on_nvdec_and_keeps_the_frames_on_the_gpu():
+    """Without -hwaccel_output_format the decoder hands back system memory and
+    every scale_cuda in the graph fails to find a hardware frame. Padding and
+    scaling then happen on the GPU too, so a frame is copied back across PCIe
+    once, for the one rung NVENC cannot encode."""
+    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args())
+
+    assert "-hwaccel cuda -hwaccel_output_format cuda" in command
+    assert command.index("-hwaccel cuda") < command.index("-i ")
+    assert command.count("hwdownload") == 1
 
 
 def test_dash_carries_one_vp9_rung_for_players_that_cannot_decode_av1():
@@ -124,8 +136,11 @@ def test_dash_carries_one_vp9_rung_for_players_that_cannot_decode_av1():
 
     assert command.count("libvpx-vp9") == 1
     # Fed by the same scale as the AV1 720p rung rather than a second one, so
-    # the two agree pixel for pixel about what 720p is.
-    assert "scale=-2:min(720\\,ih),split=2[v1][v3]" in command
+    # the two agree pixel for pixel about what 720p is -- and so the download
+    # back to system memory is of an already-scaled 720p frame rather than a
+    # full-size one.
+    assert "scale_cuda=-2:min(720\\,ih),split=2[v1][cpu]" in command
+    assert "[cpu]hwdownload,format=nv12,format=yuv420p[v3]" in command
 
 
 def test_dash_keeps_the_two_codecs_in_separate_adaptation_sets():
@@ -138,13 +153,25 @@ def test_dash_keeps_the_two_codecs_in_separate_adaptation_sets():
 
 
 def test_dash_sets_the_keyframe_interval_explicitly():
-    """-force_key_frames does not stop libvpx placing keyframes of its own, and
-    the muxer starts a segment at whichever keyframe it finds first. Pinning
-    -g and -keyint_min together is what makes the segments come out even."""
+    """-force_key_frames does not stop an encoder placing keyframes of its own,
+    and the muxer starts a segment at whichever keyframe it finds first.
+    Pinning -g and -keyint_min together is what makes the segments come out
+    even."""
     command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args(gop_frames=360))
 
     assert "-g 360 -keyint_min 360" in command
     assert "-force_key_frames" not in command
+
+
+def test_dash_stops_nvenc_inserting_keyframes_at_scene_cuts():
+    """The one NVENC default that would break segmentation outright. With
+    lookahead on it inserts an IDR wherever it detects a cut, so the GOP is no
+    longer a fixed number of frames, the segments stop being the length the
+    manifest declares, and every rendition cuts somewhere different."""
+    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args())
+
+    for stream in range(3):
+        assert f"-no-scenecut:v:{stream} 1" in command
 
 
 def test_dash_asks_for_the_segment_length_it_will_actually_produce():

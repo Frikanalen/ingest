@@ -8,7 +8,6 @@ that shows up in a command-line assertion; it only shows up in the bytes.
 """
 
 import re
-import shutil
 import struct
 import subprocess
 from pathlib import Path
@@ -19,8 +18,9 @@ from frikanalen_django_api_client.models import VideoFileVariantEnum
 from app.media.comand_template import ProfileTemplateArguments, TemplatedCommandGenerator
 from app.media.ffprobe_schema import FfprobeOutput
 from app.media.segmentation import segmentation_for
+from tests.utils.nvenc import requires_nvenc
 
-pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg missing")
+pytestmark = requires_nvenc
 
 # 59.94fps: the rate that has no whole-second segment length, and the one the
 # first real upload to hit this was shot at.

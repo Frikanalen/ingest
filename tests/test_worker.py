@@ -21,6 +21,7 @@ from app.formats import current_revision
 from app.ingest_reporting import IngestErrorCode
 from app.media.produce import TranscodeFailed
 from app.worker import Worker
+from tests.utils.nvenc import requires_nvenc
 
 VIDEO_ID = "12345"
 
@@ -120,6 +121,7 @@ async def test_a_video_that_needs_nothing_is_finished_not_skipped(worker, django
     assert reported_states(django_api)[-1] == IngestStateEnum.DONE
 
 
+@requires_nvenc
 @pytest.mark.asyncio
 async def test_work_that_is_needed_gets_done(worker, django_api, archive_root, color_bars_video):
     """A thumbnail registered by a superseded profile is rebuilt."""
@@ -263,6 +265,7 @@ async def test_the_original_is_never_republished(worker, django_api, archive_roo
     assert all(str(f) != "original" for f in registered)
 
 
+@requires_nvenc
 @pytest.mark.asyncio
 async def test_rebuilt_files_carry_the_current_revision(worker, django_api, archive_root, color_bars_video):
     (archive_root / VIDEO_ID / "original").mkdir(parents=True)

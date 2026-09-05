@@ -56,11 +56,25 @@ Publishing order matters because the archive is exported read-only to the playou
 
 ### DASH
 
-`dash` is an adaptive AV1/Opus ladder — 1080p, 720p and 360p, none of them upscaled past the source — played back over MSE by a browser-side player, plus a single 720p VP9 rung for players with no AV1 decoder. It is one FFmpeg invocation: the source is decoded once, padded to 16:9, and split into the four renditions in a single pass; the VP9 rung is fed by the same 720p scale as its AV1 counterpart, so the two agree pixel for pixel about what 720p is.
+`dash` is an adaptive AV1/Opus ladder, encoded on an NVIDIA GPU — 1080p, 720p and 360p, none of them upscaled past the source — played back over MSE by a browser-side player, plus a single 720p VP9 rung for players with no AV1 decoder. It is one FFmpeg invocation: the source is decoded once, padded to 16:9, and split into the four renditions in a single pass; the VP9 rung is fed by the same 720p scale as its AV1 counterpart, so the two agree pixel for pixel about what 720p is.
 
 The two codecs sit in adaptation sets of their own. A player switches renditions *within* an adaptation set, so one set holding both would ask it to switch from AV1 to VP9 mid-playback — the thing the VP9 rung exists to make unnecessary. A player that can decode AV1 takes the three-rung set and never fetches the VP9 rung at all; one that cannot has a single 720p rendition to fall back on, which is a fallback rather than a ladder, and deliberately so: it is there to be watchable, not to adapt.
 
 The audio is carried twice for the same reason, in two adaptation sets of its own: Opus for players that can decode it, and AAC-LC because Opus in an MP4 is *silence* on desktop WebKit — and silence is worse than a worse codec. Broadly the same audience needs both fallbacks: a Safari with no AV1 decoder is likely a Safari with no Opus-in-MP4 either, and handing that viewer a picture with no sound would defeat the VP9 rung entirely. Both tracks are normalized identically; a second audio encode is not measurable next to four video ones.
+
+#### Where the work happens
+
+The source is decoded on NVDEC and stays in GPU memory: `pad_cuda` squares it up to 16:9, three `scale_cuda` rungs come off a `split`, and each goes to its own `av1_nvenc` session at `-preset p7 -tune uhq` — the Ultra High Quality mode Blackwell added, which is what makes an RTX 5080 the target rather than any NVENC card.
+
+NVENC has no VP9 encoder and never has, on any generation. The compatibility rung is therefore the one thing that cannot move to the GPU: it is `hwdownload`ed back to system memory and encoded by libvpx on the CPU. It is taken off the *720p* branch rather than the source, so what crosses PCIe is an already-scaled frame rather than a full-size one, and it still shares its scale with the AV1 720p rung.
+
+`-no-scenecut 1` is not optional. With lookahead enabled NVENC inserts an IDR wherever it detects a cut, which would make the GOP something other than a fixed number of frames — and a segmented format can only cut where a keyframe is. Left on, it breaks the invariant the whole of `tests/test_dash_manifest.py` exists to protect.
+
+#### Two things this ladder does not handle yet
+
+`-hwaccel_output_format cuda` means a source NVDEC cannot decode — ProRes and DNxHD among them — fails outright rather than falling back to software decode, because the CUDA filters then find no hardware frame to work on. Fixing it properly means deciding per source, from what ffprobe already reports, whether to take the hardware path, which is a change to `ProfileTemplateArguments` rather than to the template.
+
+`hwdownload,format=nv12` assumes 8-bit. A 10-bit source decodes to P010 and the download fails.
 
 Segments live inside one file per representation, addressed by byte range from the manifest (`-single_file 1`), rather than as a file each. A one-hour video is five files instead of several thousand, which is what makes DASH viable over a remote archive at all: publishing is one privileged command per file, so a ladder of segments would be a command apiece. The cost is a manifest that grows with duration, by roughly 120 KB per hour; it compresses well, and if it ever becomes a problem the fix is rewriting the manifest into on-demand `SegmentBase` form.
 
