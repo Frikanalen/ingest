@@ -7,6 +7,7 @@ many hours have gone into it.
 """
 
 import asyncio
+import signal
 from pathlib import PurePosixPath
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -337,3 +338,28 @@ async def test_a_failed_upload_is_not_marked_importable(worker, django_api, arch
 
     django_api.set_video_proper_import.assert_not_awaited()
     assert reported_states(django_api)[-1] == IngestStateEnum.FAILED
+
+
+@pytest.mark.asyncio
+async def test_a_signal_during_startup_is_not_lost(worker, monkeypatch):
+    """The container is PID 1, and the kernel drops a signal PID 1 has no
+    handler for. A worker deleted a second after it was created -- which a
+    rollout does -- would otherwise never hear its only SIGTERM, and spend the
+    whole hour-long grace period claiming jobs nobody expects it to take."""
+    import app.worker as worker_module
+
+    monkeypatch.setattr(worker_module, "_signalled_during_startup", True)
+    worker_module.install_drain_handlers(worker)
+
+    assert worker.draining
+    await asyncio.wait_for(worker.run(), timeout=5)
+
+
+@pytest.mark.asyncio
+async def test_the_startup_handler_records_the_signal(monkeypatch):
+    import app.worker as worker_module
+
+    monkeypatch.setattr(worker_module, "_signalled_during_startup", False)
+    worker_module._note_signal_during_startup(signal.SIGTERM, None)
+
+    assert worker_module._signalled_during_startup
