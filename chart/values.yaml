@@ -218,21 +218,21 @@ workers:
     limits:
       memory: "4Gi"
 
-  # Prefer a worker per node rather than two on one and none on another. Each
+  # Require workers to be spread across nodes rather than placing two on one
+  # and none on another. Each
   # holds a whole encode's scratch space and saturates what CPU it is given,
   # so stacking them makes them contend for one node's disk and cores while
   # another sits idle.
   #
-  # Soft on purpose. DoNotSchedule would make this a rollout's problem the
-  # moment a node is cordoned or full -- a replacement with nowhere to go that
-  # satisfies the constraint stays Pending, which is the deadlock this pool
-  # already had once. ScheduleAnyway spreads when it can and places the pod
-  # regardless when it cannot.
+  # This is a hard constraint: if a node is cordoned, full, or otherwise
+  # ineligible, a worker that cannot satisfy maxSkew stays Pending instead of
+  # being stacked onto a busier node. Check Pending workers during rollouts and
+  # restore node capacity before expecting the rollout to complete.
   topologySpread:
     enabled: true
     maxSkew: 1
     topologyKey: kubernetes.io/hostname
-    whenUnsatisfiable: ScheduleAnyway
+    whenUnsatisfiable: DoNotSchedule
 
   # Batch work is a reasonable thing to keep off the nodes serving the site.
   nodeSelector: {}
