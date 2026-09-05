@@ -17,6 +17,7 @@ from frikanalen_django_api_client.models import IngestStateEnum, VideoFileVarian
 
 from app.archive_store import LocalArchiveStore
 from app.converge.apply import SourceUnavailable
+from app.formats import current_revision
 from app.ingest_reporting import IngestErrorCode
 from app.media.produce import TranscodeFailed
 from app.worker import Worker
@@ -32,14 +33,23 @@ def video_row(duration="00:10:00", framerate=25000):
     return SimpleNamespace(id=int(VIDEO_ID), duration=duration, framerate=framerate)
 
 
-def file_row(file_id, variant, filename, revision=1, lufs=-23.0):
+def file_row(file_id, variant, filename, revision=None, lufs=-23.0):
+    """One row as the catalogue reports it.
+
+    The revision defaults to whatever the shipped template currently is, so
+    that "already built" keeps meaning "already built" when a profile is
+    bumped. Hardcoding 1 here made every fixture quietly go stale the first
+    time a ladder changed, and the tests that failed were the ones about
+    signalling and importability rather than about revisions at all.
+    """
+    variant = VideoFileVariantEnum(variant)
     return SimpleNamespace(
         id=file_id,
         video=int(VIDEO_ID),
-        variant=VideoFileVariantEnum(variant),
+        variant=variant,
         filename=filename,
         integrated_lufs=lufs,
-        profile_revision=revision,
+        profile_revision=current_revision(variant) if revision is None else revision,
         additional_properties={},
     )
 
@@ -265,8 +275,11 @@ async def test_rebuilt_files_carry_the_current_revision(worker, django_api, arch
 
     await worker.run_once()
 
-    revisions = {c.kwargs["profile_revision"] for c in django_api.create_video_file.await_args_list}
-    assert revisions == {1}
+    built = {
+        c.kwargs["file_format"]: c.kwargs["profile_revision"] for c in django_api.create_video_file.await_args_list
+    }
+    assert built
+    assert built == {file_format: current_revision(file_format) for file_format in built}
 
 
 @pytest.mark.asyncio

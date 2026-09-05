@@ -24,9 +24,13 @@ FROM python:3.12
 # ffmpeg, not from apt. Debian trixie ships 7.1, which is two releases behind,
 # and the archive is transcoded once and kept forever -- it is worth doing that
 # with the current encoders. These are statically linked binaries built with
-# libx264, libvpx and the dash muxer, so they bring no shared libraries into
-# the image and nothing here depends on Debian's ffmpeg packaging. Pinned: an
-# ffmpeg change is an encoder change, and those want to be deliberate.
+# libsvtav1, libvpx, libx264 and the dash muxer, so they bring no shared
+# libraries into the image and nothing here depends on Debian's ffmpeg
+# packaging. The DASH ladder is AV1, so libsvtav1 is load-bearing: an ffmpeg
+# without it fails every encode rather than falling back to something.
+#
+# Pinned: an ffmpeg change is an encoder change, and those want to be
+# deliberate.
 COPY --from=mwader/static-ffmpeg:9.0.1 /ffmpeg /ffprobe /usr/local/bin/
 
 # It is important to use the image that matches the builder, as the path to the

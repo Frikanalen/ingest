@@ -78,9 +78,11 @@ class ProfileTemplateArguments(TypedDict):
     #: that gop_frames really is segment_duration_s long: left to infer it,
     #: ffmpeg may not pick the rate those two were worked out from.
     frame_rate: str
-    #: Keyframe interval, in frames. Set explicitly because libvpx places
-    #: keyframes of its own otherwise, and a segmented format can only cut
-    #: where a keyframe is -- see app.media.segmentation.
+    #: Keyframe interval, in frames. Set explicitly because an encoder left
+    #: to itself places keyframes of its own, and a segmented format can only
+    #: cut where a keyframe is -- and where the ladder's encoders disagree
+    #: about that, its renditions stop being switchable. See
+    #: app.media.segmentation.
     gop_frames: int
     #: Segment length in seconds, as ffmpeg spells it. Must be what
     #: gop_frames actually comes to, since ffmpeg copies it into the manifest.

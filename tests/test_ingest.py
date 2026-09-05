@@ -236,7 +236,9 @@ async def test_archives_nothing_but_the_finished_files(ingested, archive_root):
     """ffmpeg scratch, the two-pass log and the transfer spool must all stay out."""
     archived = sorted(str(p.relative_to(archive_root)) for p in archive_root.rglob("*") if p.is_file())
 
-    dash_media = sorted(f"{VIDEO_ID}/dash/manifest-stream{n}.mp4" for n in range(3))
+    # One file per representation in the ladder: three AV1 rungs and the VP9
+    # one. The fixture is silent, so neither audio representation is there.
+    dash_media = sorted(f"{VIDEO_ID}/dash/manifest-stream{n}.mp4" for n in range(4))
 
     assert archived == sorted(
         [

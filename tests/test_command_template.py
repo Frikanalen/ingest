@@ -107,14 +107,34 @@ def test_dash_is_a_single_ffmpeg_invocation():
     assert command.count("-progress pipe:1") == 1
 
 
-def test_dash_encodes_three_renditions_and_never_upscales():
+def test_dash_encodes_an_av1_ladder_and_never_upscales():
     command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args())
 
-    assert command.count("libvpx-vp9") == 3
+    assert command.count("libsvtav1") == 3
     # min(rung, ih) rather than a bare height: a 576i upload must not be
     # blown up to 1080p and charged three times for the privilege.
     for rung in (1080, 720, 360):
         assert f"scale=-2:min({rung}" in command
+
+
+def test_dash_carries_one_vp9_rung_for_players_that_cannot_decode_av1():
+    """720p, and only the one: it exists to be watchable at all on a player
+    with no AV1 decoder, not to be a second ladder alongside the first."""
+    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args())
+
+    assert command.count("libvpx-vp9") == 1
+    # Fed by the same scale as the AV1 720p rung rather than a second one, so
+    # the two agree pixel for pixel about what 720p is.
+    assert "scale=-2:min(720\\,ih),split=2[v1][v3]" in command
+
+
+def test_dash_keeps_the_two_codecs_in_separate_adaptation_sets():
+    """A player switches renditions within an adaptation set, so a set holding
+    both codecs would ask it to switch from AV1 to VP9 mid-playback -- which
+    is exactly what the VP9 rung exists to avoid needing."""
+    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args())
+
+    assert "id=0,streams=0,1,2 id=1,streams=3" in command
 
 
 def test_dash_sets_the_keyframe_interval_explicitly():
@@ -155,14 +175,37 @@ def test_dash_is_told_which_constant_frame_rate():
     assert "-r 60000/1001" in command
 
 
-def test_dash_audio_is_aac():
-    """Opus in an MP4 is silence on anything running WebKit -- which on iOS is
-    every browser, Firefox and Chrome included. AAC-LC is the one audio codec
-    every DASH client will decode."""
+def test_dash_audio_is_opus_with_an_aac_set_beside_it():
+    """Opus is the better codec and what a current player should get.
+
+    AAC stays because Opus in an MP4 is *silence* on desktop WebKit -- and
+    silence is worse than a worse codec. It is the same audience the VP9 rung
+    serves: a Safari with no AV1 decoder is likely a Safari with no
+    Opus-in-MP4 either, so dropping AAC would hand that viewer a picture with
+    no sound. Two audio adaptation sets cost one more file and no measurable
+    encode time; the video is what the CPU goes on.
+    """
     command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args())
 
-    assert "-c:a aac" in command
-    assert "libopus" not in command
+    assert "-c:a:0 libopus" in command
+    assert "-c:a:1 aac" in command
+
+
+def test_dash_gives_each_audio_codec_an_adaptation_set_of_its_own():
+    """Same reason the two video codecs are kept apart: a player switches
+    within a set, and Opus and AAC are not interchangeable mid-stream."""
+    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args())
+
+    assert "id=2,streams=4 id=3,streams=5" in command
+
+
+def test_dash_hands_opus_the_48khz_it_is_defined_at():
+    """Opus is a 48kHz codec. Unlike the resample after loudnorm, this one is
+    not conditional on anything having been measured."""
+    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args(loudness=None))
+
+    assert "loudnorm" not in command
+    assert "-ar:a:0 48000" in command
 
 
 def test_dash_normalizes_a_measured_source_to_the_web_target():
@@ -186,11 +229,14 @@ def test_dash_normalizes_in_one_linear_pass_rather_than_riding_the_gain():
 
 
 def test_dash_resamples_after_normalizing():
-    """loudnorm outputs 192kHz, which the AAC encoder does not accept -- without
-    a resampler the encode fails outright rather than sounding wrong."""
+    """loudnorm outputs 192kHz, which neither encoder accepts -- without a
+    resampler the encode fails outright rather than sounding wrong. Both audio
+    outputs are normalized, so both need the resampler."""
     command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args(loudness=MEASURED))
 
-    assert command.index("loudnorm") < command.index("-ar 48000") < command.index("-c:a aac")
+    for stream in ("0", "1"):
+        chain = command[command.index(f"-c:a:{stream} ") :]
+        assert chain.index("loudnorm") < chain.index(f"-ar:a:{stream} 48000")
 
 
 def test_dash_leaves_the_level_alone_when_nothing_was_measured():
@@ -198,7 +244,8 @@ def test_dash_leaves_the_level_alone_when_nothing_was_measured():
     command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args(loudness=None))
 
     assert "loudnorm" not in command
-    assert "-map 0:a:0 -c:a aac" in command
+    assert "-map 0:a:0 -c:a:0 libopus" in command
+    assert "-map 0:a:0 -c:a:1 aac" in command
 
 
 def test_dash_does_not_normalize_a_source_with_no_measurable_peak():
@@ -217,15 +264,16 @@ def test_dash_leaves_out_the_audio_adaptation_set_when_there_is_no_audio():
     command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args(has_audio=False))
 
     assert "libopus" not in command
-    assert "streams=a" not in command
-    assert '-adaptation_sets "id=0,streams=v"' in command
+    assert "-c:a" not in command
+    assert '-adaptation_sets "id=0,streams=0,1,2 id=1,streams=3"' in command
 
 
 def test_dash_includes_the_audio_adaptation_set_when_there_is_audio():
     command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args(has_audio=True))
 
-    assert "-map 0:a:0 -c:a aac" in command
-    assert '-adaptation_sets "id=0,streams=v id=1,streams=a"' in command
+    assert "-map 0:a:0 -c:a:0 libopus" in command
+    assert "-map 0:a:0 -c:a:1 aac" in command
+    assert '-adaptation_sets "id=0,streams=0,1,2 id=1,streams=3 id=2,streams=4 id=3,streams=5"' in command
 
 
 def test_a_template_must_say_how_its_output_is_named():
