@@ -24,6 +24,7 @@ from app.converge.actions import Action, ProduceFormat, RefreshMetadata, RetireP
 from app.converge.chores import ORIGINAL_DIR, Plan
 from app.django_client.service import DjangoApiService
 from app.formats import DASH_PREVIEW
+from app.media.comand_template import DEFAULT_ENCODER, Encoder
 from app.media.produce import FormatProducer, SourceMedia
 from app.media.segmentation import segmentation_for
 from app.runner import ProgressCallback
@@ -47,11 +48,12 @@ class Applier:
         archive: ArchiveSession,
         django_api: DjangoApiService,
         work_dir: Path | None = None,
+        encoder: Encoder = DEFAULT_ENCODER,
     ):
         self.archive = archive
         self.django_api = django_api
         self.work_dir = work_dir
-        self.producer = FormatProducer(archive, django_api)
+        self.producer = FormatProducer(archive, django_api, encoder)
 
     async def apply(
         self,

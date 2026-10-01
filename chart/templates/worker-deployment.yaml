@@ -1,41 +1,54 @@
 {{- if .Values.workers.enabled }}
+{{- /*
+One Deployment per pool: the main pool, from `workers`, and one for each entry
+under `workers.pools`, which is `workers` with that entry merged over it.
+*/}}
+{{- $main := omit .Values.workers "pools" }}
+{{- $pools := list (dict "name" "" "workers" $main) }}
+{{- range $name, $override := .Values.workers.pools }}
+{{- $pools = append $pools (dict "name" $name "workers" (mergeOverwrite (deepCopy $main) $override)) }}
+{{- end }}
+{{- range $pools }}
+{{- $w := .workers }}
+{{- $selector := include "ingest.poolSelectorLabels" (dict "root" $ "pool" .name) }}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "ingest.fullname" . }}-workers
+  name: {{ include "ingest.fullname" $ }}-workers{{ if .name }}-{{ .name }}{{ end }}
   labels:
-    {{- include "ingest.labels" . | nindent 4 }}
-    app.kubernetes.io/component: worker
+    {{- include "ingest.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: worker{{ if .name }}-{{ .name }}{{ end }}
 spec:
   # Scaling this is the only capacity control there is: workers claim work
   # when they are free, so nothing has to be told how many there are. It is
   # also safe to overshoot -- the scheduler will leave the surplus Pending
   # rather than overcommit the nodes.
-  replicas: {{ .Values.workers.replicaCount }}
+  replicas: {{ $w.replicaCount }}
   # Long enough for a worker to see out the job it holds, or a rollout that
   # waits for one is reported as a failure. See the note in values.yaml.
-  progressDeadlineSeconds: {{ .Values.workers.progressDeadlineSeconds }}
-  {{- with .Values.workers.strategy }}
+  progressDeadlineSeconds: {{ $w.progressDeadlineSeconds }}
+  {{- with $w.strategy }}
   strategy:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   selector:
     matchLabels:
-      {{- include "ingest.workerSelectorLabels" . | nindent 6 }}
+      {{- $selector | nindent 6 }}
   template:
     metadata:
       annotations:
-        {{- if and .Values.archive.ssh.enabled .Values.archive.ssh.secretChecksum }}
-        checksum/ssh-secret: {{ .Values.archive.ssh.secretChecksum | quote }}
+        {{- if and $.Values.archive.ssh.enabled $.Values.archive.ssh.secretChecksum }}
+        checksum/ssh-secret: {{ $.Values.archive.ssh.secretChecksum | quote }}
         {{- end }}
-        {{- with .Values.podAnnotations }}
+        {{- with $.Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-        {{- with .Values.workers.podAnnotations }}
+        {{- with $w.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       labels:
-        {{- include "ingest.workerSelectorLabels" . | nindent 8 }}
+        {{- $selector | nindent 8 }}
     spec:
       # SIGTERM means "stop claiming"; the job in hand is seen out. That only
       # helps if there is time for it: an encode abandoned partway is not lost
@@ -43,10 +56,13 @@ spec:
       # lost hours. Anything still running when this elapses is killed, so set
       # it to something a job can realistically finish in, and know that node
       # drains will wait that long.
-      terminationGracePeriodSeconds: {{ .Values.workers.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ $w.terminationGracePeriodSeconds }}
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      {{- with .Values.workers.topologySpread }}
+        {{- toYaml (mergeOverwrite (deepCopy $.Values.podSecurityContext) ($w.podSecurityContext | default dict)) | nindent 8 }}
+      {{- with $w.runtimeClassName }}
+      runtimeClassName: {{ . }}
+      {{- end }}
+      {{- with $w.topologySpread }}
       {{- if .enabled }}
       topologySpreadConstraints:
         - maxSkew: {{ .maxSkew }}
@@ -54,53 +70,54 @@ spec:
           whenUnsatisfiable: {{ .whenUnsatisfiable }}
           labelSelector:
             matchLabels:
-              {{- include "ingest.workerSelectorLabels" $ | nindent 14 }}
+              {{- $selector | nindent 14 }}
       {{- end }}
       {{- end }}
-      {{- with .Values.workers.nodeSelector }}
+      {{- with $w.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.workers.tolerations }}
+      {{- with $w.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
         - name: worker
-          image: {{ include "ingest.image" . | quote }}
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          image: {{ include "ingest.image" $ | quote }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
           # The queue is the only thing this listens to. There is no server, no
           # Service and no ingress: it reaches out to django-api and to the
           # archive, and nothing reaches in.
-          command: ["python", "-m", "app.worker"]
+          command: ["python", "-m", "app.worker", "--encoder", {{ $w.encoder | quote }}]
           env:
-            {{- include "ingest.workerEnv" . | nindent 12 }}
+            {{- include "ingest.workerEnv" (dict "root" $ "workers" $w) | nindent 12 }}
           # No probes. A worker serves nothing, so liveness would have to guess
           # at what "wedged" means, and a wrong guess kills an encode that was
           # merely slow. A claim that stops being renewed is what surfaces a
           # stuck worker, and the lease is what recovers its job.
           resources:
-            {{- toYaml .Values.workers.resources | nindent 12 }}
+            {{- toYaml $w.resources | nindent 12 }}
           volumeMounts:
             - name: work
-              mountPath: {{ .Values.workers.work.mountPath }}
-            {{- if .Values.archive.ssh.enabled }}
+              mountPath: {{ $w.work.mountPath }}
+            {{- if $.Values.archive.ssh.enabled }}
             - name: archive-ssh
-              mountPath: {{ include "ingest.sshMountPath" . }}
+              mountPath: {{ include "ingest.sshMountPath" $ }}
               readOnly: true
-            {{- include "ingest.archiveMount" . | nindent 12 }}
+            {{- include "ingest.archiveMount" $ | nindent 12 }}
             {{- end }}
       volumes:
         # Scratch for one video at a time: the original is fetched here, the
         # derivatives are built here, and both are gone when the job ends.
         - name: work
           emptyDir:
-            {{- toYaml .Values.workers.work.emptyDir | nindent 12 }}
-        {{- if .Values.archive.ssh.enabled }}
+            {{- toYaml $w.work.emptyDir | nindent 12 }}
+        {{- if $.Values.archive.ssh.enabled }}
         - name: archive-ssh
           secret:
-            secretName: {{ .Values.archive.ssh.secretName }}
-            defaultMode: {{ .Values.archive.ssh.defaultMode }}
-        {{- include "ingest.archiveVolume" . | nindent 8 }}
+            secretName: {{ $.Values.archive.ssh.secretName }}
+            defaultMode: {{ $.Values.archive.ssh.defaultMode }}
+        {{- include "ingest.archiveVolume" $ | nindent 8 }}
         {{- end }}
+{{- end }}
 {{- end }}

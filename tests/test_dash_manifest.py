@@ -18,6 +18,7 @@ from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.media.comand_template import ProfileTemplateArguments, TemplatedCommandGenerator
 from app.media.ffprobe_schema import FfprobeOutput
+from app.media.ladder import rungs_for
 from app.media.segmentation import segmentation_for
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg missing")
@@ -95,6 +96,7 @@ def _build_dash(work: Path, source: Path, segmentation) -> Path:
             frame_rate=segmentation.frame_rate_arg,
             gop_frames=segmentation.gop_frames,
             segment_duration_s=segmentation.segment_duration_arg,
+            rungs=rungs_for(_probe(source), segmentation.frame_rate),
         )
     )
     subprocess.run(command, shell=True, check=True, capture_output=True)

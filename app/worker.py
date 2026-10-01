@@ -62,6 +62,7 @@ from app.converge.chores import DesiredState, plan  # noqa: E402
 from app.converge.observe import Observer  # noqa: E402
 from app.django_client.service import DjangoApiService  # noqa: E402
 from app.ingest_reporting import IngestErrorCode, IngestReporter, transcode_progress_reporter  # noqa: E402
+from app.media.comand_template import DEFAULT_ENCODER, ENCODERS, Encoder  # noqa: E402
 from app.media.produce import PublishFailed, TranscodeFailed  # noqa: E402
 from app.util.logging import stamp_video_id  # noqa: E402
 
@@ -78,12 +79,14 @@ class Worker:
         kind: str | None = None,
         work_dir: Path | None = None,
         poll_interval_s: float = 30.0,
+        encoder: Encoder = DEFAULT_ENCODER,
     ):
         self.archive = archive
         self.django_api = django_api
         self.name = name
         self.kind = kind
         self.work_dir = work_dir
+        self.encoder = encoder
         self.poll_interval_s = poll_interval_s
         self._draining = asyncio.Event()
 
@@ -159,7 +162,7 @@ class Worker:
                 else:
                     logger.info("Plan for video %s:\n%s", video_id, work.describe())
                     await reporter.state(IngestStateEnum.TRANSCODING)
-                    await Applier(archive, self.django_api, self.work_dir).apply(
+                    await Applier(archive, self.django_api, self.work_dir, self.encoder).apply(
                         work, on_progress=transcode_progress_reporter(reporter)
                     )
 
@@ -215,7 +218,7 @@ def install_drain_handlers(worker: Worker) -> None:
     """Turn a shutdown signal into "stop claiming" rather than "stop".
 
     Kubernetes sends SIGTERM and then waits terminationGracePeriodSeconds --
-    thirty by default, which is nothing against a VP9 ladder. Set the grace
+    thirty by default, which is nothing against a CPU-encoded ladder. Set the grace
     period to something a job can actually finish in, or accept that scaling
     down mid-encode costs the work in progress.
     """
@@ -231,14 +234,29 @@ def install_drain_handlers(worker: Worker) -> None:
         worker.drain()
 
 
-async def _drain_the_queue() -> int:
+async def _drain_the_queue(encoder: Encoder | None = None, self_test_only: bool = False) -> int:
     from frikanalen_django_api_client import AuthenticatedClient
 
     from app.archive_store import create_archive_store
+    from app.media.self_test import SelfTestFailed, self_test
     from app.util.lifespan import get_token
     from app.util.settings import get_settings
 
     settings = get_settings()
+    encoder = encoder or settings.worker.encoder
+
+    # Before anything else, and before the first claim: a worker whose encoder
+    # does not work -- no device, a driver that rejects an option, an image
+    # built without the encoder -- would otherwise fail every job it claims,
+    # each one only after fetching the source. Exiting here turns that into a
+    # pod that will not start, which is where an operator looks.
+    try:
+        await self_test(encoder, settings.work_dir)
+    except SelfTestFailed as e:
+        logger.error("Encoder self-test failed on %s: %s", encoder, e)
+        return 1
+    if self_test_only:
+        return 0
 
     # Built before the first claim so a broken archive config fails the pod
     # rather than the first video unlucky enough to be claimed by it.
@@ -259,20 +277,40 @@ async def _drain_the_queue() -> int:
             kind=settings.worker.kind,
             work_dir=settings.work_dir,
             poll_interval_s=settings.worker.poll_interval_s,
+            encoder=encoder,
         )
         install_drain_handlers(worker)
 
-        logger.info("Worker %s draining %s jobs", worker.name, worker.kind or "any")
+        logger.info("Worker %s draining %s jobs with %s", worker.name, worker.kind or "any", encoder)
         await worker.run()
 
     return 0
 
 
-def main() -> int:
+def _parse_args(argv: list[str] | None = None):
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="python -m app.worker", description="Drain the ingest queue.")
+    parser.add_argument(
+        "--encoder",
+        choices=ENCODERS,
+        default=None,
+        help="What to encode with. Defaults to FK_WORKER_ENCODER, or cpu.",
+    )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Run the encoder self-test and exit, without claiming anything.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
     import logging
 
+    args = _parse_args(argv)
     logging.basicConfig(level=logging.INFO)
-    return asyncio.run(_drain_the_queue())
+    return asyncio.run(_drain_the_queue(encoder=args.encoder, self_test_only=args.self_test))
 
 
 if __name__ == "__main__":

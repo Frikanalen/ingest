@@ -6,12 +6,15 @@ import pytest
 from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.media.comand_template import (
+    ENCODERS,
     TEMPLATE_DIR,
     ProfileMetadata,
     ProfileTemplateArguments,
     TemplatedCommandGenerator,
     TemplateNotFound,
+    backends_of,
 )
+from app.media.ladder import LADDER, Rung
 from app.media.loudness.loudness_measurement import LoudnessMeasurement
 
 MEASURED = LoudnessMeasurement(
@@ -21,6 +24,10 @@ MEASURED = LoudnessMeasurement(
     threshold_lufs=-38.2,
     target_offset=0.15,
 )
+
+
+#: The ladder at its full size, as a 1080p source gets it.
+RUNGS = [Rung(spec.codec, round(spec.height * 16 / 9 / 2) * 2, spec.height, spec.bitrate_k) for spec in LADDER]
 
 
 def template_args(**overrides) -> ProfileTemplateArguments:
@@ -36,6 +43,7 @@ def template_args(**overrides) -> ProfileTemplateArguments:
             "frame_rate": "25/1",
             "gop_frames": 150,
             "segment_duration_s": "6.000000",
+            "rungs": RUNGS,
             **overrides,
         }
     )
@@ -79,27 +87,106 @@ def test_small_thumb_is_narrower_than_med_thumb():
     assert command == expected_command, f"Expected: {expected_command}, but got: {command}"
 
 
-def test_h264_med_reports_progress_on_stdout():
-    # Not a VideoFileVariantEnum member -- this template exists but nothing wires it
-    # up to a DESIRED_FORMATS entry yet.
-    template = TemplatedCommandGenerator("h264_med")
-    command = template.render(template_args())
-
-    assert "-progress pipe:1" in command
-    assert template.metadata.passes == 1
+def dash(encoder="cpu", **overrides) -> str:
+    return TemplatedCommandGenerator(VideoFileVariantEnum.DASH, encoder).render(template_args(**overrides))
 
 
-def test_dash_names_its_output_rather_than_following_the_source():
+every_encoder = pytest.mark.parametrize("encoder", ENCODERS)
+
+
+def test_h264_med_is_retired():
+    """The DASH ladder's H.264 rungs cover what the 720p MP4 was for."""
+    with pytest.raises(TemplateNotFound):
+        TemplatedCommandGenerator("h264_med")
+
+
+@every_encoder
+def test_every_encoder_has_its_own_dash_template(encoder):
+    assert (TEMPLATE_DIR / encoder / "dash.j2").is_file()
+
+
+def test_every_backend_builds_the_same_revision_of_the_ladder():
+    """A video built by one backend must not read as stale to another, or the
+    pools would rebuild each other's output forever."""
+    revisions = {
+        encoder: TemplatedCommandGenerator(VideoFileVariantEnum.DASH, encoder).metadata.revision
+        for encoder in backends_of("dash")
+    }
+
+    assert set(revisions) == set(ENCODERS)
+    assert len(set(revisions.values())) == 1, revisions
+
+
+def test_a_format_with_one_template_serves_every_encoder():
+    """Thumbnails and the preview do not depend on the encoder."""
+    for file_format in (VideoFileVariantEnum.LARGE_THUMB, VideoFileVariantEnum.DASH_PREVIEW):
+        commands = {TemplatedCommandGenerator(file_format, encoder).render(template_args()) for encoder in ENCODERS}
+        assert len(commands) == 1, commands
+
+
+@pytest.mark.parametrize(
+    ("encoder", "av1", "h264", "scaler"),
+    [
+        ("cpu", "libsvtav1", "libx264", "scale="),
+        ("qsv", "av1_qsv", "h264_qsv", "vpp_qsv="),
+        ("nvenc", "av1_nvenc", "h264_nvenc", "scale_cuda="),
+    ],
+)
+def test_each_backend_uses_its_own_encoders_and_scaler(encoder, av1, h264, scaler):
+    command = dash(encoder)
+
+    assert command.count(f" {av1}") == 4, command
+    assert command.count(f" {h264}") == 2, command
+    assert command.count(scaler) == 6, command
+
+
+@every_encoder
+def test_every_rung_is_scaled_to_its_exact_size(encoder):
+    command = dash(encoder)
+
+    for rung in RUNGS:
+        assert f"{rung.width}" in command and f"{rung.height}" in command
+
+
+@every_encoder
+def test_every_rung_is_capped(encoder):
+    """DASH advertises a bandwidth per representation and players switch on it,
+    so no rung may be left to a quality target alone."""
+    command = dash(encoder)
+
+    for i, rung in enumerate(RUNGS):
+        assert f"-maxrate:v:{i} {rung.maxrate_k}k" in command
+        assert f"-bufsize:v:{i} {rung.bufsize_k}k" in command
+
+
+@every_encoder
+def test_h264_rungs_are_high_profile(encoder):
+    command = dash(encoder)
+
+    assert "-profile:v:4 high" in command
+    assert "-profile:v:5 high" in command
+
+
+@every_encoder
+def test_dash_deinterlaces_what_the_decoder_says_is_interlaced(encoder):
+    """bwdif with deint=interlaced leaves progressive frames alone, so it can
+    sit in every graph rather than depending on what the container claims."""
+    assert "bwdif=mode=send_frame:parity=auto:deint=interlaced" in dash(encoder)
+
+
+@every_encoder
+def test_dash_names_its_output_rather_than_following_the_source(encoder):
     """The manifest names its media, so those names must not carry a source stem
     that would need percent-encoding to survive as a URL."""
-    metadata = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).metadata
+    metadata = TemplatedCommandGenerator(VideoFileVariantEnum.DASH, encoder).metadata
 
     assert metadata.output_name_for(Path("/uploads/Some Show, Episode 3.mov")) == "manifest.mpd"
 
 
-def test_dash_is_a_single_ffmpeg_invocation():
+@every_encoder
+def test_dash_is_a_single_ffmpeg_invocation(encoder):
     """One decode feeding every rendition, so ffmpeg's progress needs no scaling."""
-    template = TemplatedCommandGenerator(VideoFileVariantEnum.DASH)
+    template = TemplatedCommandGenerator(VideoFileVariantEnum.DASH, encoder)
     command = template.render(template_args())
 
     assert template.metadata.passes == 1
@@ -107,124 +194,144 @@ def test_dash_is_a_single_ffmpeg_invocation():
     assert command.count("-progress pipe:1") == 1
 
 
-def test_dash_encodes_three_renditions_and_never_upscales():
-    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args())
+@every_encoder
+def test_dash_sets_the_keyframe_interval_explicitly(encoder):
+    """The muxer starts a segment at whichever keyframe it finds first, so an
+    encoder placing keyframes of its own cuts segments the manifest does not
+    know about. Pinning -g and -keyint_min together, with scene-cut detection
+    off, is what makes the segments come out even."""
+    command = dash(encoder, gop_frames=360)
 
-    assert command.count("libvpx-vp9") == 3
-    # min(rung, ih) rather than a bare height: a 576i upload must not be
-    # blown up to 1080p and charged three times for the privilege.
-    for rung in (1080, 720, 360):
-        assert f"scale=-2:min({rung}" in command
-
-
-def test_dash_sets_the_keyframe_interval_explicitly():
-    """-force_key_frames does not stop libvpx placing keyframes of its own, and
-    the muxer starts a segment at whichever keyframe it finds first. Pinning
-    -g and -keyint_min together is what makes the segments come out even."""
-    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args(gop_frames=360))
-
-    assert "-g 360 -keyint_min 360" in command
+    assert "-g 360 -keyint_min 360 -sc_threshold 0" in command
+    assert "-flags +cgop" in command
     assert "-force_key_frames" not in command
 
 
-def test_dash_asks_for_the_segment_length_it_will_actually_produce():
+def test_qsv_does_not_place_keyframes_of_its_own():
+    command = dash("qsv")
+
+    for i in range(len(RUNGS)):
+        assert f"-adaptive_i:v:{i} 0 -adaptive_b:v:{i} 0" in command
+
+
+def test_nvenc_does_not_place_keyframes_of_its_own():
+    command = dash("nvenc")
+
+    for i in range(len(RUNGS)):
+        assert f"-no-scenecut:v:{i} 1" in command
+
+
+@every_encoder
+def test_dash_asks_for_the_segment_length_it_will_actually_produce(encoder):
     """ffmpeg copies -seg_duration into the manifest as the segment length
     players do their seek arithmetic with. Asking for a round 6s while the
     keyframes land every 6.006s is what makes a seek miss."""
-    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(
-        template_args(gop_frames=360, segment_duration_s="6.006000")
-    )
-
-    assert "-seg_duration 6.006000" in command
+    assert "-seg_duration 6.006000" in dash(encoder, gop_frames=360, segment_duration_s="6.006000")
 
 
-def test_dash_encodes_at_a_constant_frame_rate():
+@every_encoder
+def test_dash_encodes_at_a_constant_frame_rate(encoder):
     """A GOP is a number of frames, so it is only a fixed length of time if the
     frames arrive at a fixed rate."""
-    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args())
-
-    assert "-fps_mode cfr" in command
+    assert "-fps_mode cfr" in dash(encoder)
 
 
-def test_dash_is_told_which_constant_frame_rate():
+@every_encoder
+def test_dash_is_told_which_constant_frame_rate(encoder):
     """Left to infer it, ffmpeg may not settle on the rate the GOP length and
     the segment length were worked out from -- and then the manifest describes
     segments the encoder never produced."""
-    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args(frame_rate="60000/1001"))
+    command = dash(encoder, frame_rate="60000/1001")
 
     assert "-r 60000/1001" in command
+    assert "fps=60000/1001" in command
 
 
-def test_dash_audio_is_aac():
+@every_encoder
+def test_dash_audio_is_stereo_aac(encoder):
     """Opus in an MP4 is silence on anything running WebKit -- which on iOS is
     every browser, Firefox and Chrome included. AAC-LC is the one audio codec
     every DASH client will decode."""
-    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args())
+    command = dash(encoder)
 
-    assert "-c:a aac" in command
+    assert "-ac 2 -c:a aac -b:a 128k" in command
     assert "libopus" not in command
 
 
-def test_dash_normalizes_a_measured_source_to_the_web_target():
+@every_encoder
+def test_dash_normalizes_a_measured_source_to_the_web_target(encoder):
     """-16 LUFS is what the rest of a browser tab sounds like. Playout works
     to -23 from the figure stored against the original instead, which is why
     the measurement describes the upload rather than this output."""
-    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args(loudness=MEASURED))
+    command = dash(encoder, loudness=MEASURED)
 
     assert "loudnorm=I=-16:TP=-1" in command
     for measured in ("measured_I=-27.85", "measured_TP=-9.61", "measured_LRA=5.2", "measured_thresh=-38.2"):
         assert measured in command, command
 
 
-def test_dash_normalizes_in_one_linear_pass_rather_than_riding_the_gain():
+@every_encoder
+def test_dash_normalizes_in_one_linear_pass_rather_than_riding_the_gain(encoder):
     """Without the measurements loudnorm works dynamically, which pumps
     quiet passages up and audibly breathes on speech."""
-    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args(loudness=MEASURED))
+    command = dash(encoder, loudness=MEASURED)
 
     assert "linear=true" in command
     assert "offset=0.15" in command
 
 
-def test_dash_resamples_after_normalizing():
+@every_encoder
+def test_dash_resamples_after_normalizing(encoder):
     """loudnorm outputs 192kHz, which the AAC encoder does not accept -- without
     a resampler the encode fails outright rather than sounding wrong."""
-    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args(loudness=MEASURED))
+    command = dash(encoder, loudness=MEASURED)
 
     assert command.index("loudnorm") < command.index("-ar 48000") < command.index("-c:a aac")
 
 
-def test_dash_leaves_the_level_alone_when_nothing_was_measured():
+@every_encoder
+def test_dash_leaves_the_level_alone_when_nothing_was_measured(encoder):
     """A wrong gain is worse than no gain."""
-    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args(loudness=None))
+    command = dash(encoder, loudness=None)
 
     assert "loudnorm" not in command
-    assert "-map 0:a:0 -c:a aac" in command
+    assert "-map 0:a:0 -ar 48000 -ac 2 -c:a aac" in command
 
 
-def test_dash_does_not_normalize_a_source_with_no_measurable_peak():
+@every_encoder
+def test_dash_does_not_normalize_a_source_with_no_measurable_peak(encoder):
     """loudnorm has no syntax for an unknown true peak, and rendering the
     null into the filter would produce a command ffmpeg cannot parse."""
-    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(
-        template_args(loudness=MEASURED.model_copy(update={"truepeak_lufs": None}))
-    )
+    command = dash(encoder, loudness=MEASURED.model_copy(update={"truepeak_lufs": None}))
 
     assert "loudnorm" not in command
     assert "None" not in command
 
 
-def test_dash_leaves_out_the_audio_adaptation_set_when_there_is_no_audio():
+@every_encoder
+def test_dash_leaves_out_the_audio_adaptation_set_when_there_is_no_audio(encoder):
     """An adaptation set with no representation in it is not valid DASH."""
-    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args(has_audio=False))
+    command = dash(encoder, has_audio=False)
 
-    assert "libopus" not in command
+    assert "0:a:0" not in command
     assert "streams=a" not in command
-    assert '-adaptation_sets "id=0,streams=v"' in command
+    assert '-adaptation_sets "id=0,streams=0,1,2,3 id=1,streams=4,5"' in command
 
 
-def test_dash_includes_the_audio_adaptation_set_when_there_is_audio():
-    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH).render(template_args(has_audio=True))
+@every_encoder
+def test_dash_puts_each_codec_in_its_own_adaptation_set(encoder):
+    """A player picks the set it can decode, and switches only within it."""
+    command = dash(encoder, has_audio=True)
 
-    assert "-map 0:a:0 -c:a aac" in command
+    assert "-map 0:a:0" in command
+    assert '-adaptation_sets "id=0,streams=0,1,2,3 id=1,streams=4,5 id=2,streams=a"' in command
+
+
+def test_preview_is_one_h264_rung_that_plays_everywhere():
+    command = TemplatedCommandGenerator(VideoFileVariantEnum.DASH_PREVIEW).render(template_args())
+
+    assert command.count("libx264") == 1
+    assert "scale=-2:min(360" in command
     assert '-adaptation_sets "id=0,streams=v id=1,streams=a"' in command
 
 

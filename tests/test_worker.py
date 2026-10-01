@@ -17,6 +17,7 @@ from frikanalen_django_api_client.models import IngestStateEnum, VideoFileVarian
 
 from app.archive_store import LocalArchiveStore
 from app.converge.apply import SourceUnavailable
+from app.formats import current_revision
 from app.ingest_reporting import IngestErrorCode
 from app.media.produce import TranscodeFailed
 from app.worker import Worker
@@ -32,7 +33,10 @@ def video_row(duration="00:10:00", framerate=25000):
     return SimpleNamespace(id=int(VIDEO_ID), duration=duration, framerate=framerate)
 
 
-def file_row(file_id, variant, filename, revision=1, lufs=-23.0):
+def file_row(file_id, variant, filename, revision=None, lufs=-23.0):
+    """A registered file, built by the template's current revision unless told otherwise."""
+    if revision is None:
+        revision = current_revision(VideoFileVariantEnum(variant))
     return SimpleNamespace(
         id=file_id,
         video=int(VIDEO_ID),
@@ -265,8 +269,10 @@ async def test_rebuilt_files_carry_the_current_revision(worker, django_api, arch
 
     await worker.run_once()
 
-    revisions = {c.kwargs["profile_revision"] for c in django_api.create_video_file.await_args_list}
-    assert revisions == {1}
+    registered = django_api.create_video_file.await_args_list
+    assert registered
+    for call in registered:
+        assert call.kwargs["profile_revision"] == current_revision(call.kwargs["file_format"]), call.kwargs
 
 
 @pytest.mark.asyncio

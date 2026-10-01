@@ -15,8 +15,9 @@ from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.archive_store import ArchiveSession
 from app.django_client.service import DjangoApiService
-from app.media.comand_template import ProfileTemplateArguments, TemplatedCommandGenerator
+from app.media.comand_template import DEFAULT_ENCODER, Encoder, ProfileTemplateArguments, TemplatedCommandGenerator
 from app.media.ffprobe_schema import FfprobeOutput
+from app.media.ladder import rungs_for
 from app.media.loudness.loudness_measurement import LoudnessMeasurement
 from app.media.segmentation import segmentation_for
 from app.runner import ProgressCallback, Task
@@ -69,6 +70,42 @@ class SourceMedia:
         )
 
 
+def render_command(
+    source: SourceMedia, file_format: str, scratch: Path, encoder: Encoder = DEFAULT_ENCODER
+) -> tuple[TemplatedCommandGenerator, Path, str]:
+    """The command that builds `file_format` from `source`, and where its primary output will be.
+
+    Separate from `FormatProducer.produce` so the worker's startup self-test can
+    run exactly the command a real job would, without archiving what it makes.
+    """
+    template = TemplatedCommandGenerator(file_format, encoder)
+
+    # Each format gets a directory of its own, and whatever the command
+    # leaves in it is what gets archived. A format can therefore produce a
+    # set of files -- DASH writes a manifest and the media it names --
+    # without ingest having to know the shape of any of them.
+    output_dir = scratch / str(file_format)
+    output_dir.mkdir()
+    output_file = output_dir / template.metadata.output_name_for(source.path)
+
+    segmentation = segmentation_for(source.metadata)
+
+    template_args = ProfileTemplateArguments(
+        input_file=source.path,
+        output_file=output_file,
+        output_dir=output_dir,
+        scratch_dir=scratch,
+        seek_s=(source.duration_s * 0.25 or 30),
+        has_audio=source.has_audio,
+        loudness=source.loudness,
+        gop_frames=segmentation.gop_frames,
+        segment_duration_s=segmentation.segment_duration_arg,
+        frame_rate=segmentation.frame_rate_arg,
+        rungs=rungs_for(source.metadata, segmentation.frame_rate),
+    )
+    return template, output_file, template.render(template_args)
+
+
 class FormatProducer:
     """Turns a source file into one archived, registered format at a time.
 
@@ -76,9 +113,10 @@ class FormatProducer:
     video rather than one apiece.
     """
 
-    def __init__(self, archive: ArchiveSession, django_api: DjangoApiService):
+    def __init__(self, archive: ArchiveSession, django_api: DjangoApiService, encoder: Encoder = DEFAULT_ENCODER):
         self.archive = archive
         self.django_api = django_api
+        self.encoder = encoder
         self.logger = getLogger(__name__)
 
     async def produce(
@@ -91,32 +129,8 @@ class FormatProducer:
         """Build `file_format`, archive it, register it, and say where it went."""
         self.logger.info("Processing %s as %s", source.path, file_format)
 
-        template = TemplatedCommandGenerator(file_format)
-
-        # Each format gets a directory of its own, and whatever the command
-        # leaves in it is what gets archived. A format can therefore produce a
-        # set of files -- DASH writes a manifest and the media it names --
-        # without ingest having to know the shape of any of them.
-        output_dir = scratch / str(file_format)
-        output_dir.mkdir()
-        output_file = output_dir / template.metadata.output_name_for(source.path)
-
-        segmentation = segmentation_for(source.metadata)
-
-        template_args = ProfileTemplateArguments(
-            input_file=source.path,
-            output_file=output_file,
-            output_dir=output_dir,
-            scratch_dir=scratch,
-            seek_s=(source.duration_s * 0.25 or 30),
-            has_audio=source.has_audio,
-            loudness=source.loudness,
-            gop_frames=segmentation.gop_frames,
-            segment_duration_s=segmentation.segment_duration_arg,
-            frame_rate=segmentation.frame_rate_arg,
-        )
-
-        command = template.render(template_args)
+        template, output_file, command = render_command(source, file_format, scratch, self.encoder)
+        output_dir = output_file.parent
         self.logger.debug("Generated command: %s", command)
 
         try:

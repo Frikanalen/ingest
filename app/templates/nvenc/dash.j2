@@ -1,0 +1,16 @@
+---
+output_file_name: manifest.mpd
+revision: 2
+---
+{% import "_ladder.j2" as ladder with context %}
+ffmpeg -init_hw_device cuda=cu -filter_hw_device cu -i "{{ input_file }}" -y
+    -nostats -progress pipe:1
+    -filter_complex "[0:v]{{ ladder.prepare() }},format=nv12,hwupload,{{ ladder.split() }}{% for rung in rungs %};[s{{ loop.index0 }}]scale_cuda={{ rung.width }}:{{ rung.height }}[v{{ loop.index0 }}]{% endfor %}"
+    {% for rung in rungs %}{% set i = loop.index0 %}
+    -map "[v{{ i }}]"
+    -c:v:{{ i }} {{ rung.codec }}_nvenc{% if rung.codec == "h264" %} -profile:v:{{ i }} high{% endif %}
+    -preset:v:{{ i }} p7 -tune:v:{{ i }} hq -multipass:v:{{ i }} qres -rc:v:{{ i }} vbr{{ ladder.rates(i, rung) }}
+    -rc-lookahead:v:{{ i }} 32 -no-scenecut:v:{{ i }} 1 -spatial-aq:v:{{ i }} 1 -temporal-aq:v:{{ i }} 1
+    {% endfor %}
+    {{ ladder.audio() }}
+    {{ ladder.ladder_output() }}

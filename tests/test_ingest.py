@@ -24,6 +24,7 @@ from app.archive_store import SshArchiveStore
 from app.archive_store.ssh import SshArchiveSession
 from app.formats import DASH_PREVIEW, current_revision
 from app.ingest import Ingester
+from app.media.ladder import LADDER
 from app.media.loudness.measure import measure_loudness
 from app.util.settings import SshArchiveSettings
 from tests.utils.catalogue import recording_django_api, registered_file
@@ -236,7 +237,8 @@ async def test_archives_nothing_but_the_finished_files(ingested, archive_root):
     """ffmpeg scratch, the two-pass log and the transfer spool must all stay out."""
     archived = sorted(str(p.relative_to(archive_root)) for p in archive_root.rglob("*") if p.is_file())
 
-    dash_media = sorted(f"{VIDEO_ID}/dash/manifest-stream{n}.mp4" for n in range(3))
+    # Six video representations (four AV1, two H.264); the fixture has no audio.
+    dash_media = sorted(f"{VIDEO_ID}/dash/manifest-stream{n}.mp4" for n in range(len(LADDER)))
 
     assert archived == sorted(
         [

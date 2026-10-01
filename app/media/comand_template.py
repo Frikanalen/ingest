@@ -1,12 +1,13 @@
 from functools import lru_cache
 from importlib import resources
 from pathlib import Path
-from typing import TypedDict
+from typing import Literal, TypedDict, get_args
 
 import yaml
-from jinja2 import Template
+from jinja2 import Environment, FunctionLoader, StrictUndefined, Template
 from pydantic import BaseModel, Field, model_validator
 
+from app.media.ladder import Rung
 from app.media.loudness.loudness_measurement import LoudnessMeasurement
 
 #: Where the format templates live.
@@ -24,6 +25,20 @@ from app.media.loudness.loudness_measurement import LoudnessMeasurement
 #: one going away. Resolving against the package leaves nothing to be
 #: accidentally right about, and costs no fork on the event loop to do it.
 TEMPLATE_DIR = resources.files("app") / "templates"
+
+#: What a worker encodes with. Chosen per process, by `--encoder` -- see
+#: `app.worker`.
+#:
+#: A format whose output depends on the encoder has a template per backend, at
+#: `<TEMPLATE_DIR>/<encoder>/<format>.j2`; one that does not (a thumbnail, the
+#: preview) has a single template at `<TEMPLATE_DIR>/<format>.j2` that every
+#: backend shares. The backends' templates for one format build the same output
+#: -- the ladder itself lives in `app.media.ladder` -- so they must also agree
+#: on its revision, or a video would read as stale to every worker but the one
+#: that built it.
+Encoder = Literal["cpu", "qsv", "nvenc"]
+ENCODERS: tuple[Encoder, ...] = get_args(Encoder)
+DEFAULT_ENCODER: Encoder = "cpu"
 
 
 class ProfileMetadata(BaseModel):
@@ -78,13 +93,16 @@ class ProfileTemplateArguments(TypedDict):
     #: that gop_frames really is segment_duration_s long: left to infer it,
     #: ffmpeg may not pick the rate those two were worked out from.
     frame_rate: str
-    #: Keyframe interval, in frames. Set explicitly because libvpx places
+    #: Keyframe interval, in frames. Set explicitly because encoders place
     #: keyframes of its own otherwise, and a segmented format can only cut
     #: where a keyframe is -- see app.media.segmentation.
     gop_frames: int
     #: Segment length in seconds, as ffmpeg spells it. Must be what
     #: gop_frames actually comes to, since ffmpeg copies it into the manifest.
     segment_duration_s: str
+    #: The DASH ladder as it applies to this source: every rung's codec, exact
+    #: output size and rates. Empty for a format that is not a ladder.
+    rungs: list[Rung]
     #: The source's measured loudness, where we have one. None means the
     #: analysis pass found nothing to work from, and a template that would
     #: normalize has to pass the audio through at its original level
@@ -105,13 +123,28 @@ class TemplateNotFound(FileNotFoundError):
 def _shipped_formats() -> list[str]:
     """Which formats do have a template, for the benefit of the error message."""
     try:
-        return sorted(entry.name.removesuffix(".j2") for entry in TEMPLATE_DIR.iterdir() if entry.name.endswith(".j2"))
+        names = {entry.name for entry in TEMPLATE_DIR.iterdir() if entry.name.endswith(".j2")}
+        for encoder in ENCODERS:
+            backend = TEMPLATE_DIR / encoder
+            if backend.is_dir():
+                names |= {entry.name for entry in backend.iterdir() if entry.name.endswith(".j2")}
+        return sorted(name.removesuffix(".j2") for name in names if not name.startswith("_"))
     except OSError:
         return []
 
 
-def _read_template_file(format_name: str) -> str:
-    template = TEMPLATE_DIR / f"{format_name}.j2"
+def backends_of(format_name: str) -> list[Encoder]:
+    """Which encoders have a template of their own for this format."""
+    return [encoder for encoder in ENCODERS if (TEMPLATE_DIR / encoder / f"{format_name}.j2").is_file()]
+
+
+def _template_file(format_name: str, encoder: Encoder):
+    own = TEMPLATE_DIR / encoder / f"{format_name}.j2"
+    return own if own.is_file() else TEMPLATE_DIR / f"{format_name}.j2"
+
+
+def _read_template_file(format_name: str, encoder: Encoder = DEFAULT_ENCODER) -> str:
+    template = _template_file(format_name, encoder)
     try:
         # Explicit encoding: the final image has no locale set, so the default
         # would be ASCII there and UTF-8 on every developer machine.
@@ -120,7 +153,7 @@ def _read_template_file(format_name: str) -> str:
         # Anything else -- a permission error, say -- is left to propagate as
         # itself; those already name the path they failed on.
         raise TemplateNotFound(
-            f"no template for format {format_name!r}: {template} does not exist. "
+            f"no template for format {format_name!r} on encoder {encoder!r}: {template} does not exist. "
             f"{TEMPLATE_DIR} holds {_shipped_formats() or 'no templates at all'}."
         ) from e
 
@@ -133,9 +166,25 @@ def _split_content_and_metadata(content: str) -> tuple[str, str]:
     return parts[1], parts[2]
 
 
+def _one_line(body: str) -> str:
+    """A template is written over many lines and rendered as one command."""
+    return body.replace("\n", "")
+
+
+def _load_partial(name: str) -> str:
+    """Source for `{% import %}`: shared pieces, such as `_ladder.j2`, that
+    several templates use. A partial has no YAML header -- it is not a format."""
+    return _one_line((TEMPLATE_DIR / name).read_text(encoding="utf-8"))
+
+
+# Strict, so a template argument nobody passed is an error rather than an empty
+# string in the middle of an ffmpeg command.
+_environment = Environment(loader=FunctionLoader(_load_partial), undefined=StrictUndefined)
+
+
 @lru_cache
-def _load_template(format_name: str) -> tuple[ProfileMetadata, Template]:
-    """Read and compile one format's template.
+def _load_template(format_name: str, encoder: Encoder = DEFAULT_ENCODER) -> tuple[ProfileMetadata, Template]:
+    """Read and compile one format's template for one encoder.
 
     Cached because a generator is constructed per format per video -- a
     catalogue-wide backfill asks for the same handful of templates thousands of
@@ -143,15 +192,15 @@ def _load_template(format_name: str) -> tuple[ProfileMetadata, Template]:
     those calls. A Jinja template holds no state across renders, so one
     compiled template is safe to hand to every caller.
     """
-    metadata, body = _split_content_and_metadata(_read_template_file(format_name))
-    return ProfileMetadata(**yaml.safe_load(metadata)), Template(body.replace("\n", ""))
+    metadata, body = _split_content_and_metadata(_read_template_file(format_name, encoder))
+    return ProfileMetadata(**yaml.safe_load(metadata)), _environment.from_string(_one_line(body))
 
 
 class TemplatedCommandGenerator:
-    def __init__(self, format_name: str):
+    def __init__(self, format_name: str, encoder: Encoder = DEFAULT_ENCODER):
         # str() so that the enum member and its value are one cache key rather
         # than two.
-        self.template_metadata, self.template = _load_template(str(format_name))
+        self.template_metadata, self.template = _load_template(str(format_name), encoder)
 
     @property
     def metadata(self) -> ProfileMetadata:
