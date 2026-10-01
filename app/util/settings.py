@@ -6,6 +6,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.media.comand_template import DEFAULT_ENCODER, Encoder
+
 
 class DjangoApiSettingsPwdAuth(BaseModel):
     url: HttpUrl = Field()
@@ -108,6 +110,11 @@ class WorkerSettings(BaseModel):
     poll_interval_s: float = Field(
         default=30.0,
         description="How long to wait before asking again when the queue is empty",
+    )
+    encoder: Encoder = Field(
+        default=DEFAULT_ENCODER,
+        description="What this worker encodes with: `cpu`, `qsv` (Intel Quick Sync) or `nvenc` (NVIDIA). "
+        "Picks which backend's template builds each format; overridden by `--encoder`.",
     )
 
     def identify(self) -> str:

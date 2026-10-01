@@ -1,0 +1,28 @@
+{#
+  Pieces every encoder backend's DASH template shares. Newlines are stripped
+  before this is compiled, as they are from a template, so each macro is one
+  line and starts with a space wherever it continues a command.
+
+  prepare: the CPU half of the video graph, identical on every backend.
+  bwdif only touches frames the decoder flags as interlaced, so a progressive
+  source passes through it untouched. The source is then padded to 16:9 --
+  app.media.ladder.padded_size mirrors this expression and must stay in step
+  with it -- and made constant-rate at exactly the rate the segmentation was
+  worked out from.
+#}
+{% macro prepare() %}bwdif=mode=send_frame:parity=auto:deint=interlaced,pad=ceil(max(iw\,ih*16/9)/2)*2:ceil(max(ih\,iw*9/16)/2)*2:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={{ frame_rate }}{% endmacro %}
+{% macro split() %}split={{ rungs | length }}{% for rung in rungs %}[s{{ loop.index0 }}]{% endfor %}{% endmacro %}
+{% macro audio(bitrate="128k") %}{% if has_audio %} -map 0:a:0{% if loudness and loudness.truepeak_lufs is not none %} -af "loudnorm=I=-16:TP=-1:LRA=11:measured_I={{ loudness.integrated_lufs }}:measured_TP={{ loudness.truepeak_lufs }}:measured_LRA={{ loudness.loudness_range }}:measured_thresh={{ loudness.threshold_lufs }}:offset={{ loudness.target_offset }}:linear=true"{% endif %} -ar 48000 -ac 2 -c:a aac -b:a {{ bitrate }}{% endif %}{% endmacro %}
+{#
+  One closed GOP per segment, keyframes only where the segmentation puts
+  them: -keyint_min and -sc_threshold stop an encoder adding its own, which
+  would cut segments the manifest does not know about.
+#}
+{% macro gop() %} -fps_mode cfr -r {{ frame_rate }} -g {{ gop_frames }} -keyint_min {{ gop_frames }} -sc_threshold 0 -flags +cgop{% endmacro %}
+{% macro dash(adaptation_sets, audio_set=2) %} -f dash -dash_segment_type mp4 -single_file 1 -seg_duration {{ segment_duration_s }} -adaptation_sets "{{ adaptation_sets }}{% if has_audio %} id={{ audio_set }},streams=a{% endif %}" "{{ output_file }}"{% endmacro %}
+{#
+  AV1 and H.264 are separate adaptation sets, so a player picks the codec it
+  can decode and switches only within it.
+#}
+{% macro ladder_output() %}{% set ns = namespace(av1=[], h264=[]) %}{% for rung in rungs %}{% if rung.codec == "av1" %}{% set ns.av1 = ns.av1 + [loop.index0 | string] %}{% else %}{% set ns.h264 = ns.h264 + [loop.index0 | string] %}{% endif %}{% endfor %}{{ gop() }}{{ dash("id=0,streams=" ~ (ns.av1 | join(",")) ~ " id=1,streams=" ~ (ns.h264 | join(","))) }}{% endmacro %}
+{% macro rates(i, rung) %} -b:v:{{ i }} {{ rung.bitrate_k }}k -maxrate:v:{{ i }} {{ rung.maxrate_k }}k -bufsize:v:{{ i }} {{ rung.bufsize_k }}k{% endmacro %}

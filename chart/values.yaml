@@ -153,7 +153,7 @@ workers:
 
   # SIGTERM stops a worker claiming; it still finishes the job it holds. This
   # is how long that is allowed to take. The default 30s is useless here -- a
-  # VP9 ladder is hours -- but a long value also means node drains and cluster
+  # CPU ladder is hours -- but a long value also means node drains and cluster
   # upgrades wait this long for a worker to finish. An hour is a compromise;
   # raise it if losing an encode to a drain matters more than the wait.
   terminationGracePeriodSeconds: 3600
@@ -241,6 +241,42 @@ workers:
   tolerations: []
 
   podAnnotations: {}
+
+  # What this pool encodes with, handed to each worker as `--encoder`: `cpu`
+  # (SVT-AV1 and x264), `qsv` (Intel Quick Sync) or `nvenc` (NVIDIA). Every
+  # backend builds the same ladder at the same revision, so a video is done
+  # whichever pool built it. A worker proves its encoder works before claiming
+  # anything and exits if it does not, so a pool on a node without the device
+  # shows up as a crash-looping pod rather than as failed encodes.
+  encoder: cpu
+
+  # Further pools, one Deployment each, for encoders the main pool's nodes do
+  # not have. Each entry is merged over the settings above, so it names only
+  # what differs -- typically the encoder, a replica count, the GPU node and
+  # the GPU resource. All pools drain the same queue.
+  #
+  # Each also takes:
+  #   runtimeClassName    for NVIDIA's container runtime, where the cluster
+  #                       needs one named
+  #   extraEnv            more environment, e.g. NVIDIA_DRIVER_CAPABILITIES
+  #   podSecurityContext  merged over the chart-wide one; a GPU pool usually
+  #                       needs the device's group in supplementalGroups, since
+  #                       the worker runs unprivileged
+  #
+  # For example, one worker on the Arc A310 through Intel's GPU device plugin:
+  #
+  #   pools:
+  #     qsv:
+  #       encoder: qsv
+  #       replicaCount: 1
+  #       nodeSelector:
+  #         frikanalen.no/gpu-intel-arc-a310: "true"
+  #       topologySpread:
+  #         enabled: false
+  #       resources:
+  #         requests: {cpu: "1", memory: 1Gi, gpu.intel.com/i915: 1}
+  #         limits: {memory: 4Gi, gpu.intel.com/i915: 1}
+  pools: {}
 
 service:
   type: ClusterIP

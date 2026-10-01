@@ -21,13 +21,44 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Then, use a final image without uv
 FROM python:3.12
 
-# ffmpeg, not from apt. Debian trixie ships 7.1, which is two releases behind,
+# ffmpeg, not from apt: Debian trixie ships 7.1, which is two releases behind,
 # and the archive is transcoded once and kept forever -- it is worth doing that
-# with the current encoders. These are statically linked binaries built with
-# libx264, libvpx and the dash muxer, so they bring no shared libraries into
-# the image and nothing here depends on Debian's ffmpeg packaging. Pinned: an
-# ffmpeg change is an encoder change, and those want to be deliberate.
-COPY --from=mwader/static-ffmpeg:9.0.1 /ffmpeg /ffprobe /usr/local/bin/
+# with the current encoders. Pinned: an ffmpeg change is an encoder change, and
+# those want to be deliberate.
+#
+# Jellyfin's build, because one binary has to drive every encoder backend
+# (see app.media.comand_template.Encoder): SVT-AV1 and x264 on CPU, QSV on
+# Intel, NVENC on NVIDIA. It brings Intel's half of that with it -- libva, the
+# iHD driver and the oneVPL runtime are under its own lib/, so nothing here
+# depends on Debian's non-free section. NVIDIA's half is the driver's, mounted
+# into the container by the NVIDIA runtime on a GPU node.
+#
+# Taken out of the Jellyfin server image rather than installed from Jellyfin's
+# apt repository, the same way the static build this replaces was copied out of
+# its image. Pinned by digest; the image is Jellyfin 12.1, carrying
+# jellyfin-ffmpeg8 8.1.2-4-trixie.
+#
+# The previous static build could not do this at all: a static binary cannot
+# load the VA driver, which is a shared object chosen at runtime.
+COPY --from=jellyfin/jellyfin@sha256:78d3ea1207d1322471fcac39a614f004f2ccf7e878f95ab2977d752f07e4dd7e \
+    /usr/lib/jellyfin-ffmpeg /usr/lib/jellyfin-ffmpeg
+
+# What the jellyfin-ffmpeg8 package depends on that the base image does not
+# already have. The ldd check fails the build, rather than the first encode,
+# if a future base image drops one.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libbluray2 libmp3lame0 libmpg123-0t64 libnuma1 libogg0 libopenmpt0t64 libopus0 \
+        libudfread0 libvorbis0a libvorbisenc2 libvorbisfile3 libvpx9 libx264-164 libx265-215 \
+        libzvbi0t64 ocl-icd-libopencl1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/lib/jellyfin-ffmpeg/ffmpeg /usr/local/bin/ffmpeg \
+    && ln -s /usr/lib/jellyfin-ffmpeg/ffprobe /usr/local/bin/ffprobe \
+    && ! ldd /usr/lib/jellyfin-ffmpeg/ffmpeg | grep "not found" \
+    && ffmpeg -hide_banner -version | head -1
+
+# Where libva finds the iHD driver Jellyfin's build carries, so QSV does not
+# depend on one being installed in the image.
+ENV LIBVA_DRIVERS_PATH=/usr/lib/jellyfin-ffmpeg/lib/dri
 
 # It is important to use the image that matches the builder, as the path to the
 # Python executable must be the same, e.g., using `python:3.11-slim-bookworm`

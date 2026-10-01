@@ -1,0 +1,18 @@
+---
+output_file_name: manifest.mpd
+revision: 2
+---
+{% import "_ladder.j2" as ladder with context %}
+ffmpeg -i "{{ input_file }}" -y
+    -nostats -progress pipe:1
+    -filter_complex "[0:v]{{ ladder.prepare() }},format=yuv420p,{{ ladder.split() }}{% for rung in rungs %};[s{{ loop.index0 }}]scale={{ rung.width }}:{{ rung.height }}[v{{ loop.index0 }}]{% endfor %}"
+    {% for rung in rungs %}{% set i = loop.index0 %}
+    -map "[v{{ i }}]"
+    {% if rung.codec == "av1" %}
+    -c:v:{{ i }} libsvtav1 -preset:v:{{ i }} 6 -crf:v:{{ i }} 30 -maxrate:v:{{ i }} {{ rung.maxrate_k }}k -bufsize:v:{{ i }} {{ rung.bufsize_k }}k
+    {% else %}
+    -c:v:{{ i }} libx264 -preset:v:{{ i }} slow -profile:v:{{ i }} high{{ ladder.rates(i, rung) }}
+    {% endif %}
+    {% endfor %}
+    {{ ladder.audio() }}
+    {{ ladder.ladder_output() }}

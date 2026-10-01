@@ -150,6 +150,23 @@ app: {{ include "ingest.name" . }}-worker
 {{- end }}
 
 {{/*
+One worker pool's selector labels. Takes (dict "root" $ "pool" <name>), the
+main pool being "". The main pool keeps the labels it always had, since a
+Deployment's selector cannot be changed in place; every other pool differs in
+`component` and `app`, so no pool's selector also matches another's pods.
+*/}}
+{{- define "ingest.poolSelectorLabels" -}}
+{{- if .pool -}}
+app.kubernetes.io/name: {{ include "ingest.name" .root }}
+app.kubernetes.io/instance: {{ .root.Release.Name }}
+app.kubernetes.io/component: worker-{{ .pool }}
+app: {{ include "ingest.name" .root }}-worker-{{ .pool }}
+{{- else -}}
+{{ include "ingest.workerSelectorLabels" .root }}
+{{- end }}
+{{- end }}
+
+{{/*
 How ingest authenticates to django-api. Shared by everything that talks to it.
 */}}
 {{- define "ingest.apiEnv" -}}
@@ -236,23 +253,32 @@ out for the worker pool does not roll the upload pod for no reason.
 {{ include "ingest.archiveEnv" . }}
 {{- end }}
 
+{{/*
+A worker pool's environment. Takes (dict "root" $ "workers" <the pool's
+settings>), since an extra pool's settings are the main pool's with its own
+merged over them.
+*/}}
 {{- define "ingest.workerEnv" -}}
+{{- $w := .workers -}}
 - name: FK_WORK_DIR
-  value: {{ .Values.workers.work.mountPath | quote }}
+  value: {{ $w.work.mountPath | quote }}
 # The pod name, so an operator reading claimed_by on a stuck job knows which
 # pod to go and look at.
 - name: FK_WORKER_NAME
   valueFrom:
     fieldRef:
       fieldPath: metadata.name
-{{- with .Values.workers.kind }}
+{{- with $w.kind }}
 # What this pool can reach, not what it prefers. An upload's source is in the
 # upload volume, which no worker mounts.
 - name: FK_WORKER_KIND
   value: {{ . | quote }}
 {{- end }}
 - name: FK_WORKER_POLL_INTERVAL_S
-  value: {{ .Values.workers.pollIntervalSeconds | quote }}
-{{ include "ingest.apiEnv" . }}
-{{ include "ingest.archiveEnv" . }}
+  value: {{ $w.pollIntervalSeconds | quote }}
+{{- with $w.extraEnv }}
+{{ toYaml . }}
+{{- end }}
+{{ include "ingest.apiEnv" .root }}
+{{ include "ingest.archiveEnv" .root }}
 {{- end }}

@@ -20,17 +20,22 @@ jobs:
         uses: actions/checkout@v7
 
       # The runner image does not ship ffmpeg, and the suite shells out to
-      # ffmpeg/ffprobe to build its fixture videos and to probe them. These are
-      # the same pinned binaries the Dockerfile puts in the image, rather than
-      # whatever apt has, so the tests exercise the encoder production runs.
-      # The image is scratch, so the binaries come out of a stopped container
-      # rather than by running one.
+      # ffmpeg/ffprobe to build its fixture videos, to probe them, and to run
+      # the CPU encoder's self-test for real. This is the same jellyfin-ffmpeg
+      # release the Dockerfile copies into the image, built for the runner's
+      # Ubuntu rather than the image's Debian, so the tests exercise the
+      # encoder production runs. Bump the two together.
       - name: Install ffmpeg
         run: |
-          cid=$(docker create mwader/static-ffmpeg:9.0.1)
-          docker cp "$cid:/ffmpeg" /usr/local/bin/ffmpeg
-          docker cp "$cid:/ffprobe" /usr/local/bin/ffprobe
-          docker rm "$cid"
+          . /etc/os-release
+          sudo install -d -m 0755 /etc/apt/keyrings
+          curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/jellyfin.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/jellyfin.gpg] https://repo.jellyfin.org/ubuntu $VERSION_CODENAME main" \
+            | sudo tee /etc/apt/sources.list.d/jellyfin.list
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends "jellyfin-ffmpeg8=8.1.2-4-$VERSION_CODENAME"
+          sudo ln -sf /usr/lib/jellyfin-ffmpeg/ffmpeg /usr/local/bin/ffmpeg
+          sudo ln -sf /usr/lib/jellyfin-ffmpeg/ffprobe /usr/local/bin/ffprobe
           ffmpeg -version | head -1
           ffprobe -version | head -1
 
