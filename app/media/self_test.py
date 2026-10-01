@@ -6,7 +6,7 @@ at all -- does not fail at startup. It fails every job it claims, each one
 only after fetching that video's source, and the queue fills with failures
 that all look like the video's fault.
 
-So a worker encodes a second of synthetic video with the real templates, the
+So a worker encodes a single frame of synthetic video with the real templates, the
 same command a job would run, and checks that what came out is the ladder it
 asked for. Anything else and it exits, which in Kubernetes is a pod that will
 not come up: the place an operator looks, and nothing is claimed meanwhile.
@@ -37,9 +37,10 @@ logger = getLogger(__name__)
 #: hung driver is noticed rather than waited on.
 TIMEOUT_S = 120
 
-#: A second is enough to open every encoder and push frames through it, and
-#: keeps the CPU backend's AV1 encode to seconds.
-CLIP_DURATION_S = 1
+#: One frame. Opening the device and the encoders, with every option the
+#: template passes, is where a broken backend fails; a frame through each of
+#: them and into the muxer proves the rest of the pipeline is wired up.
+CLIP_FRAMES = 1
 
 #: A plausible measurement, so the loudnorm path in the audio chain runs too.
 _LOUDNESS = LoudnessMeasurement(
@@ -75,8 +76,8 @@ def _clip_command(path: Path) -> str:
     # Interlaced-flagged, so the deinterlacer in the real templates has
     # something to do; with a tone, so the audio chain does too.
     return (
-        f"ffmpeg -v error -y -f lavfi -i testsrc2=size=1920x1080:rate=25:duration={CLIP_DURATION_S} "
-        f"-f lavfi -i sine=frequency=440:duration={CLIP_DURATION_S} "
+        "ffmpeg -v error -y -f lavfi -i testsrc2=size=1920x1080:rate=25 "
+        f"-f lavfi -i sine=frequency=440:duration={CLIP_FRAMES / 25} -frames:v {CLIP_FRAMES} "
         "-c:v libx264 -preset ultrafast -pix_fmt yuv420p -flags +ildct+ilme -top 1 -c:a aac "
         f"{shlex.quote(str(path))}"
     )
