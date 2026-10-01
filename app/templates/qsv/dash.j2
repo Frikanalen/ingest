@@ -3,6 +3,12 @@ output_file_name: manifest.mpd
 revision: 2
 ---
 {% import "_ladder.j2" as ladder with context %}
+{#
+  No lookahead on H.264: on the Arc A310 with Jellyfin's FFmpeg 8.1.2 and the
+  iHD driver, h264_qsv segfaults whenever it is given -look_ahead_depth, at
+  any depth and any input length. It holds its bitrates without it.
+  https://github.com/intel/vpl-gpu-rt/issues/390
+#}
 ffmpeg -init_hw_device qsv=hw -filter_hw_device hw -i "{{ input_file }}" -y
     -nostats -progress pipe:1
     -filter_complex "[0:v]{{ ladder.prepare() }},format=nv12,hwupload=extra_hw_frames=64,{{ ladder.split() }}{% for rung in rungs %};[s{{ loop.index0 }}]vpp_qsv=w={{ rung.width }}:h={{ rung.height }}[v{{ loop.index0 }}]{% endfor %}"
@@ -10,7 +16,7 @@ ffmpeg -init_hw_device qsv=hw -filter_hw_device hw -i "{{ input_file }}" -y
     -map "[v{{ i }}]"
     -c:v:{{ i }} {{ rung.codec }}_qsv{% if rung.codec == "h264" %} -profile:v:{{ i }} high{% endif %}
     -preset:v:{{ i }} veryslow{{ ladder.rates(i, rung) }}
-    -extbrc:v:{{ i }} 1 -look_ahead_depth:v:{{ i }} 40 -adaptive_i:v:{{ i }} 0 -adaptive_b:v:{{ i }} 0
+    -extbrc:v:{{ i }} 1{% if rung.codec == "av1" %} -look_ahead_depth:v:{{ i }} 40{% endif %} -adaptive_i:v:{{ i }} 0 -adaptive_b:v:{{ i }} 0
     {% endfor %}
     {{ ladder.audio() }}
     {{ ladder.ladder_output() }}

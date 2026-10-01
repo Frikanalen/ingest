@@ -215,6 +215,14 @@ def test_qsv_does_not_place_keyframes_of_its_own():
         assert f"-adaptive_i:v:{i} 0 -adaptive_b:v:{i} 0" in command
 
 
+def test_qsv_gives_lookahead_to_av1_only():
+    """h264_qsv segfaults on the A310 when given -look_ahead_depth."""
+    command = dash("qsv")
+
+    for i, rung in enumerate(RUNGS):
+        assert (f"-look_ahead_depth:v:{i} " in command) == (rung.codec == "av1"), rung
+
+
 def test_nvenc_does_not_place_keyframes_of_its_own():
     command = dash("nvenc")
 
