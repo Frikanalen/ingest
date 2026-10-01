@@ -237,8 +237,10 @@ async def test_archives_nothing_but_the_finished_files(ingested, archive_root):
     """ffmpeg scratch, the two-pass log and the transfer spool must all stay out."""
     archived = sorted(str(p.relative_to(archive_root)) for p in archive_root.rglob("*") if p.is_file())
 
-    # Six video representations (four AV1, two H.264); the fixture has no audio.
-    dash_media = sorted(f"{VIDEO_ID}/dash/manifest-stream{n}.mp4" for n in range(len(LADDER)))
+    # Six video representations (four AV1, two H.264: the fixture is too small
+    # for the 2160p rung); the fixture has no audio.
+    rungs = [spec for spec in LADDER if not spec.only_above]
+    dash_media = sorted(f"{VIDEO_ID}/dash/manifest-stream{n}.mp4" for n in range(len(rungs)))
 
     assert archived == sorted(
         [

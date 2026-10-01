@@ -6,7 +6,8 @@ the rungs here rather than spelled out in each template is what makes "the
 same ladder on QSV, NVENC and CPU" true by construction: a template loops over
 what it is handed and only decides which encoder and scaler produce each rung.
 
-AV1 is the ladder proper. H.264 is a fallback for players with no AV1 decoder
+AV1 is the ladder proper, topping out at 2160p for sources that have the
+pixels for it. H.264 is a fallback for players with no AV1 decoder
 (older Apple hardware, older smart TVs), so it is deliberately short: two
 rungs, topping out at 720p.
 """
@@ -42,11 +43,16 @@ class RungSpec:
     codec: Codec
     height: int
     bitrate_k: int
+    #: Only sources taller than this get the rung at all. Every other rung is
+    #: kept for any source, at the source's height if need be, but a 1080p
+    #: source would only get a second 1080p rung at four times the bitrate.
+    only_above: int = 0
 
 
 #: The ladder, highest first within each codec. AV1 first, so its
 #: representations are the lower stream indices.
 LADDER: tuple[RungSpec, ...] = (
+    RungSpec("av1", 2160, 10000, only_above=1080),
     RungSpec("av1", 1080, 3500),
     RungSpec("av1", 720, 2000),
     RungSpec("av1", 540, 1100),
@@ -100,7 +106,8 @@ def rungs_for(metadata: FfprobeOutput, frame_rate: Fraction) -> list[Rung]:
     No rung is upscaled past the padded source: a rung taller than the source
     is encoded at the source's height instead, as the VP9 ladder did. Its
     bitrate is left alone, so a small source gets a short ladder of bitrate
-    variants rather than fewer representations.
+    variants rather than fewer representations. The exception is a rung
+    marked `only_above`, which a source no taller than that does not get.
 
     Sizes are worked out here rather than by scaler expressions in the
     templates, because the hardware scalers do not all accept the same
@@ -111,6 +118,8 @@ def rungs_for(metadata: FfprobeOutput, frame_rate: Fraction) -> list[Rung]:
 
     rungs = []
     for spec in LADDER:
+        if padded_h <= spec.only_above:
+            continue
         height = min(spec.height, padded_h)
         width = _even(height * padded_w / padded_h)
         bitrate = spec.bitrate_k

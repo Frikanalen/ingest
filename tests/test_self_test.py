@@ -12,7 +12,7 @@ MPD = """<?xml version="1.0"?>
 <AdaptationSet id="2"><Representation id="6" codecs="mp4a.40.2"/></AdaptationSet>
 </Period></MPD>"""
 
-FULL_LADDER = [
+HD_LADDER = [
     ("av01.0.08M.08", 1920, 1080),
     ("av01.0.05M.08", 1280, 720),
     ("av01.0.04M.08", 960, 540),
@@ -45,23 +45,23 @@ def hd_source() -> SourceMedia:
 
 
 def test_the_whole_ladder_passes(tmp_path):
-    check_ladder(manifest(tmp_path, FULL_LADDER), hd_source())
+    check_ladder(manifest(tmp_path, HD_LADDER), hd_source())
 
 
 def test_a_missing_rung_fails(tmp_path):
     with pytest.raises(SelfTestFailed):
-        check_ladder(manifest(tmp_path, FULL_LADDER[:-1]), hd_source())
+        check_ladder(manifest(tmp_path, HD_LADDER[:-1]), hd_source())
 
 
 def test_a_rung_in_the_wrong_codec_fails(tmp_path):
     """An encoder that silently fell back to another codec is not the ladder."""
-    wrong = [("vp09.00.40.08", 1920, 1080), *FULL_LADDER[1:]]
+    wrong = [("vp09.00.40.08", 1920, 1080), *HD_LADDER[1:]]
     with pytest.raises(SelfTestFailed):
         check_ladder(manifest(tmp_path, wrong), hd_source())
 
 
 def test_a_rung_at_the_wrong_size_fails(tmp_path):
-    wrong = [("av01.0.08M.08", 1280, 720), *FULL_LADDER[1:]]
+    wrong = [("av01.0.08M.08", 1280, 720), *HD_LADDER[1:]]
     with pytest.raises(SelfTestFailed):
         check_ladder(manifest(tmp_path, wrong), hd_source())
 

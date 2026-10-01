@@ -24,6 +24,20 @@ def test_a_1080p_source_gets_the_whole_ladder():
     ]
 
 
+def test_a_4k_source_gets_a_2160p_rung_on_top():
+    rungs = rungs_for(source(3840, 2160), Fraction(25))
+
+    assert sizes(rungs)[:2] == [("av1", 3840, 2160), ("av1", 1920, 1080)]
+    assert len(rungs) == len(LADDER)
+    assert rungs[0].bitrate_k > rungs[1].bitrate_k
+
+
+def test_a_1440p_source_gets_its_own_height_on_top():
+    """Between 1080p and 4K, the top rung is the source's height, not a
+    second 1080p."""
+    assert sizes(rungs_for(source(2560, 1440), Fraction(25)))[:2] == [("av1", 2560, 1440), ("av1", 1920, 1080)]
+
+
 def test_h264_is_a_short_fallback():
     """At most two rungs, topping out at 720p."""
     h264 = [spec for spec in LADDER if spec.codec == "h264"]
@@ -35,6 +49,8 @@ def test_h264_is_a_short_fallback():
 def test_nothing_is_upscaled_past_the_source():
     """A 576-line upload must not be blown up to 1080p and charged for it."""
     rungs = rungs_for(source(1024, 576), Fraction(25))
+
+    assert len(rungs) == len(LADDER) - 1, "only the 2160p rung is dropped"
 
     assert max(rung.height for rung in rungs) == 576
     assert sizes(rungs)[0] == ("av1", 1024, 576)

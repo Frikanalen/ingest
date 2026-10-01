@@ -72,11 +72,18 @@ async def _run(command: str, timeout_s: float) -> None:
         raise SelfTestFailed(f"exited {proc.returncode}: {command}\n{tail}")
 
 
-def _clip_command(path: Path) -> str:
+def _clip_size(encoder: Encoder) -> str:
+    # 4K on a GPU, so the 2160p rung is built too: it is the one most likely
+    # to be past what the hardware can do. The CPU encoders have no such
+    # limit, and a 4K frame through SVT-AV1 costs them about 20s of startup.
+    return "1920x1080" if encoder == "cpu" else "3840x2160"
+
+
+def _clip_command(path: Path, size: str) -> str:
     # Interlaced-flagged, so the deinterlacer in the real templates has
     # something to do; with a tone, so the audio chain does too.
     return (
-        "ffmpeg -v error -y -f lavfi -i testsrc2=size=1920x1080:rate=25 "
+        f"ffmpeg -v error -y -f lavfi -i testsrc2=size={size}:rate=25 "
         f"-f lavfi -i sine=frequency=440:duration={CLIP_FRAMES / 25} -frames:v {CLIP_FRAMES} "
         "-c:v libx264 -preset ultrafast -pix_fmt yuv420p -flags +ildct+ilme -top 1 -c:a aac "
         f"{shlex.quote(str(path))}"
@@ -121,7 +128,7 @@ async def self_test(encoder: Encoder, work_dir: Path | None = None, timeout_s: f
     with TemporaryDirectory(dir=work_dir, prefix="self-test-") as scratch_dir:
         scratch = Path(scratch_dir)
         clip = scratch / "clip.mp4"
-        await _run(_clip_command(clip), timeout_s)
+        await _run(_clip_command(clip, _clip_size(encoder)), timeout_s)
 
         source = SourceMedia.probed("self-test", clip, await _probe(clip))
         source = replace(source, loudness=_LOUDNESS)

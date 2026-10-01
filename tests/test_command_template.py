@@ -26,7 +26,7 @@ MEASURED = LoudnessMeasurement(
 )
 
 
-#: The ladder at its full size, as a 1080p source gets it.
+#: The ladder at its full size, as a 4K source gets it.
 RUNGS = [Rung(spec.codec, round(spec.height * 16 / 9 / 2) * 2, spec.height, spec.bitrate_k) for spec in LADDER]
 
 
@@ -135,9 +135,9 @@ def test_a_format_with_one_template_serves_every_encoder():
 def test_each_backend_uses_its_own_encoders_and_scaler(encoder, av1, h264, scaler):
     command = dash(encoder)
 
-    assert command.count(f" {av1}") == 4, command
-    assert command.count(f" {h264}") == 2, command
-    assert command.count(scaler) == 6, command
+    assert command.count(f" {av1}") == sum(rung.codec == "av1" for rung in RUNGS), command
+    assert command.count(f" {h264}") == sum(rung.codec == "h264" for rung in RUNGS), command
+    assert command.count(scaler) == len(RUNGS), command
 
 
 @every_encoder
@@ -163,8 +163,9 @@ def test_every_rung_is_capped(encoder):
 def test_h264_rungs_are_high_profile(encoder):
     command = dash(encoder)
 
-    assert "-profile:v:4 high" in command
-    assert "-profile:v:5 high" in command
+    for i, rung in enumerate(RUNGS):
+        if rung.codec == "h264":
+            assert f"-profile:v:{i} high" in command
 
 
 @every_encoder
@@ -315,7 +316,7 @@ def test_dash_leaves_out_the_audio_adaptation_set_when_there_is_no_audio(encoder
 
     assert "0:a:0" not in command
     assert "streams=a" not in command
-    assert '-adaptation_sets "id=0,streams=0,1,2,3 id=1,streams=4,5"' in command
+    assert '-adaptation_sets "id=0,streams=0,1,2,3,4 id=1,streams=5,6"' in command
 
 
 @every_encoder
@@ -324,7 +325,7 @@ def test_dash_puts_each_codec_in_its_own_adaptation_set(encoder):
     command = dash(encoder, has_audio=True)
 
     assert "-map 0:a:0" in command
-    assert '-adaptation_sets "id=0,streams=0,1,2,3 id=1,streams=4,5 id=2,streams=a"' in command
+    assert '-adaptation_sets "id=0,streams=0,1,2,3,4 id=1,streams=5,6 id=2,streams=a"' in command
 
 
 def test_preview_is_one_h264_rung_that_plays_everywhere():

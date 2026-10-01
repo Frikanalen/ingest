@@ -56,7 +56,7 @@ Publishing order matters because the archive is exported read-only to the playou
 
 ### DASH
 
-`dash` is an adaptive ladder played back over MSE by dash.js: AV1 at 1080p, 720p, 540p and 360p, and H.264 at 720p and 360p as a fallback for players with no AV1 decoder, with stereo AAC audio normalized to -16 LUFS. AV1 and H.264 are separate adaptation sets, so a player picks the codec it can decode and switches only within it. The rungs, their sizes and their bitrate caps are declared once, in [`app/media/ladder.py`](app/media/ladder.py); nothing is upscaled past the source.
+`dash` is an adaptive ladder played back over MSE by dash.js: AV1 at 1080p, 720p, 540p and 360p, with a 2160p rung on top for sources taller than 1080p, and H.264 at 720p and 360p as a fallback for players with no AV1 decoder, with stereo AAC audio normalized to -16 LUFS. AV1 and H.264 are separate adaptation sets, so a player picks the codec it can decode and switches only within it. The rungs, their sizes and their bitrate caps are declared once, in [`app/media/ladder.py`](app/media/ladder.py); nothing is upscaled past the source.
 
 It is one FFmpeg invocation: the source is decoded once, deinterlaced where the decoder says a frame is interlaced (`bwdif`), padded to 16:9, and split into all six renditions in a single pass.
 
@@ -72,7 +72,7 @@ The ladder can be encoded three ways, and a worker is told which by `--encoder` 
 
 Each backend has its own template, `app/templates/<encoder>/dash.j2`, sharing the pieces that do not depend on the encoder from `app/templates/_ladder.j2`. A format with only `app/templates/<format>.j2` -- the thumbnails, the preview -- is the same for every backend. The backends' `dash` templates must carry the same revision, since a video built by one has to read as finished to the others; a test holds them to it.
 
-Before it claims anything, a worker encodes a single synthetic, interlaced-flagged frame with its backend's real `dash` and `dash_preview` templates and checks the manifest lists every rung at the right codec and size. If that fails or takes more than two minutes, it exits non-zero, so a GPU pool on a node with no device, a driver that rejects an option, or an image missing an encoder is a pod that will not start rather than a queue of failed encodes. `python -m app.worker --encoder qsv --self-test` runs the check alone.
+Before it claims anything, a worker encodes a single synthetic, interlaced-flagged frame (4K on a GPU backend, so the 2160p rung is tried too; 1080p on CPU) with its backend's real `dash` and `dash_preview` templates and checks the manifest lists every rung at the right codec and size. If that fails or takes more than two minutes, it exits non-zero, so a GPU pool on a node with no device, a driver that rejects an option, or an image missing an encoder is a pod that will not start rather than a queue of failed encodes. `python -m app.worker --encoder qsv --self-test` runs the check alone.
 
 The image's FFmpeg is Jellyfin's build, which carries Intel's VA driver and oneVPL runtime with it; NVENC needs the NVIDIA container runtime on the node. In the chart, `workers.pools` adds a Deployment per extra encoder -- see `chart/values.yaml`.
 
