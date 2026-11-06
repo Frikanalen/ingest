@@ -1,7 +1,7 @@
 Source: fk-archive-utils
 Section: utils
 Priority: optional
-Maintainer: Frikanalen <post@frikanalen.no>
+Maintainer: Frikanalen <post@frikanalen.tv>
 Build-Depends:
  debhelper-compat (= 13),
  dh-python,

@@ -18770,7 +18770,7 @@ components:
         uploadUrl:
           type: string
           readOnly: true
-          default: https://staging.frikanalen.no/upload
+          default: https://staging.frikanalen.tv/upload
       required:
       - uploadUrl
     VideofilesCreateError:
