@@ -27,7 +27,7 @@ fk-archive-utils (${version}) ${distribution}; urgency=medium
 
   * Built from $(git rev-parse --short HEAD 2>/dev/null || echo "an unversioned tree").
 
- -- Frikanalen <post@frikanalen.no>  $(date -R)
+ -- Frikanalen <post@frikanalen.tv>  $(date -R)
 EOF
 
 dpkg-buildpackage -us -uc -b

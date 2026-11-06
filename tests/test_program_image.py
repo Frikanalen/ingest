@@ -16,7 +16,7 @@ REGISTERED_IMAGE = {
     "mediaType": "image/png",
     "width": 1200,
     "height": 675,
-    "url": "https://media.frikanalen.no/1234/images/abc123.png",
+    "url": "https://media.frikanalen.tv/1234/images/abc123.png",
     "createdTime": "2026-08-27T10:00:00Z",
 }
 

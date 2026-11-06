@@ -9,7 +9,7 @@ nameOverride: ""
 fullnameOverride: ""
 
 api:
-  url: https://frikanalen.no
+  url: https://frikanalen.tv
   # Secret holding the Django API token ingest authenticates with. DRF tokens
   # do not expire, so this needs rotating only if it leaks.
   secretName: ingest-api
@@ -270,7 +270,7 @@ workers:
   #       encoder: qsv
   #       replicaCount: 1
   #       nodeSelector:
-  #         frikanalen.no/gpu-intel-arc-a310: "true"
+  #         frikanalen.tv/gpu-intel-arc-a310: "true"
   #       topologySpread:
   #         enabled: false
   #       resources:
@@ -290,7 +290,7 @@ ingress:
   # frontend at / and the API at /api, rather than on its own subdomain.
   # Django hands this out as a video's uploadUrl, so FK_UPLOAD_URL there must
   # be "<scheme>://<this host><tusd.basePath>".
-  hostname: frikanalen.no
+  hostname: frikanalen.tv
   certResolver: letsencrypt
   annotations: {}
 
