@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/Frikanalen/ingest/compare/v1.1.0...v1.1.1) (2026-11-08)
+
+
+### Bug Fixes
+
+* **ci:** install sudo before building the fk-archive-utils release .deb ([#63](https://github.com/Frikanalen/ingest/issues/63)) ([85b8853](https://github.com/Frikanalen/ingest/commit/85b8853acb1d7de96b467df284a6ac2b4e84c5df))
+
 ## [1.1.0](https://github.com/Frikanalen/ingest/compare/v1.0.0...v1.1.0) (2026-11-08)
 
 
