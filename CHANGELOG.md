@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/Frikanalen/ingest/compare/v1.0.0...v1.1.0) (2026-11-08)
+
+
+### Features
+
+* move from frikanalen.no to frikanalen.tv ([#61](https://github.com/Frikanalen/ingest/issues/61)) ([35b3c6b](https://github.com/Frikanalen/ingest/commit/35b3c6b7a075654643c8fada602aca8331127f3f))
+
 ## [1.0.0](https://github.com/Frikanalen/ingest/compare/v0.1.1...v1.0.0) (2026-10-02)
 
 
