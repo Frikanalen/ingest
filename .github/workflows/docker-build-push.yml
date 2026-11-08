@@ -50,7 +50,7 @@ jobs:
             apt-get update -qq
             apt-get install -y -qq --no-install-recommends \
               build-essential debhelper dh-python pybuild-plugin-pyproject \
-              python3-all python3-setuptools
+              python3-all python3-setuptools sudo
             ./build-deb.sh "${{ needs.release.outputs.tag }}"
           '
 
