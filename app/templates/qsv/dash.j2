@@ -8,6 +8,11 @@ revision: 2
   iHD driver, h264_qsv segfaults whenever it is given -look_ahead_depth, at
   any depth and any input length. It holds its bitrates without it.
   https://github.com/intel/vpl-gpu-rt/issues/390
+
+  No lookahead on AV1 either: with -extbrc 1, av1_qsv on the same stack
+  returns an empty bitstream ("Invalid FrameType:0") a few hundred frames
+  in, so every upload longer than about 15 s failed. Either option alone
+  works, and lookahead does nothing without extbrc, so it is dropped.
 #}
 ffmpeg -init_hw_device qsv=hw -filter_hw_device hw -i "{{ input_file }}" -y
     -nostats -progress pipe:1
@@ -16,7 +21,7 @@ ffmpeg -init_hw_device qsv=hw -filter_hw_device hw -i "{{ input_file }}" -y
     -map "[v{{ i }}]"
     -c:v:{{ i }} {{ rung.codec }}_qsv{% if rung.codec == "h264" %} -profile:v:{{ i }} high{% endif %}
     -preset:v:{{ i }} veryslow{{ ladder.rates(i, rung) }}
-    -extbrc:v:{{ i }} 1{% if rung.codec == "av1" %} -look_ahead_depth:v:{{ i }} 40{% endif %} -adaptive_i:v:{{ i }} 0 -adaptive_b:v:{{ i }} 0
+    -extbrc:v:{{ i }} 1 -adaptive_i:v:{{ i }} 0 -adaptive_b:v:{{ i }} 0
     {% endfor %}
     {{ ladder.audio() }}
     {{ ladder.ladder_output() }}
