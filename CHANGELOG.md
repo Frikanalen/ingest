@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2](https://github.com/Frikanalen/ingest/compare/v1.1.1...v1.1.2) (2026-11-11)
+
+
+### Bug Fixes
+
+* **qsv:** no lookahead on AV1, which fails av1_qsv on the A310 after ~15 s ([#65](https://github.com/Frikanalen/ingest/issues/65)) ([764be07](https://github.com/Frikanalen/ingest/commit/764be07684c7a4867c5c5c89a1823dc9177cb0f0))
+
 ## [1.1.1](https://github.com/Frikanalen/ingest/compare/v1.1.0...v1.1.1) (2026-11-08)
 
 
