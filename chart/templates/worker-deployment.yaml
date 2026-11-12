@@ -110,8 +110,12 @@ spec:
         # Scratch for one video at a time: the original is fetched here, the
         # derivatives are built here, and both are gone when the job ends.
         - name: work
+          {{- if $w.work.volume }}
+          {{- toYaml $w.work.volume | nindent 10 }}
+          {{- else }}
           emptyDir:
             {{- toYaml $w.work.emptyDir | nindent 12 }}
+          {{- end }}
         {{- if $.Values.archive.ssh.enabled }}
         - name: archive-ssh
           secret:

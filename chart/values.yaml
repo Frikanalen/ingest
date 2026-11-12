@@ -195,6 +195,12 @@ workers:
     # pod's, because a backfill fetches the source as well as writing outputs.
     emptyDir:
       sizeLimit: 100Gi
+    # A volume source to use instead of the emptyDir, e.g.
+    # {persistentVolumeClaim: {claimName: ingest-work}} or an `ephemeral`
+    # volume. The emptyDir lands on the node's root disk, which a large
+    # source can fill; this puts the scratch on a disk meant for it. Each job
+    # works in its own temporary directory, so pods may share one volume.
+    volume: {}
 
   # Sized for the pool's real duty cycle, which is idle punctuated by bursts.
   #
