@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/Frikanalen/ingest/compare/v1.1.2...v1.2.0) (2026-11-12)
+
+
+### Features
+
+* **chart:** workers.work.volume puts the scratch on a chosen volume ([#67](https://github.com/Frikanalen/ingest/issues/67)) ([75c8eed](https://github.com/Frikanalen/ingest/commit/75c8eedab5c0521f9d9104b09a0b5d68fdcad51a))
+
 ## [1.1.2](https://github.com/Frikanalen/ingest/compare/v1.1.1...v1.1.2) (2026-11-11)
 
 
