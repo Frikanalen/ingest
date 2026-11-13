@@ -205,7 +205,30 @@ class DjangoApiService:
             # predate one.
             profile_revision=profile_revision if profile_revision is not None else UNSET,
         )
-        return await videofiles_create.asyncio(client=self.client, body=req)
+        # Detailed, and checked: a 400 is a documented response, so the plain
+        # call parses it and hands back None instead of raising. A rejected
+        # registration then looked like a successful one, and a rebuild that
+        # collided with the row it was replacing reported the job done while
+        # the catalogue still described the old files.
+        response = await videofiles_create.asyncio_detailed(client=self.client, body=req)
+        _expect(response, HTTPStatus.CREATED)
+        return response.parsed
+
+    async def update_video_file(self, file_id: int, filename: str, profile_revision: int):
+        """Re-point an existing row at a rebuilt format.
+
+        A video has at most one row per variant (unique_variant_per_video), so
+        a rebuild cannot register beside the row it supersedes; it takes that
+        row over instead. Patched rather than deleted and recreated, so there
+        is no moment at which the format is published but unregistered.
+        """
+        response = await videofiles_partial_update.asyncio_detailed(
+            file_id,
+            client=self.client,
+            body=PatchedVideoFileRequest(filename=str(filename), profile_revision=profile_revision),
+        )
+        _expect(response, HTTPStatus.OK)
+        return response.parsed
 
     async def create_program_image(
         self,

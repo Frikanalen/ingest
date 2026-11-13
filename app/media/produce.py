@@ -125,8 +125,14 @@ class FormatProducer:
         file_format: VideoFileVariantEnum,
         scratch: Path,
         on_progress: ProgressCallback | None = None,
+        row_id: int | None = None,
     ) -> PurePosixPath:
-        """Build `file_format`, archive it, register it, and say where it went."""
+        """Build `file_format`, archive it, register it, and say where it went.
+
+        `row_id` is the row this format is already registered under, for a
+        rebuild: that row is re-pointed at the new output rather than a second
+        one created beside it.
+        """
         self.logger.info("Processing %s as %s", source.path, file_format)
 
         template, output_file, command = render_command(source, file_format, scratch, self.encoder)
@@ -157,13 +163,21 @@ class FormatProducer:
         # Registered last, and only once every file is in the archive. That
         # ordering is what lets a row's existence stand for "this format landed
         # in full", and what makes the revision it carries safe to trust.
-        self.logger.info("Creating video file entry for %s", destination)
-        await self.django_api.create_video_file(
-            filename=str(destination),
-            file_format=file_format,
-            video_id=source.video_id,
-            profile_revision=template.metadata.revision,
-        )
+        if row_id is not None:
+            self.logger.info("Updating video file entry %s for %s", row_id, destination)
+            await self.django_api.update_video_file(
+                row_id,
+                filename=str(destination),
+                profile_revision=template.metadata.revision,
+            )
+        else:
+            self.logger.info("Creating video file entry for %s", destination)
+            await self.django_api.create_video_file(
+                filename=str(destination),
+                file_format=file_format,
+                video_id=source.video_id,
+                profile_revision=template.metadata.revision,
+            )
         return destination
 
     async def _publish(

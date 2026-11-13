@@ -215,6 +215,8 @@ def produce_formats(state: VideoState, desired: DesiredState) -> Fragment:
                 from_revision=have,
                 to_revision=wanted,
                 replacing=directory if occupied else None,
+                # The newest row, matching revision_of; there is at most one.
+                row_id=max(registered, key=lambda row: row.profile_revision).id if registered else None,
             )
         )
 

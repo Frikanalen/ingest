@@ -52,9 +52,13 @@ class ProduceFormat(Action):
     #: whichever encode the member is really waiting on, and against the
     #: ladder's hours the preview that precedes it is minutes.
     drives_progress: bool = True
+    #: The videofile row this format already has, if any. A video holds one
+    #: row per variant, so a rebuild re-points that row rather than
+    #: registering a second one -- which django-api refuses.
+    row_id: int | None = None
 
     def describe(self) -> str:
-        if self.from_revision != UNTRACKED_REVISION:
+        if self.from_revision != UNTRACKED_REVISION or self.row_id is not None:
             return f"produce {self.file_format} (revision {self.from_revision} -> {self.to_revision})"
         if self.replacing is None:
             return f"produce {self.file_format} (missing)"
