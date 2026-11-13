@@ -81,7 +81,6 @@ def test_a_video_with_only_images_is_not_read_as_a_lost_ladder():
     assert not plan(state, DESIRED, chores=("formats",)).notes
 
 
-
 # --- the legacy broadcast/ directory ---------------------------------------
 #
 # There is no chore for it any more. Settling which directory holds a video's
@@ -124,6 +123,7 @@ def test_a_video_with_no_source_at_all_is_silent():
 
     assert not result.actions
     assert not result.notes
+
 
 # --- formats ---------------------------------------------------------------
 
@@ -512,3 +512,38 @@ class TestThePreview:
 
         assert drives[DASH_PREVIEW] is False
         assert drives[VideoFileVariantEnum.DASH] is True
+
+
+def test_a_rebuild_carries_the_row_it_replaces():
+    """django-api holds one row per variant, so the rebuild must re-point it."""
+    state = video(
+        files=(
+            registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", file_id=1),
+            registered(VideoFileVariantEnum.DASH, "manifest.mpd", revision=UNTRACKED_REVISION, file_id=2),
+            registered(VideoFileVariantEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
+        )
+    )
+
+    [action] = actions_of(state)
+
+    assert isinstance(action, ProduceFormat)
+    assert action.row_id == 2
+    assert action.describe() == "produce dash (revision 0 -> 2)"
+
+
+def test_a_missing_format_carries_no_row():
+    state = video(
+        files=(
+            registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", file_id=1),
+            registered(VideoFileVariantEnum.DASH, "manifest.mpd", revision=2, file_id=2),
+        ),
+        directories={
+            "original": (entry(f"{VIDEO_ID}/original/source.mp4"),),
+            "dash": (entry(f"{VIDEO_ID}/dash/manifest.mpd"),),
+        },
+    )
+
+    [action] = actions_of(state)
+
+    assert action.file_format == VideoFileVariantEnum.LARGE_THUMB
+    assert action.row_id is None

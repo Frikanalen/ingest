@@ -115,7 +115,9 @@ class Applier:
         on_progress: ProgressCallback | None,
     ) -> None:
         match action:
-            case ProduceFormat(file_format=file_format, replacing=replacing, drives_progress=drives_progress):
+            case ProduceFormat(
+                file_format=file_format, replacing=replacing, drives_progress=drives_progress, row_id=row_id
+            ):
                 assert source is not None, "produce needs the original"
                 if replacing is not None:
                     # Swapped, not overwritten: a new revision can emit a
@@ -127,6 +129,7 @@ class Applier:
                     file_format,
                     scratch,
                     on_progress=on_progress if drives_progress else None,
+                    row_id=row_id,
                 )
 
             case RefreshMetadata(fields=fields, original_file_id=file_id):

@@ -7,16 +7,18 @@ revision it carries safe to act on. These pin it.
 """
 
 import shutil
+from http import HTTPStatus
 from pathlib import Path, PurePosixPath
 from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
 from frikanalen_django_api_client.models import VideoFileVariantEnum
+from frikanalen_django_api_client.types import Response
 
 from app.api.hooks.metadata import MetadataExtractor
 from app.archive_store import ArchiveEntry, ArchiveSession
-from app.django_client.service import DjangoApiService
+from app.django_client.service import DjangoApiError, DjangoApiService
 from app.media.produce import FormatProducer, SourceMedia, TranscodeFailed
 
 VIDEO_ID = "12345"
@@ -47,6 +49,10 @@ class OrderRecordingSession(ArchiveSession):
 
     async def delete_variant(self, variant: str, video_id: str) -> bool:
         raise NotImplementedError
+
+
+def created(status: HTTPStatus = HTTPStatus.CREATED) -> Response:
+    return Response(status_code=status, content=b"", headers={}, parsed=None)
 
 
 @pytest.fixture
@@ -130,8 +136,9 @@ async def test_create_video_file_sends_the_profile_revision(monkeypatch):
 
     async def fake_create(*, client, body):
         captured["body"] = body
+        return created()
 
-    monkeypatch.setattr("app.django_client.service.videofiles_create.asyncio", fake_create)
+    monkeypatch.setattr("app.django_client.service.videofiles_create.asyncio_detailed", fake_create)
 
     await DjangoApiService(client=None).create_video_file(
         filename=f"{VIDEO_ID}/dash/manifest.mpd",
@@ -151,8 +158,9 @@ async def test_create_video_file_omits_the_revision_when_there_is_none(monkeypat
 
     async def fake_create(*, client, body):
         captured["body"] = body
+        return created()
 
-    monkeypatch.setattr("app.django_client.service.videofiles_create.asyncio", fake_create)
+    monkeypatch.setattr("app.django_client.service.videofiles_create.asyncio_detailed", fake_create)
 
     await DjangoApiService(client=None).create_video_file(
         filename=f"{VIDEO_ID}/original/video.mp4",
@@ -161,3 +169,55 @@ async def test_create_video_file_omits_the_revision_when_there_is_none(monkeypat
     )
 
     assert "profileRevision" not in captured["body"].to_dict()
+
+
+@pytest.mark.asyncio
+async def test_a_rebuild_re_points_the_row_it_already_has(producer, django_api, source, tmp_path):
+    """One row per variant: a second would be refused, so the old one is taken over."""
+    await producer.produce(source, VideoFileVariantEnum.LARGE_THUMB, tmp_path, row_id=77)
+
+    django_api.create_video_file.assert_not_awaited()
+    [call] = django_api.update_video_file.call_args_list
+    assert call.args == (77,)
+    assert call.kwargs["profile_revision"] == 1
+    assert call.kwargs["filename"] == f"{VIDEO_ID}/large_thumb/{source.path.stem}.jpg"
+
+
+@pytest.mark.asyncio
+async def test_a_refused_registration_raises(monkeypatch):
+    """A 400 is a documented response, so it parses rather than raising on its own.
+
+    Swallowed, it let a rebuild that collided with an existing row report done
+    while the catalogue still described the files it had just replaced.
+    """
+
+    async def refuse(*, client, body):
+        return created(HTTPStatus.BAD_REQUEST)
+
+    monkeypatch.setattr("app.django_client.service.videofiles_create.asyncio_detailed", refuse)
+
+    with pytest.raises(DjangoApiError):
+        await DjangoApiService(client=None).create_video_file(
+            filename=f"{VIDEO_ID}/large_thumb/source.jpg",
+            video_id=VIDEO_ID,
+            file_format=VideoFileVariantEnum.LARGE_THUMB,
+            profile_revision=1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_video_file_sends_the_new_filename_and_revision(monkeypatch):
+    captured = {}
+
+    async def fake_patch(file_id, *, client, body):
+        captured["id"], captured["body"] = file_id, body
+        return created(HTTPStatus.OK)
+
+    monkeypatch.setattr("app.django_client.service.videofiles_partial_update.asyncio_detailed", fake_patch)
+
+    await DjangoApiService(client=None).update_video_file(
+        77, filename=f"{VIDEO_ID}/dash/manifest.mpd", profile_revision=2
+    )
+
+    assert captured["id"] == 77
+    assert captured["body"].to_dict() == {"filename": f"{VIDEO_ID}/dash/manifest.mpd", "profileRevision": 2}
