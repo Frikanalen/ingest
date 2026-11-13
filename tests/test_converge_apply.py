@@ -16,9 +16,10 @@ from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.archive_store import LocalArchiveStore
 from app.archive_store.base import TRASH_DIR
-from app.converge.actions import ProduceFormat, RefreshMetadata
+from app.converge.actions import ProduceFormat, RefreshMetadata, WriteHlsPlaylists
 from app.converge.apply import Applier, SourceUnavailable
 from app.converge.chores import Plan
+from tests.test_hls import MANIFEST
 
 VIDEO_ID = "12345"
 ORIGINAL = PurePosixPath(f"{VIDEO_ID}/original/source.mp4")
@@ -165,3 +166,39 @@ async def test_producing_over_output_nothing_claims_replaces_it(applier, archive
     rebuilt = archive_root / VIDEO_ID / "med_thumb" / "source.jpg"
     assert rebuilt.read_bytes() != b"an earlier, unregistered thumbnail"
     assert list((archive_root / TRASH_DIR).rglob("source.jpg"))
+
+
+# --- HLS playlists ------------------------------------------------------------
+
+HLS_DIR = PurePosixPath(f"{VIDEO_ID}/hls")
+
+
+@pytest.mark.asyncio
+async def test_writing_playlists_reads_only_the_manifest_and_registers_the_master(applier, archive_root, django_api):
+    """No original is in this archive, which is the point: the playlists are made from the ladder."""
+
+    place(archive_root, DASH_DIR / "manifest.mpd", MANIFEST.encode())
+
+    await applier.apply(plan_of(WriteHlsPlaylists(video_id=VIDEO_ID, to_revision=1)))
+
+    published = sorted(path.name for path in (archive_root / HLS_DIR).iterdir())
+    assert published == ["manifest-stream0.m3u8", "manifest-stream1.m3u8", "manifest-stream2.m3u8", "master.m3u8"]
+    django_api.create_video_file.assert_awaited_once_with(
+        filename=f"{HLS_DIR}/master.m3u8",
+        file_format=VideoFileVariantEnum.HLS,
+        video_id=VIDEO_ID,
+        profile_revision=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_rewriting_playlists_swaps_the_old_ones_out_and_keeps_the_row(applier, archive_root, django_api):
+    place(archive_root, DASH_DIR / "manifest.mpd", MANIFEST.encode())
+    place(archive_root, HLS_DIR / "master.m3u8", b"#EXTM3U\n# from the ladder before the rebuild\n")
+
+    await applier.apply(plan_of(WriteHlsPlaylists(video_id=VIDEO_ID, to_revision=1, replacing=HLS_DIR, row_id=9)))
+
+    assert "manifest-stream1.m3u8" in (archive_root / HLS_DIR / "master.m3u8").read_text()
+    assert any((archive_root / TRASH_DIR).rglob("master.m3u8"))
+    django_api.update_video_file.assert_awaited_once_with(9, filename=f"{HLS_DIR}/master.m3u8", profile_revision=1)
+    django_api.create_video_file.assert_not_awaited()
