@@ -245,6 +245,19 @@ workers:
   # Batch work is a reasonable thing to keep off the nodes serving the site.
   nodeSelector: {}
   tolerations: []
+  # For instance, to keep workers off the nodes running the live stream -- a
+  # worker has no CPU limit, and on 2026-11-13 one starved the stream's
+  # transcoder on staging for hours:
+  #
+  #   affinity:
+  #     podAntiAffinity:
+  #       requiredDuringSchedulingIgnoredDuringExecution:
+  #         - topologyKey: kubernetes.io/hostname
+  #           namespaceSelector: {}
+  #           labelSelector:
+  #             matchLabels:
+  #               app.kubernetes.io/name: live-stream-packager
+  affinity: {}
 
   podAnnotations: {}
 
