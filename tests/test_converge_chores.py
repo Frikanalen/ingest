@@ -11,7 +11,7 @@ import pytest
 from frikanalen_django_api_client.models import VideoFileVariantEnum
 
 from app.archive_store import ArchiveEntry
-from app.converge.actions import ProduceFormat, RefreshMetadata, RetirePreview
+from app.converge.actions import ProduceFormat, RefreshMetadata, RetirePreview, WriteHlsPlaylists
 from app.converge.chores import DesiredState, plan
 from app.converge.state import RegisteredFile, VideoState
 from app.formats import DASH_PREVIEW, UNTRACKED_REVISION
@@ -547,6 +547,60 @@ def test_a_missing_format_carries_no_row():
 
     assert action.file_format == VideoFileVariantEnum.LARGE_THUMB
     assert action.row_id is None
+
+
+# --- HLS playlists over the ladder ------------------------------------------
+
+WITH_HLS = DesiredState(formats={**DESIRED.formats, VideoFileVariantEnum.HLS: 1})
+
+
+def hls_actions(state):
+    return [action for action in plan(state, WITH_HLS).actions if isinstance(action, WriteHlsPlaylists)]
+
+
+def with_playlists(**overrides) -> VideoState:
+    base = video()
+    return video(
+        files=(*base.files, registered(VideoFileVariantEnum.HLS, "master.m3u8", revision=1, file_id=9)),
+        directories={**base.directories, "hls": (entry(f"{VIDEO_ID}/hls/master.m3u8"),)},
+        **overrides,
+    )
+
+
+def test_a_current_ladder_without_playlists_gets_them_without_fetching_the_original():
+    """The bulk of the catalogue after the backfill: only the cheap translation is due."""
+    result = plan(video(), WITH_HLS)
+
+    assert [type(action) for action in result.actions] == [WriteHlsPlaylists]
+    assert not any(action.needs_source for action in result.actions)
+    assert result.actions[0].replacing is None and result.actions[0].row_id is None
+
+
+def test_current_playlists_over_a_current_ladder_need_nothing():
+    assert not plan(with_playlists(), WITH_HLS)
+
+
+def test_rebuilding_the_ladder_rewrites_the_playlists_after_it():
+    """A rebuild moves every byte range, so playlists at their own current revision are stale too."""
+    base = with_playlists()
+    stale_ladder = tuple(
+        registered(VideoFileVariantEnum.DASH, "manifest.mpd", revision=1, file_id=2)
+        if row.variant == VideoFileVariantEnum.DASH
+        else row
+        for row in base.files
+    )
+
+    actions = plan(video(files=stale_ladder, directories=base.directories), WITH_HLS).actions
+    kinds = [(type(action), getattr(action, "file_format", None)) for action in actions]
+
+    assert kinds.index((ProduceFormat, VideoFileVariantEnum.DASH)) < kinds.index((WriteHlsPlaylists, None))
+    hls = hls_actions(video(files=stale_ladder, directories=base.directories))[0]
+    assert hls.replacing == PurePosixPath(f"{VIDEO_ID}/hls")
+    assert hls.row_id == 9
+
+
+def test_no_playlists_are_planned_for_a_video_with_no_original():
+    assert not hls_actions(broadcast_only())
 
 
 def test_an_orphaned_preview_is_swapped_out_before_a_new_one_is_published():

@@ -17,9 +17,9 @@ from pathlib import PurePosixPath
 
 from frikanalen_django_api_client.models import VideoFileVariantEnum
 
-from app.converge.actions import Action, ProduceFormat, RefreshMetadata, RetirePreview
+from app.converge.actions import Action, ProduceFormat, RefreshMetadata, RetirePreview, WriteHlsPlaylists
 from app.converge.state import VideoState
-from app.formats import DASH_PREVIEW, DESIRED_FORMATS, current_revision
+from app.formats import DASH_PREVIEW, DESIRED_FORMATS, HLS, current_revision
 
 ORIGINAL_DIR = "original"
 
@@ -158,9 +158,16 @@ def produce_formats(state: VideoState, desired: DesiredState) -> Fragment:
     #: already had one, or because this plan builds it. Only then is there
     #: anything for a preview to be superseded by.
     dash_settled = False
+    #: Whether this plan builds the ladder, which moves every byte range the
+    #: HLS playlists point at.
+    dash_planned = False
     planned_preview = False
 
-    for file_format, wanted in desired.formats.items():
+    # HLS is made from the ladder rather than from the original, so it is
+    # planned below, once it is known whether the ladder is being rebuilt.
+    from_original = {file_format: wanted for file_format, wanted in desired.formats.items() if file_format != HLS}
+
+    for file_format, wanted in from_original.items():
         directory = PurePosixPath(state.video_id) / str(file_format)
         registered = state.rows_for(file_format)
         have = state.revision_of(file_format)
@@ -186,6 +193,7 @@ def produce_formats(state: VideoState, desired: DesiredState) -> Fragment:
 
         if file_format == VideoFileVariantEnum.DASH:
             dash_settled = True
+            dash_planned = True
             if not registered:
                 # No ladder is registered at any revision, so there is nothing
                 # this video can currently be watched with, and the one being
@@ -226,6 +234,9 @@ def produce_formats(state: VideoState, desired: DesiredState) -> Fragment:
             )
         )
 
+    if dash_settled and (hls := _hls_playlists(state, desired, dash_planned)):
+        actions.append(hls)
+
     if dash_settled and (planned_preview or state.rows_for(DASH_PREVIEW)):
         # Last, so that a ladder which fails takes the plan down before the
         # thing standing in for it is destroyed. `state.rows_for` covers the
@@ -240,6 +251,39 @@ def produce_formats(state: VideoState, desired: DesiredState) -> Fragment:
         )
 
     return Fragment(state, actions=tuple(actions), notes=tuple(notes))
+
+
+def _hls_playlists(state: VideoState, desired: DesiredState, dash_planned: bool) -> WriteHlsPlaylists | None:
+    """The HLS playlists, if they are missing, stale, or about to be.
+
+    They are a translation of the ladder's manifest, so they are due whenever
+    the ladder is rebuilt -- even at the current revision of their own -- as
+    well as whenever they are absent or written by an older revision.
+    """
+    if HLS not in desired.formats:
+        return None
+    wanted = desired.formats[HLS]
+    registered = state.rows_for(HLS)
+    have = state.revision_of(HLS)
+    occupied = state.archive_was_read and str(HLS) in state.directories
+
+    if dash_planned:
+        reason = "the ladder is being rebuilt"
+    elif not registered:
+        reason = "missing"
+    elif have < wanted:
+        reason = f"revision {have} -> {wanted}"
+    else:
+        return None
+
+    return WriteHlsPlaylists(
+        video_id=state.video_id,
+        from_revision=have,
+        to_revision=wanted,
+        replacing=PurePosixPath(state.video_id) / str(HLS) if occupied else None,
+        row_id=max(registered, key=lambda row: row.profile_revision).id if registered else None,
+        reason=reason,
+    )
 
 
 Chore = Callable[[VideoState, DesiredState], Fragment]

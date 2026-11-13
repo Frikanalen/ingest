@@ -7222,6 +7222,7 @@ paths:
           - cloudflare_id
           - dash
           - dash_preview
+          - hls
           - large_thumb
           - med_thumb
           - original
@@ -7243,6 +7244,7 @@ paths:
           * `dash` - MPEG-DASH manifest
           * `dash_preview` - Transient low-quality MPEG-DASH manifest
           * `webm_med` - Medium-quality WebM
+          * `hls` - HLS playlists over the DASH media
       - in: query
         name: video_id
         schema:
@@ -18636,6 +18638,7 @@ components:
       - dash
       - dash_preview
       - webm_med
+      - hls
       type: string
       description: |-
         * `large_thumb` - Large thumbnail
@@ -18650,6 +18653,7 @@ components:
         * `dash` - MPEG-DASH manifest
         * `dash_preview` - Transient low-quality MPEG-DASH manifest
         * `webm_med` - Medium-quality WebM
+        * `hls` - HLS playlists over the DASH media
     VideoFiles:
       type: object
       properties:
@@ -18676,6 +18680,8 @@ components:
         dashPreview:
           $ref: '#/components/schemas/VideoFileLink'
         webmMed:
+          $ref: '#/components/schemas/VideoFileLink'
+        hls:
           $ref: '#/components/schemas/VideoFileLink'
     VideoRequest:
       type: object

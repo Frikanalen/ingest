@@ -18,16 +18,20 @@ from logging import getLogger
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 
+from frikanalen_django_api_client.models import VideoFileVariantEnum
+
 from app.api.hooks.metadata import MetadataExtractor
 from app.archive_store import ArchiveSession
-from app.converge.actions import Action, ProduceFormat, RefreshMetadata, RetirePreview
+from app.converge.actions import Action, ProduceFormat, RefreshMetadata, RetirePreview, WriteHlsPlaylists
 from app.converge.chores import ORIGINAL_DIR, Plan
 from app.django_client.service import DjangoApiService
-from app.formats import DASH_PREVIEW
+from app.formats import DASH_PREVIEW, HLS
+from app.media import hls
 from app.media.comand_template import DEFAULT_ENCODER, Encoder
 from app.media.produce import FormatProducer, SourceMedia
 from app.media.segmentation import segmentation_for
 from app.runner import ProgressCallback
+from app.util.file_name_utils import derived_file_location
 
 logger = getLogger(__name__)
 
@@ -139,8 +143,55 @@ class Applier:
             case RetirePreview(directory=directory):
                 await self._retire_preview(video_id, directory)
 
+            case WriteHlsPlaylists():
+                await self._write_hls(action, scratch)
+
             case _:
                 raise NotImplementedError(f"no way to apply {action!r}")
+
+    async def _write_hls(self, action: WriteHlsPlaylists, scratch: Path) -> None:
+        """Translate the archived ladder manifest into playlists, publish them, register them.
+
+        Read from the archive rather than from anything the plan carried, so a
+        ladder this same plan has just rebuilt is the one translated.
+        """
+        video_id = action.video_id
+        dash_dir = PurePosixPath(video_id) / str(VideoFileVariantEnum.DASH)
+        manifests = [
+            entry for entry in await self.archive.list_dir(dash_dir) if not entry.is_dir and entry.name.endswith(".mpd")
+        ]
+        if len(manifests) != 1:
+            raise hls.UnsupportedManifest(f"{dash_dir} holds {len(manifests)} manifests, expected exactly one")
+
+        work = scratch / str(HLS)
+        work.mkdir()
+        local_manifest = scratch / manifests[0].name
+        await self.archive.get(manifests[0].path, local_manifest)
+        playlists = hls.playlists_from_manifest(local_manifest.read_text())
+
+        for name, text in playlists.items():
+            (work / name).write_text(text)
+
+        if action.replacing is not None:
+            await self.archive.trash(action.replacing)
+
+        # Master last, as a manifest is published last: until it lands there is
+        # nothing a player could be handed that names a playlist still missing.
+        for name in sorted(playlists, key=lambda name: name == hls.MASTER_PLAYLIST):
+            await self.archive.put(work / name, derived_file_location(video_id, str(HLS), work / name))
+
+        destination = derived_file_location(video_id, str(HLS), work / hls.MASTER_PLAYLIST)
+        if action.row_id is not None:
+            await self.django_api.update_video_file(
+                action.row_id, filename=str(destination), profile_revision=action.to_revision
+            )
+        else:
+            await self.django_api.create_video_file(
+                filename=str(destination),
+                file_format=HLS,
+                video_id=video_id,
+                profile_revision=action.to_revision,
+            )
 
     async def _retire_preview(self, video_id: str, directory: PurePosixPath) -> None:
         """Destroy the preview, then drop the rows that named it.

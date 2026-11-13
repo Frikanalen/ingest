@@ -77,6 +77,10 @@ spec:
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with $w.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with $w.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
