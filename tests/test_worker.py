@@ -71,6 +71,7 @@ def django_api():
         file_row(3, "large_thumb", f"{VIDEO_ID}/large_thumb/source.jpg"),
         file_row(4, "med_thumb", f"{VIDEO_ID}/med_thumb/source.jpg"),
         file_row(5, "small_thumb", f"{VIDEO_ID}/small_thumb/source.jpg"),
+        file_row(6, "hls", f"{VIDEO_ID}/hls/master.m3u8"),
     )
     return api
 

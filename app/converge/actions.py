@@ -108,3 +108,28 @@ class RetirePreview(Action):
 
     def describe(self) -> str:
         return f"retire {self.directory}, now superseded by dash"
+
+
+@dataclass(frozen=True)
+class WriteHlsPlaylists(Action):
+    """Translate the archived `dash` manifest into HLS playlists and register them.
+
+    Needs no original: everything it reads is the manifest, which names every
+    segment's byte range in the ladder's media. Planned after any `dash` build
+    in the same plan, because a rebuilt ladder moves every one of those ranges
+    and playlists made from the old manifest would point into the wrong bytes.
+    """
+
+    video_id: str
+    to_revision: int
+    from_revision: int = UNTRACKED_REVISION
+    #: The playlists' directory as it stands, to swap out -- as for ProduceFormat.
+    replacing: PurePosixPath | None = None
+    row_id: int | None = None
+    #: Why, for the plan's description.
+    reason: str = "missing"
+
+    needs_source = False
+
+    def describe(self) -> str:
+        return f"write hls playlists from the dash manifest ({self.reason})"

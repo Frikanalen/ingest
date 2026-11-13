@@ -241,11 +241,15 @@ async def test_archives_nothing_but_the_finished_files(ingested, archive_root):
     # for the 2160p rung); the fixture has no audio.
     rungs = [spec for spec in LADDER if not spec.only_above]
     dash_media = sorted(f"{VIDEO_ID}/dash/manifest-stream{n}.mp4" for n in range(len(rungs)))
+    # One HLS media playlist per representation, over those same files.
+    playlists = sorted(f"{VIDEO_ID}/hls/manifest-stream{n}.m3u8" for n in range(len(rungs)))
 
     assert archived == sorted(
         [
             f"{VIDEO_ID}/dash/manifest.mpd",
             *dash_media,
+            f"{VIDEO_ID}/hls/master.m3u8",
+            *playlists,
             f"{VIDEO_ID}/large_thumb/example_video.jpg",
             f"{VIDEO_ID}/med_thumb/example_video.jpg",
             f"{VIDEO_ID}/small_thumb/example_video.jpg",
@@ -297,6 +301,7 @@ async def test_registers_archive_relative_paths_with_django(ingested, django_api
         # Only the manifest: the media it names is reached through it, never
         # on its own.
         VideoFileVariantEnum.DASH: f"{VIDEO_ID}/dash/manifest.mpd",
+        VideoFileVariantEnum.HLS: f"{VIDEO_ID}/hls/master.m3u8",
     }
 
 

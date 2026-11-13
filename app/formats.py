@@ -10,6 +10,7 @@ from functools import lru_cache
 
 from frikanalen_django_api_client.models import VideoFileVariantEnum
 
+from app.media import hls
 from app.media.comand_template import TemplatedCommandGenerator
 
 #: Produced for every video, from its original.
@@ -18,7 +19,13 @@ DESIRED_FORMATS = (
     VideoFileVariantEnum.MED_THUMB,
     VideoFileVariantEnum.SMALL_THUMB,
     VideoFileVariantEnum.DASH,
+    VideoFileVariantEnum.HLS,
 )
+
+#: HLS playlists over the `dash` media -- see `app.media.hls`. Not built from
+#: the original and not by a template, but from the ladder's manifest, so a
+#: chore of its own decides when it is due and its revision lives in code.
+HLS = VideoFileVariantEnum.HLS
 
 #: The stand-in published while the real ladder encodes: one low rendition and
 #: the audio, encoded at many times realtime, so a member can watch their
@@ -50,4 +57,6 @@ def current_revision(file_format: VideoFileVariantEnum) -> int:
     Cached because it reads the template off disk, and a catalogue-wide plan
     asks the same handful of questions once per video.
     """
+    if file_format == HLS:
+        return hls.REVISION
     return TemplatedCommandGenerator(str(file_format)).metadata.revision

@@ -60,6 +60,10 @@ Publishing order matters because the archive is exported read-only to the playou
 
 It is one FFmpeg invocation: the source is decoded once, deinterlaced where the decoder says a frame is interlaced (`bwdif`), padded to 16:9, and split into all six renditions in a single pass.
 
+#### HLS playlists
+
+Apple devices play DASH only through ManagedMediaSource, which cannot be AirPlayed and leaves seeking to dash.js. So every video with a current ladder also gets `hls`: playlists in `<id>/hls/` that point back into `../dash/` by byte range. They are a translation of `manifest.mpd` (`app/media/hls.py`), not an encode, so writing them needs neither the original nor ffmpeg and takes a moment. Because a rebuilt ladder moves every byte range, the planner rewrites the playlists whenever it rebuilds `dash`. Their revision is `app.media.hls.REVISION`.
+
 #### Encoder backends
 
 The ladder can be encoded three ways, and a worker is told which by `--encoder` (or `FK_WORKER_ENCODER`):
