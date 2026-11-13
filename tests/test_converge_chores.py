@@ -601,3 +601,22 @@ def test_rebuilding_the_ladder_rewrites_the_playlists_after_it():
 
 def test_no_playlists_are_planned_for_a_video_with_no_original():
     assert not hls_actions(broadcast_only())
+
+
+def test_an_orphaned_preview_is_swapped_out_before_a_new_one_is_published():
+    """An upload that died after publishing its preview leaves it with no row."""
+    state = video(
+        files=(
+            registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", file_id=1),
+            registered(VideoFileVariantEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
+        ),
+        directories={
+            "original": (entry(f"{VIDEO_ID}/original/source.mp4"),),
+            "large_thumb": (entry(f"{VIDEO_ID}/large_thumb/source.jpg"),),
+            str(DASH_PREVIEW): (entry(f"{VIDEO_ID}/{DASH_PREVIEW}/manifest.mpd"),),
+        },
+    )
+
+    [preview] = [a for a in actions_of(state) if isinstance(a, ProduceFormat) and a.file_format == DASH_PREVIEW]
+
+    assert preview.replacing == PurePosixPath(VIDEO_ID) / str(DASH_PREVIEW)

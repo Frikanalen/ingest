@@ -205,10 +205,16 @@ def produce_formats(state: VideoState, desired: DesiredState) -> Fragment:
                 # Inserted here rather than by a chore of its own so it lands
                 # where it belongs in the order -- after the thumbnails, which
                 # are seconds, and before the ladder, which is hours.
+                # A preview published by an upload that died before
+                # registering it is still in the archive with no row, and
+                # put() refuses to overwrite it -- so it is swapped out like
+                # any other occupied format directory.
+                preview_occupied = state.archive_was_read and str(DASH_PREVIEW) in state.directories
                 actions.append(
                     ProduceFormat(
                         file_format=DASH_PREVIEW,
                         to_revision=current_revision(DASH_PREVIEW),
+                        replacing=PurePosixPath(state.video_id) / str(DASH_PREVIEW) if preview_occupied else None,
                         # The ladder below owns the bar. Two encodes reporting
                         # into it would run it to 100 and start it again, which
                         # to a member watching is an import that restarted.
