@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/Frikanalen/ingest/compare/v1.2.0...v1.2.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **converge:** re-point the existing videofile row when rebuilding a format ([#69](https://github.com/Frikanalen/ingest/issues/69)) ([61f7800](https://github.com/Frikanalen/ingest/commit/61f7800a826d223686970c9c8a4cc3a128ef633e))
+
 ## [1.2.0](https://github.com/Frikanalen/ingest/compare/v1.1.2...v1.2.0) (2026-11-12)
 
 
