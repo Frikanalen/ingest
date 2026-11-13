@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.0](https://github.com/Frikanalen/ingest/compare/v1.2.1...v1.3.0) (2026-11-13)
+
+
+### Features
+
+* **chart:** let worker pools set affinity ([#74](https://github.com/Frikanalen/ingest/issues/74)) ([e61e545](https://github.com/Frikanalen/ingest/commit/e61e545ad46b1b4dda28adb194e23c07525242b7))
+* **hls:** write HLS playlists over the DASH ladder for Apple devices ([#72](https://github.com/Frikanalen/ingest/issues/72)) ([aa072cd](https://github.com/Frikanalen/ingest/commit/aa072cdd9bf92cd3b90a281d9dc046b2f33a4beb))
+
+
+### Bug Fixes
+
+* **converge:** swap out an orphaned dash_preview before publishing a new one ([#71](https://github.com/Frikanalen/ingest/issues/71)) ([fb4ffbb](https://github.com/Frikanalen/ingest/commit/fb4ffbb6fb36f33fd049153e5533287c63f3ace1))
+
 ## [1.2.1](https://github.com/Frikanalen/ingest/compare/v1.2.0...v1.2.1) (2026-11-13)
 
 
