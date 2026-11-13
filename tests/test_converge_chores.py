@@ -547,3 +547,22 @@ def test_a_missing_format_carries_no_row():
 
     assert action.file_format == VideoFileVariantEnum.LARGE_THUMB
     assert action.row_id is None
+
+
+def test_an_orphaned_preview_is_swapped_out_before_a_new_one_is_published():
+    """An upload that died after publishing its preview leaves it with no row."""
+    state = video(
+        files=(
+            registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", file_id=1),
+            registered(VideoFileVariantEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
+        ),
+        directories={
+            "original": (entry(f"{VIDEO_ID}/original/source.mp4"),),
+            "large_thumb": (entry(f"{VIDEO_ID}/large_thumb/source.jpg"),),
+            str(DASH_PREVIEW): (entry(f"{VIDEO_ID}/{DASH_PREVIEW}/manifest.mpd"),),
+        },
+    )
+
+    [preview] = [a for a in actions_of(state) if isinstance(a, ProduceFormat) and a.file_format == DASH_PREVIEW]
+
+    assert preview.replacing == PurePosixPath(VIDEO_ID) / str(DASH_PREVIEW)
