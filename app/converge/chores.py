@@ -135,6 +135,35 @@ def refresh_metadata(state: VideoState, desired: DesiredState) -> Fragment:
     return Fragment(state)
 
 
+def _preview(state: VideoState) -> tuple[ProduceFormat, ...]:
+    """The stand-in to build ahead of a missing ladder -- or nothing, to keep the one there.
+
+    A current preview already registered -- an earlier run built it and then
+    failed on the ladder -- is what the video plays with until the ladder
+    lands, so it stays. Otherwise one is built, swapping out whatever is in its
+    directory (an upload that died before registering it leaves one with no
+    row, and put() refuses to overwrite) and re-pointing a stale row rather
+    than creating a second one: a video holds one row per variant.
+    """
+    rows = state.rows_for(DASH_PREVIEW)
+    if rows and state.revision_of(DASH_PREVIEW) >= current_revision(DASH_PREVIEW):
+        return ()
+
+    occupied = state.archive_was_read and str(DASH_PREVIEW) in state.directories
+    return (
+        ProduceFormat(
+            file_format=DASH_PREVIEW,
+            to_revision=current_revision(DASH_PREVIEW),
+            replacing=PurePosixPath(state.video_id) / str(DASH_PREVIEW) if occupied else None,
+            row_id=max(rows, key=lambda row: row.profile_revision).id if rows else None,
+            # The ladder below owns the bar. Two encodes reporting into it
+            # would run it to 100 and start it again, which to a member
+            # watching is an import that restarted.
+            drives_progress=False,
+        ),
+    )
+
+
 def produce_formats(state: VideoState, desired: DesiredState) -> Fragment:
     """Build every desired format that is absent or built by an older profile."""
     if not state.rows_for(VideoFileVariantEnum.ORIGINAL):
@@ -205,22 +234,7 @@ def produce_formats(state: VideoState, desired: DesiredState) -> Fragment:
                 # Inserted here rather than by a chore of its own so it lands
                 # where it belongs in the order -- after the thumbnails, which
                 # are seconds, and before the ladder, which is hours.
-                # A preview published by an upload that died before
-                # registering it is still in the archive with no row, and
-                # put() refuses to overwrite it -- so it is swapped out like
-                # any other occupied format directory.
-                preview_occupied = state.archive_was_read and str(DASH_PREVIEW) in state.directories
-                actions.append(
-                    ProduceFormat(
-                        file_format=DASH_PREVIEW,
-                        to_revision=current_revision(DASH_PREVIEW),
-                        replacing=PurePosixPath(state.video_id) / str(DASH_PREVIEW) if preview_occupied else None,
-                        # The ladder below owns the bar. Two encodes reporting
-                        # into it would run it to 100 and start it again, which
-                        # to a member watching is an import that restarted.
-                        drives_progress=False,
-                    )
-                )
+                actions.extend(_preview(state))
                 planned_preview = True
 
         actions.append(

@@ -14,7 +14,7 @@ from app.archive_store import ArchiveEntry
 from app.converge.actions import ProduceFormat, RefreshMetadata, RetirePreview, WriteHlsPlaylists
 from app.converge.chores import DesiredState, plan
 from app.converge.state import RegisteredFile, VideoState
-from app.formats import DASH_PREVIEW, UNTRACKED_REVISION
+from app.formats import DASH_PREVIEW, UNTRACKED_REVISION, current_revision
 
 VIDEO_ID = "12345"
 
@@ -619,4 +619,39 @@ def test_an_orphaned_preview_is_swapped_out_before_a_new_one_is_published():
 
     [preview] = [a for a in actions_of(state) if isinstance(a, ProduceFormat) and a.file_format == DASH_PREVIEW]
 
+    assert preview.replacing == PurePosixPath(VIDEO_ID) / str(DASH_PREVIEW)
+
+
+def _video_with_preview_row(revision: int) -> VideoState:
+    return video(
+        files=(
+            registered(VideoFileVariantEnum.ORIGINAL, "source.mp4", file_id=1),
+            registered(VideoFileVariantEnum.LARGE_THUMB, "source.jpg", revision=1, file_id=3),
+            registered(DASH_PREVIEW, "manifest.mpd", revision=revision, file_id=9),
+        ),
+        directories={
+            "original": (entry(f"{VIDEO_ID}/original/source.mp4"),),
+            "large_thumb": (entry(f"{VIDEO_ID}/large_thumb/source.jpg"),),
+            str(DASH_PREVIEW): (entry(f"{VIDEO_ID}/{DASH_PREVIEW}/manifest.mpd"),),
+        },
+    )
+
+
+def test_a_registered_current_preview_is_kept_while_the_ladder_is_built():
+    """An earlier run built the preview and then failed on the ladder."""
+    state = _video_with_preview_row(current_revision(DASH_PREVIEW))
+
+    actions = actions_of(state)
+
+    assert not [a for a in actions if isinstance(a, ProduceFormat) and a.file_format == DASH_PREVIEW]
+    assert any(isinstance(a, ProduceFormat) and a.file_format == VideoFileVariantEnum.DASH for a in actions)
+    assert isinstance(actions[-1], RetirePreview)
+
+
+def test_a_registered_stale_preview_is_rebuilt_into_its_own_row():
+    state = _video_with_preview_row(UNTRACKED_REVISION)
+
+    [preview] = [a for a in actions_of(state) if isinstance(a, ProduceFormat) and a.file_format == DASH_PREVIEW]
+
+    assert preview.row_id == 9
     assert preview.replacing == PurePosixPath(VIDEO_ID) / str(DASH_PREVIEW)
