@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.1](https://github.com/Frikanalen/ingest/compare/v1.3.0...v1.3.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* **chart:** default image tag to v&lt;Chart.Version&gt; ([#77](https://github.com/Frikanalen/ingest/issues/77)) ([df4983f](https://github.com/Frikanalen/ingest/commit/df4983faede6df95d879f0952f1f4e3973f14fa2))
+* **converge:** keep a registered preview, and re-point a stale one's row ([#75](https://github.com/Frikanalen/ingest/issues/75)) ([602c9b4](https://github.com/Frikanalen/ingest/commit/602c9b4b3daa68d8ec916ccfc06be92d2570c77d))
+
 ## [1.3.0](https://github.com/Frikanalen/ingest/compare/v1.2.1...v1.3.0) (2026-11-13)
 
 
