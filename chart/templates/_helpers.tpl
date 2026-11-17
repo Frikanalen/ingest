@@ -225,7 +225,7 @@ about format revisions. That is only worth anything if the string reported is
 the string running, hence one definition rather than three.
 */}}
 {{- define "ingest.image" -}}
-{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.Version }}
+{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" .Chart.Version) }}
 {{- end }}
 
 {{/*
