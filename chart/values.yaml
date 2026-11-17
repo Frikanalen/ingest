@@ -3,7 +3,9 @@ replicaCount: 1
 image:
   repository: ghcr.io/frikanalen/ingest
   pullPolicy: Always
-  tag: "latest"
+  # Empty = v<Chart.Version>: the chart at a release tag runs that release's
+  # image, so a deploy only names the version once (targetRevision).
+  tag: ""
 
 nameOverride: ""
 fullnameOverride: ""

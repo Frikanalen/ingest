@@ -24,7 +24,11 @@ jobs:
         if: ${{ github.ref == 'refs/heads/main' }}
         uses: googleapis/release-please-action@v5
         with:
-          release-type: python
+          # No release-type here on purpose: passing it puts the action in
+          # single-package mode, where release-please-config.json is never read
+          # and its extra-files (chart/Chart.yaml) are silently ignored.
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
 
   archive-utils:
     name: Attach fk-archive-utils to the release
