@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/Frikanalen/ingest/compare/v1.3.1...v1.4.0) (2026-11-19)
+
+
+### Features
+
+* **recordings:** archive a recording MediaMTX made on request ([#78](https://github.com/Frikanalen/ingest/issues/78)) ([d205818](https://github.com/Frikanalen/ingest/commit/d205818ff6d9e386774aa92b7e0337abfe0f65a2))
+
 ## [1.3.1](https://github.com/Frikanalen/ingest/compare/v1.3.0...v1.3.1) (2026-11-17)
 
 
