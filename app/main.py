@@ -8,6 +8,7 @@ from starlette.middleware.cors import CORSMiddleware
 from app.api.formats.routes import create_router as create_formats_router
 from app.api.health.routes import router as internal_router
 from app.api.hooks.routes import router as hooks_router
+from app.api.recordings.routes import router as recordings_router
 from app.util.lifespan import lifespan
 from app.util.settings import IngestAppSettings, get_settings
 
@@ -39,6 +40,8 @@ def create_app(settings: IngestAppSettings | None = None) -> FastAPI:
     )
 
     app.include_router(internal_router, prefix="/internal")
+    # In-cluster only, like the rest of /internal: the ingress names nothing here.
+    app.include_router(recordings_router, prefix="/internal")
     app.include_router(hooks_router, prefix="/tusdHooks")
     # The one thing here that is reachable from outside the cluster. Mounted
     # under its own prefix rather than beside the hooks so that the ingress can
