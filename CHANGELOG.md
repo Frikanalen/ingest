@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/Frikanalen/ingest/compare/v1.4.0...v1.4.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* **recordings:** fetch fragmented MP4 and remux it here ([#80](https://github.com/Frikanalen/ingest/issues/80)) ([678c7ad](https://github.com/Frikanalen/ingest/commit/678c7adef93116d200d7b1c8bf5702d0f862c646))
+
 ## [1.4.0](https://github.com/Frikanalen/ingest/compare/v1.3.1...v1.4.0) (2026-11-19)
 
 
