@@ -36,6 +36,11 @@ def setup(monkeypatch, tmp_path):
         target.write_bytes(b"mp4")
 
     monkeypatch.setattr(routes, "fetch", fetch)
+
+    async def remux(source: Path, target: Path):
+        target.write_bytes(source.read_bytes())
+
+    monkeypatch.setattr(routes, "remux", remux)
     ingester = MagicMock()
     ingester.return_value.ingest = AsyncMock()
     monkeypatch.setattr(routes, "Ingester", ingester)
@@ -81,3 +86,22 @@ def test_does_nothing_for_a_request_not_waiting_on_ingest(setup) -> None:
     run(setup)
     ingester.return_value.ingest.assert_not_awaited()
     assert django.calls == [("GET", "/api/recordings/7", None)]
+
+
+def test_remuxes_fragmented_mp4_to_plain(tmp_path) -> None:
+    import subprocess
+
+    source, target = tmp_path / "in.fmp4", tmp_path / "out.mp4"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=d=2:s=320x240:r=25",
+         "-f", "lavfi", "-i", "sine=d=2", "-c:v", "libx264", "-g", "25", "-c:a", "aac",
+         "-movflags", "frag_keyframe+empty_moov", "-f", "mp4", str(source)],
+        check=True,
+    )  # fmt: skip
+    asyncio.run(routes.remux(source, target))
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(target)],
+        check=True, capture_output=True, text=True,
+    )  # fmt: skip
+    assert abs(float(probe.stdout) - 2.0) < 0.2
+    assert b"moof" not in target.read_bytes()[:200000]

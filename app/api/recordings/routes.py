@@ -59,6 +59,18 @@ async def fetch(url: str, target: Path) -> None:
                 file.write(chunk)
 
 
+async def remux(source: Path, target: Path) -> None:
+    """Rewrite fragmented MP4 as a plain one, streams copied as they are."""
+    process = await asyncio.create_subprocess_exec(
+        "ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(source),
+        "-map", "0", "-c", "copy", "-movflags", "+faststart", str(target),
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+    )  # fmt: skip
+    _, stderr = await process.communicate()
+    if process.returncode != 0:
+        raise RuntimeError(f"remux failed: {stderr.decode(errors='replace')[-300:]}")
+
+
 async def archive_recording(
     recording_id: int,
     settings: IngestAppSettings,
@@ -76,7 +88,12 @@ async def archive_recording(
     ok, error = False, ""
     try:
         logger.info("Fetching recording %s for video %s", recording_id, video_id)
-        await fetch(recording["playbackUrl"], target)
+        fetched = target.with_suffix(".fmp4")
+        try:
+            await fetch(recording["playbackUrl"], fetched)
+            await remux(fetched, target)
+        finally:
+            fetched.unlink(missing_ok=True)
         await reporter.state(IngestStateEnum.PROBING)
         try:
             metadata = await metadata_extractor.assert_compliance(target)
