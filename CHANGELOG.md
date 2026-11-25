@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.2](https://github.com/Frikanalen/ingest/compare/v1.4.1...v1.4.2) (2026-11-25)
+
+
+### Bug Fixes
+
+* **recordings:** fetch every unbroken run of a recording, or the source's master ([#82](https://github.com/Frikanalen/ingest/issues/82)) ([0bb0261](https://github.com/Frikanalen/ingest/commit/0bb0261370677fd9d9d8dd5c7dd56c0f5d250d44))
+
 ## [1.4.1](https://github.com/Frikanalen/ingest/compare/v1.4.0...v1.4.1) (2026-11-24)
 
 
