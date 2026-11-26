@@ -48,6 +48,7 @@ pre_create_request_valid = HookRequest(
                             "Upload-Length": ["3012"],
                             "Upload-Metadata": [""],
                             "User-Agent": ["python-requests/2.32.4"],
+                            "Cookie": ["sessionid=member-session"],
                         }
                     ),
                 }
@@ -93,7 +94,7 @@ def test_pre_create_succeeds_if_metadata_parses():
 
     response = client.post(HOOK_PATH, json=mock_hook_payload)
     assert response.status_code == 200
-    django_api.verify_upload_token.assert_awaited_once_with("1234", "asdfasdf")
+    django_api.authorize_upload.assert_awaited_once_with("1234", {"Cookie": "sessionid=member-session"})
 
 
 def test_pre_create_gives_each_programme_image_a_unique_spool_path():
@@ -205,14 +206,69 @@ def test_pre_create_rejects_a_non_numeric_video_id():
     assert response.status_code == 422
 
 
-def test_pre_create_forwards_upload_token_rejection():
-    django_api.verify_upload_token.side_effect = DjangoApiError(404)
+def test_pre_create_forwards_djangos_refusal():
+    django_api.authorize_upload.side_effect = DjangoApiError(403)
 
     response = client.post(HOOK_PATH, json=pre_create_request_valid.model_dump(by_alias=True))
 
-    assert response.status_code == 404
-    assert response.json() == {"detail": "Invalid upload token"}
-    django_api.verify_upload_token.side_effect = None
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Not allowed to upload to this video"}
+    django_api.authorize_upload.side_effect = None
+
+
+def _with_headers(headers: dict[str, list[str]]) -> dict:
+    request = pre_create_request_valid.model_copy(deep=True)
+    request.event.http_request.header = Header.model_validate(headers)
+    return request.model_dump(by_alias=True)
+
+
+def test_pre_create_without_credentials_asks_the_uploader_to_sign_in():
+    django_api.reset_mock()
+
+    response = client.post(HOOK_PATH, json=_with_headers({"Tus-Resumable": ["1.0.0"]}))
+
+    assert response.status_code == 401
+    django_api.authorize_upload.assert_not_awaited()
+
+
+def test_pre_create_forwards_an_api_token():
+    django_api.reset_mock()
+
+    response = client.post(HOOK_PATH, json=_with_headers({"Authorization": ["Token abc123"]}))
+
+    assert response.status_code == 200
+    django_api.authorize_upload.assert_awaited_once_with("1234", {"Authorization": "Token abc123"})
+
+
+def test_pre_create_accepts_the_sites_own_origin():
+    django_api.reset_mock()
+
+    response = client.post(
+        HOOK_PATH,
+        json=_with_headers({"Cookie": ["sessionid=x"], "Origin": ["http://localhost:8000"]}),
+    )
+
+    assert response.status_code == 200
+
+
+def test_pre_create_refuses_a_foreign_origin():
+    django_api.reset_mock()
+
+    response = client.post(
+        HOOK_PATH,
+        json=_with_headers({"Cookie": ["sessionid=x"], "Origin": ["https://evil.example"]}),
+    )
+
+    assert response.status_code == 403
+    django_api.authorize_upload.assert_not_awaited()
+
+
+def test_pre_create_still_accepts_a_legacy_upload_token_field():
+    django_api.reset_mock()
+
+    response = client.post(HOOK_PATH, json=pre_create_request_valid.model_dump(by_alias=True))
+
+    assert response.status_code == 200
 
 
 def test_post_create_fails_if_metadata_bad():

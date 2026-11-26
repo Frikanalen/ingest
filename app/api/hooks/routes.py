@@ -31,17 +31,48 @@ router = APIRouter()
 IMAGE_UPLOAD_ID_PREFIX = "image"
 
 
+FORWARDED_CREDENTIALS = ("Authorization", "Cookie")
+
+
+def uploader_credentials(hook_request: HookRequest, settings: IngestAppSettings) -> dict[str, str]:
+    """The credentials the uploader sent with the tus request.
+
+    A browser upload carries the session cookie, since uploads go to the
+    site's own origin; a script sends `Authorization: Token ...`. Both are
+    passed on to django-api as they came, and never logged.
+
+    A request from another origin is refused outright. SameSite keeps a
+    foreign site's requests from carrying the cookie at all, but a sibling
+    subdomain counts as the same site, and nothing on one of those has any
+    business uploading on a visitor's behalf.
+    """
+    request = hook_request.event.http_request if hook_request.event else None
+    headers = (request.header.root if request and request.header else None) or {}
+    by_name = {name.lower(): values for name, values in headers.items()}
+
+    origin = by_name.get("origin")
+    if origin and origin[0] not in settings.upload_allowed_origins():
+        logger.warning("Upload from foreign origin %s refused", origin[0])
+        raise HTTPException(status_code=403, detail="Uploads are not accepted from this origin")
+
+    credentials = {name: by_name[name.lower()][0] for name in FORWARDED_CREDENTIALS if by_name.get(name.lower())}
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Sign in to upload")
+    return credentials
+
+
 async def prepare_upload(
     hook_request: HookRequest,
     settings: IngestAppSettings,
     django_api: DjangoApiService,
 ) -> HookResponse:
     metadata = get_upload_metadata(hook_request)
+    credentials = uploader_credentials(hook_request, settings)
     try:
-        await django_api.verify_upload_token(metadata.video_id, metadata.upload_token)
+        await django_api.authorize_upload(metadata.video_id, credentials)
     except DjangoApiError as error:
-        logger.warning("Upload token verification failed for video %s", metadata.video_id)
-        raise HTTPException(status_code=error.status_code, detail="Invalid upload token") from error
+        logger.warning("Upload to video %s refused (%s)", metadata.video_id, error.status_code)
+        raise HTTPException(status_code=error.status_code, detail="Not allowed to upload to this video") from error
 
     sanitized_filename = secure_filename(metadata.orig_file_name)
     if not sanitized_filename:
