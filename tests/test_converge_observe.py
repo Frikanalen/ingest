@@ -53,6 +53,7 @@ def archive_root(tmp_path):
 def django_api():
     api = AsyncMock()
     api.get_video.return_value = video_row(int(VIDEO_ID))
+    api.get_media_metadata_version.return_value = 0
     api.get_files_for_video.return_value = SimpleNamespace(
         count=1, results=[file_row(1, int(VIDEO_ID), "original", f"{VIDEO_ID}/original/source.mp4")]
     )
@@ -131,3 +132,13 @@ async def test_a_row_that_omits_the_revision_reads_as_untracked(observer, django
     state = await observer.observe_one(VIDEO_ID)
 
     assert state.files[0].profile_revision == UNTRACKED_REVISION
+
+
+@pytest.mark.asyncio
+async def test_the_recorded_media_metadata_version_is_read_back(observer, django_api):
+    django_api.get_media_metadata_version.return_value = 1
+
+    state = await observer.observe_one(VIDEO_ID)
+
+    assert state.media_metadata_version == 1
+    django_api.get_media_metadata_version.assert_awaited_once_with(VIDEO_ID)

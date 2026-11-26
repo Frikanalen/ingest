@@ -69,8 +69,8 @@ class ProduceFormat(Action):
 class RefreshMetadata(Action):
     """Re-derive from the original what should have been recorded at upload."""
 
-    #: Which of duration / framerate / loudness are missing. Named rather than
-    #: inferred so a plan says what it is going to fill in.
+    #: Which of duration / framerate / media / loudness to write. Named rather
+    #: than inferred so a plan says what it is going to fill in.
     fields: tuple[str, ...]
     original_file_id: int
 

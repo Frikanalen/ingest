@@ -78,6 +78,10 @@ class VideoState:
     directories: Mapping[str, tuple[ArchiveEntry, ...]] | None = None
     duration: str | None = None
     framerate: int | None = None
+    #: The envelope version of the recorded ffprobe report: 0 when nothing has
+    #: recorded one, None when nobody asked django-api. None plans nothing, for
+    #: the same reason an unread archive reports nothing missing.
+    media_metadata_version: int | None = None
 
     @classmethod
     def from_rows(
@@ -86,6 +90,7 @@ class VideoState:
         video,
         files: tuple[RegisteredFile, ...],
         directories: Mapping[str, tuple[ArchiveEntry, ...]] | None = None,
+        media_metadata_version: int | None = None,
     ) -> "VideoState":
         """One video as django-api describes it, with the archive if it was read."""
         return cls(
@@ -94,6 +99,7 @@ class VideoState:
             directories=directories,
             duration=optional(getattr(video, "duration", None)) if video else None,
             framerate=optional(getattr(video, "framerate", None)) if video else None,
+            media_metadata_version=media_metadata_version,
         )
 
     @property

@@ -1,7 +1,9 @@
+import json
 import logging
 import shlex
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 from fastapi import HTTPException
 from frikanalen_django_api_client.models import RoleEnum
@@ -62,12 +64,24 @@ class MetadataExtractor:
         return stdout
 
     async def do_probe(self, filepath: Path) -> FfprobeOutput:
+        metadata, _ = await self.probe_with_report(filepath)
+        return metadata
+
+    async def probe_with_report(self, filepath: Path) -> tuple[FfprobeOutput, dict[str, Any]]:
+        """The parsed probe, and ffprobe's own report exactly as it printed it.
+
+        Both, because they serve different readers. The model is what ingest
+        reasons with, and it keeps only the fields it declares. The report is
+        what django-api records as the video's media metadata, and that has
+        to be everything ffprobe said -- colour, side data, tags -- or a
+        question nobody has thought of yet means probing the archive again.
+        """
         logger.info("Probing file: %s", filepath)
         if not filepath.exists():
             raise FileNotFoundError(f"File {filepath} does not exist")
         data = await self._run_ffprobe(filepath)
         logger.debug("Validating ffprobe output against JSON Schema: %s", data)
-        return FfprobeOutput.model_validate_json(data)
+        return FfprobeOutput.model_validate_json(data), json.loads(data)
 
     async def assert_compliance(self, upload_file: Path) -> FfprobeOutput:
         """Refuse an upload that does not meet the rules a member is told about.

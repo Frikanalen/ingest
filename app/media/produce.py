@@ -7,9 +7,11 @@ afterwards must not depend on that -- a transcode path that existed in two
 copies is how the catalogue came to disagree with itself in the first place.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from logging import getLogger
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 from frikanalen_django_api_client.models import VideoFileVariantEnum
 
@@ -54,19 +56,29 @@ class SourceMedia:
     #: analysis pass found nothing to work from, and a template that would
     #: normalize has to pass the audio through untouched instead.
     loudness: LoudnessMeasurement | None = None
+    #: ffprobe's report as it printed it, for recording as media metadata.
+    #: None where the caller had only the parsed model to hand.
+    probe_report: Mapping[str, Any] | None = None
 
     @property
     def duration_s(self) -> float:
         return float(self.metadata.format.duration)
 
     @classmethod
-    def probed(cls, video_id: str, path: Path, metadata: FfprobeOutput) -> "SourceMedia":
+    def probed(
+        cls,
+        video_id: str,
+        path: Path,
+        metadata: FfprobeOutput,
+        probe_report: Mapping[str, Any] | None = None,
+    ) -> "SourceMedia":
         """Read what ffprobe saw. Loudness is measured separately and added after."""
         return cls(
             video_id=video_id,
             path=path,
             metadata=metadata,
             has_audio=any(stream.codec_type == "audio" for stream in metadata.streams or []),
+            probe_report=probe_report,
         )
 
 

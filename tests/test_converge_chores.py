@@ -655,3 +655,42 @@ def test_a_registered_stale_preview_is_rebuilt_into_its_own_row():
 
     assert preview.row_id == 9
     assert preview.replacing == PurePosixPath(VIDEO_ID) / str(DASH_PREVIEW)
+
+
+# --- media metadata --------------------------------------------------------
+
+
+def refresh_of(state):
+    return [a for a in actions_of(state) if isinstance(a, RefreshMetadata)]
+
+
+def test_an_unprobed_video_has_its_media_metadata_and_framerate_recorded():
+    """The framerate rides along because the column defaults to 25000: until a
+    probe has been recorded, the figure there is a default, not a measurement."""
+    [refresh] = refresh_of(video(media_metadata_version=0))
+
+    assert refresh.fields == ("framerate", "media")
+    assert refresh.original_file_id == 1
+
+
+def test_a_probed_video_is_left_alone():
+    assert not plan(video(media_metadata_version=1), DESIRED)
+
+
+def test_a_video_nobody_asked_about_plans_no_probe():
+    """None is "django-api was not asked", which is not the same as "none recorded"."""
+    assert not plan(video(media_metadata_version=None), DESIRED)
+
+
+def test_loudness_rides_along_with_a_media_refill_only_where_it_is_missing():
+    [measured] = refresh_of(video(media_metadata_version=0))
+    [unmeasured_refresh] = refresh_of(unmeasured(media_metadata_version=0))
+
+    assert "loudness" not in measured.fields
+    assert unmeasured_refresh.fields == ("framerate", "media", "loudness")
+
+
+def test_a_video_without_an_original_is_not_probed():
+    state = video(files=(), directories={}, media_metadata_version=0)
+
+    assert not refresh_of(state)
