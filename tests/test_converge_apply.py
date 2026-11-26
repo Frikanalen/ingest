@@ -87,6 +87,52 @@ async def test_refreshing_records_duration_and_framerate(applier, archive_root, 
 
 
 @pytest.mark.asyncio
+async def test_a_media_refresh_records_ffprobes_whole_report(applier, archive_root, django_api, color_bars_video):
+    place(archive_root, ORIGINAL, color_bars_video.read_bytes())
+
+    await applier.apply(plan_of(RefreshMetadata(fields=("framerate", "media"), original_file_id=7)))
+
+    django_api.set_video_framerate.assert_awaited_once_with(VIDEO_ID, 25000)
+    [(video_id, report), _] = django_api.set_media_metadata.await_args
+    assert video_id == VIDEO_ID
+    # As ffprobe printed it: snake_case keys, and fields the parsed model
+    # does not declare are kept.
+    [stream] = report["streams"]
+    assert stream["codec_name"] == "h264"
+    assert (stream["width"], stream["height"]) == (1280, 720)
+    assert "mov" in report["format"]["format_name"]
+    assert "disposition" in stream
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_that_does_not_ask_for_loudness_does_not_measure_it(
+    applier, archive_root, django_api, color_bars_video_with_tone, monkeypatch
+):
+    """A decode of the whole audio track, for nothing: the refill's common case."""
+    import app.media.loudness.measure as measure
+
+    measured = AsyncMock()
+    monkeypatch.setattr(measure, "measure_loudness", measured)
+    place(archive_root, ORIGINAL, color_bars_video_with_tone.read_bytes())
+
+    await applier.apply(plan_of(RefreshMetadata(fields=("framerate", "media"), original_file_id=7)))
+
+    measured.assert_not_awaited()
+    django_api.set_video_file_loudness.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_that_asks_for_loudness_measures_it(
+    applier, archive_root, django_api, color_bars_video_with_tone
+):
+    place(archive_root, ORIGINAL, color_bars_video_with_tone.read_bytes())
+
+    await applier.apply(plan_of(RefreshMetadata(fields=("media", "loudness"), original_file_id=7)))
+
+    django_api.set_video_file_loudness.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_a_silent_source_records_no_loudness(applier, archive_root, django_api, color_bars_video, caplog):
     """A measurement of nothing would be worse than the absence of one.
 

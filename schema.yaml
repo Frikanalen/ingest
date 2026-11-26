@@ -9374,6 +9374,282 @@ paths:
               schema:
                 $ref: '#/components/schemas/IngestJob'
           description: ''
+  /api/videos/{id}/media_metadata:
+    get:
+      operationId: videos_media_metadata_retrieve
+      description: The ffprobe report on the video's original file, keys exactly as
+        ffprobe prints them. `version` 0 with empty `data` means nothing has probed
+        it yet.
+      summary: Read a video's media metadata
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - videos
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideosMediaMetadataRetrieveErrorResponse400'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse401'
+              examples:
+                AuthenticationFailed:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: authentication_failed
+                      detail: Incorrect authentication credentials.
+                      attr: null
+                NotAuthenticated:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_authenticated
+                      detail: Authentication credentials were not provided.
+                      attr: null
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse403'
+              examples:
+                PermissionDenied:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: permission_denied
+                      detail: You do not have permission to perform this action.
+                      attr: null
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
+                      attr: null
+          description: ''
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse405'
+              examples:
+                MethodNotAllowed:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: method_not_allowed
+                      detail: Method "get" not allowed.
+                      attr: null
+          description: ''
+        '406':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse406'
+              examples:
+                NotAcceptable:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_acceptable
+                      detail: Could not satisfy the request Accept header.
+                      attr: null
+          description: ''
+        '415':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse415'
+              examples:
+                UnsupportedMediaType:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: unsupported_media_type
+                      detail: Unsupported media type "application/json" in request.
+                      attr: null
+          description: ''
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse500'
+              examples:
+                APIException:
+                  value:
+                    type: server_error
+                    errors:
+                    - code: error
+                      detail: A server error occurred.
+                      attr: null
+          description: ''
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoMediaMetadata'
+          description: ''
+    put:
+      operationId: videos_media_metadata_update
+      description: Replaces the stored ffprobe report with the one given. Reserved for
+        the ingest service. Keys inside `data` are stored exactly as sent.
+      summary: Record a video's media metadata
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - videos
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VideoMediaMetadataRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideosMediaMetadataUpdateErrorResponse400'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse401'
+              examples:
+                AuthenticationFailed:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: authentication_failed
+                      detail: Incorrect authentication credentials.
+                      attr: null
+                NotAuthenticated:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_authenticated
+                      detail: Authentication credentials were not provided.
+                      attr: null
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse403'
+              examples:
+                PermissionDenied:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: permission_denied
+                      detail: You do not have permission to perform this action.
+                      attr: null
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse404'
+              examples:
+                NotFound:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_found
+                      detail: Not found.
+                      attr: null
+          description: ''
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse405'
+              examples:
+                MethodNotAllowed:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: method_not_allowed
+                      detail: Method "get" not allowed.
+                      attr: null
+          description: ''
+        '406':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse406'
+              examples:
+                NotAcceptable:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_acceptable
+                      detail: Could not satisfy the request Accept header.
+                      attr: null
+          description: ''
+        '415':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse415'
+              examples:
+                UnsupportedMediaType:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: unsupported_media_type
+                      detail: Unsupported media type "application/json" in request.
+                      attr: null
+          description: ''
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse500'
+              examples:
+                APIException:
+                  value:
+                    type: server_error
+                    errors:
+                    - code: error
+                      detail: A server error occurred.
+                      attr: null
+          description: ''
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoMediaMetadata'
+          description: ''
   /api/videos/{id}/upload_token:
     get:
       operationId: videos_upload_token_retrieve
@@ -23647,6 +23923,223 @@ components:
       required:
       - errors
       - type
+    VideoMediaMetadata:
+      type: object
+      description: 'What ffprobe made of a video''s original, as ingest recorded it.
+
+
+        Stored whole rather than picked apart: container, codecs, resolution,
+
+        field order and anything else ffprobe reports are all in `data`, and
+
+        deciding today which of them matter would only mean probing the whole
+
+        archive again the day something else does. `version` describes the
+
+        envelope, not ffprobe: 1 is `{"format": ..., "streams": ...}` as
+
+        `ffprobe -show_format -show_streams -of json` prints it, the shape
+
+        media-processor first wrote into this column in 2021.
+
+
+        An empty column -- nothing has ever probed the video -- reads as
+
+        `version` 0 with empty `data`, so a reader never has to tell a missing
+
+        envelope from an empty one.'
+      properties:
+        version:
+          type: integer
+          minimum: 1
+        data:
+          type: object
+          additionalProperties: {}
+      required:
+      - data
+      - version
+    VideoMediaMetadataRequest:
+      type: object
+      description: 'What ffprobe made of a video''s original, as ingest recorded it.
+
+
+        Stored whole rather than picked apart: container, codecs, resolution,
+
+        field order and anything else ffprobe reports are all in `data`, and
+
+        deciding today which of them matter would only mean probing the whole
+
+        archive again the day something else does. `version` describes the
+
+        envelope, not ffprobe: 1 is `{"format": ..., "streams": ...}` as
+
+        `ffprobe -show_format -show_streams -of json` prints it, the shape
+
+        media-processor first wrote into this column in 2021.
+
+
+        An empty column -- nothing has ever probed the video -- reads as
+
+        `version` 0 with empty `data`, so a reader never has to tell a missing
+
+        envelope from an empty one.'
+      properties:
+        version:
+          type: integer
+          minimum: 1
+        data:
+          type: object
+          additionalProperties: {}
+      required:
+      - data
+      - version
+    VideosMediaMetadataRetrieveErrorResponse400:
+      oneOf:
+      - $ref: '#/components/schemas/ParseErrorResponse'
+      discriminator:
+        propertyName: type
+        mapping:
+          client_error: '#/components/schemas/ParseErrorResponse'
+    VideosMediaMetadataUpdateDataErrorComponent:
+      type: object
+      properties:
+        attr:
+          enum:
+          - data
+          type: string
+          description: '* `data` - data'
+        code:
+          enum:
+          - empty
+          - not_a_dict
+          - 'null'
+          - required
+          type: string
+          description: '* `empty` - empty
+
+            * `not_a_dict` - not_a_dict
+
+            * `null` - null
+
+            * `required` - required'
+        detail:
+          type: string
+      required:
+      - attr
+      - code
+      - detail
+    VideosMediaMetadataUpdateDataKEYErrorComponent:
+      type: object
+      properties:
+        attr:
+          enum:
+          - data.KEY
+          type: string
+          description: '* `data.KEY` - data.KEY'
+        code:
+          enum:
+          - invalid
+          - 'null'
+          - required
+          type: string
+          description: '* `invalid` - invalid
+
+            * `null` - null
+
+            * `required` - required'
+        detail:
+          type: string
+      required:
+      - attr
+      - code
+      - detail
+    VideosMediaMetadataUpdateError:
+      oneOf:
+      - $ref: '#/components/schemas/VideosMediaMetadataUpdateNonFieldErrorsErrorComponent'
+      - $ref: '#/components/schemas/VideosMediaMetadataUpdateVersionErrorComponent'
+      - $ref: '#/components/schemas/VideosMediaMetadataUpdateDataErrorComponent'
+      - $ref: '#/components/schemas/VideosMediaMetadataUpdateDataKEYErrorComponent'
+      discriminator:
+        propertyName: attr
+        mapping:
+          non_field_errors: '#/components/schemas/VideosMediaMetadataUpdateNonFieldErrorsErrorComponent'
+          version: '#/components/schemas/VideosMediaMetadataUpdateVersionErrorComponent'
+          data: '#/components/schemas/VideosMediaMetadataUpdateDataErrorComponent'
+          data.KEY: '#/components/schemas/VideosMediaMetadataUpdateDataKEYErrorComponent'
+    VideosMediaMetadataUpdateErrorResponse400:
+      oneOf:
+      - $ref: '#/components/schemas/VideosMediaMetadataUpdateValidationError'
+      - $ref: '#/components/schemas/ParseErrorResponse'
+      discriminator:
+        propertyName: type
+        mapping:
+          validation_error: '#/components/schemas/VideosMediaMetadataUpdateValidationError'
+          client_error: '#/components/schemas/ParseErrorResponse'
+    VideosMediaMetadataUpdateNonFieldErrorsErrorComponent:
+      type: object
+      properties:
+        attr:
+          enum:
+          - non_field_errors
+          type: string
+          description: '* `non_field_errors` - non_field_errors'
+        code:
+          enum:
+          - invalid
+          - 'null'
+          type: string
+          description: '* `invalid` - invalid
+
+            * `null` - null'
+        detail:
+          type: string
+      required:
+      - attr
+      - code
+      - detail
+    VideosMediaMetadataUpdateValidationError:
+      type: object
+      properties:
+        type:
+          $ref: '#/components/schemas/ValidationErrorEnum'
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/VideosMediaMetadataUpdateError'
+      required:
+      - errors
+      - type
+    VideosMediaMetadataUpdateVersionErrorComponent:
+      type: object
+      properties:
+        attr:
+          enum:
+          - version
+          type: string
+          description: '* `version` - version'
+        code:
+          enum:
+          - invalid
+          - max_string_length
+          - min_value
+          - 'null'
+          - required
+          type: string
+          description: '* `invalid` - invalid
+
+            * `max_string_length` - max_string_length
+
+            * `min_value` - min_value
+
+            * `null` - null
+
+            * `required` - required'
+        detail:
+          type: string
+      required:
+      - attr
+      - code
+      - detail
   securitySchemes:
     cookieAuth:
       type: apiKey

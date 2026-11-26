@@ -92,17 +92,27 @@ def refresh_metadata(state: VideoState, desired: DesiredState) -> Fragment:
     afterwards is very nearly exactly the videos that cannot be measured.
     Distinguishing the remainder properly needs django-api to record that a
     measurement was attempted; there is no field for it today.
+
+    The media metadata -- ffprobe's whole report on the original -- is asked
+    for whenever django-api has none, and it is what finally makes framerate
+    trustworthy. The column defaults to 25000, so "absent" never fired for it
+    and every video in the catalogue claimed 25 fps whatever it was. A
+    recorded probe is the evidence that somebody measured: until there is one,
+    the framerate beside it is a default, and it is rewritten from the same
+    probe. Once there is one, both stay as they are.
     """
     originals = state.rows_for(VideoFileVariantEnum.ORIGINAL)
     if not originals:
         return Fragment(state)
 
     original = originals[0]
+    unprobed = state.media_metadata_version == 0
     probed = tuple(
         name
         for name, absent in (
             ("duration", not state.duration),
-            ("framerate", not state.framerate),
+            ("framerate", not state.framerate or unprobed),
+            ("media", unprobed),
         )
         if absent
     )

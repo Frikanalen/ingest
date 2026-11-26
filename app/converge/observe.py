@@ -28,10 +28,11 @@ class Observer:
 
     async def observe_one(self, video_id: str) -> VideoState:
         """Assemble everything the chores need to decide about one video."""
-        video, files, directories = await asyncio.gather(
+        video, files, directories, media_metadata_version = await asyncio.gather(
             self.django_api.get_video(video_id),
             self.django_api.get_files_for_video(video_id),
             self._archived_directories(video_id),
+            self.django_api.get_media_metadata_version(video_id),
         )
 
         return VideoState.from_rows(
@@ -39,6 +40,7 @@ class Observer:
             video,
             tuple(RegisteredFile.from_row(row) for row in (files.results or [])),
             directories=directories,
+            media_metadata_version=media_metadata_version,
         )
 
     async def _archived_directories(self, video_id: str) -> dict[str, tuple[ArchiveEntry, ...]]:

@@ -1,5 +1,7 @@
+from collections.abc import Mapping
 from datetime import datetime
 from http import HTTPStatus
+from typing import Any
 
 from frikanalen_django_api_client import AuthenticatedClient
 from frikanalen_django_api_client.api.ingest import ingest_claim
@@ -14,6 +16,8 @@ from frikanalen_django_api_client.api.videos import (
     videos_ingest_report,
     videos_ingest_retrieve,
     videos_list,
+    videos_media_metadata_retrieve,
+    videos_media_metadata_update,
     videos_partial_update,
     videos_retrieve,
     videos_upload_token_verify,
@@ -31,11 +35,17 @@ from frikanalen_django_api_client.models import (
     UploadTokenVerificationRequest,
     VideoFileRequest,
     VideoFileVariantEnum,
+    VideoMediaMetadataRequest,
+    VideoMediaMetadataRequestData,
 )
 from frikanalen_django_api_client.types import UNSET, Response
 
 from app.media.loudness.loudness_measurement import LoudnessMeasurement
 from app.util.pprint_object_list import pprint_object_list
+
+#: The envelope `set_media_metadata` writes. See django-api's
+#: VideoMediaMetadataSerializer; 0 is what an unprobed video reads as.
+MEDIA_METADATA_VERSION = 1
 
 
 class DjangoApiError(Exception):
@@ -284,6 +294,35 @@ class DjangoApiService:
             client=self.client,
             body=PatchedVideoRequest(framerate=framerate_milli),
         )
+
+    async def get_media_metadata_version(self, video_id: str) -> int | None:
+        """Which envelope the video's recorded probe is in; 0 when nothing has probed it.
+
+        None when django-api has no such endpoint (404), which is what a
+        django-api older than the endpoint answers. That plans no probe rather
+        than failing every job, so ingest can roll out before django-api does.
+        """
+        response = await videos_media_metadata_retrieve.asyncio_detailed(int(video_id), client=self.client)
+        if response.status_code == HTTPStatus.NOT_FOUND:
+            return None
+        _expect(response, HTTPStatus.OK)
+        return response.parsed.version
+
+    async def set_media_metadata(self, video_id: str, report: Mapping[str, Any]) -> None:
+        """Record ffprobe's report on the original, keys exactly as ffprobe printed them.
+
+        Version 1 is the envelope media-processor first wrote into this column:
+        `{"format": ..., "streams": ...}` from `-show_format -show_streams`.
+        """
+        response = await videos_media_metadata_update.asyncio_detailed(
+            int(video_id),
+            client=self.client,
+            body=VideoMediaMetadataRequest(
+                version=MEDIA_METADATA_VERSION,
+                data=VideoMediaMetadataRequestData.from_dict(dict(report)),
+            ),
+        )
+        _expect(response, HTTPStatus.OK)
 
     async def list_videos_page(self, limit: int, offset: int, *, proper_import: bool):
         """One page of the catalogue, ordered so paging is stable.

@@ -40,6 +40,21 @@ logger = getLogger(__name__)
 FRAME_RATE_SCALE = 1000
 
 
+def _needs_loudness(actions) -> bool:
+    """Whether anything in the plan reads the source's loudness.
+
+    A refresh that asks for it, because django-api has none; or a format,
+    because the ladder's two-pass loudnorm needs the full measurement (range,
+    threshold, offset), of which django-api keeps only integrated and true
+    peak. A thumbnail needs neither, but telling the formats apart here would
+    duplicate what the templates know, and a format is a full decode anyway.
+    """
+    return any(
+        isinstance(action, ProduceFormat) or (isinstance(action, RefreshMetadata) and "loudness" in action.fields)
+        for action in actions
+    )
+
+
 class SourceUnavailable(RuntimeError):
     """The plan needs the original and the archive does not have exactly one."""
 
@@ -81,18 +96,22 @@ class Applier:
             # will read. A plan with no actions fetches nothing either, which
             # is the case where there may well be no original to fetch.
             if source is None and any(action.needs_source for action in plan.actions):
-                source = await self._fetch_source(plan.video_id, Path(scratch))
+                source = await self._fetch_source(plan.video_id, Path(scratch), measure=_needs_loudness(plan.actions))
 
             for action in plan.actions:
                 logger.info("video %s: %s", plan.video_id, action.describe())
                 await self._apply(action, plan.video_id, source, Path(scratch), on_progress)
 
-    async def _fetch_source(self, video_id: str, scratch: Path) -> SourceMedia:
+    async def _fetch_source(self, video_id: str, scratch: Path, measure: bool = True) -> SourceMedia:
         """Bring the original down and learn everything the formats need from it.
 
         Read from the archive rather than from anything the plan carried, so
         that a rename earlier in the same plan is already reflected. One fetch
         serves the probe, the loudness measurement and every format.
+
+        `measure` says whether anything in the plan will read the loudness.
+        It is a decode of the whole audio track, so a plan that only records
+        what a probe says -- the bulk of a metadata refill -- skips it.
         """
         from app.media.loudness.measure import measure_loudness
 
@@ -105,8 +124,9 @@ class Applier:
         local = scratch / files[0].name
         await self.archive.get(files[0].path, local)
 
-        source = SourceMedia.probed(video_id, local, await MetadataExtractor().do_probe(local))
-        if source.has_audio:
+        metadata, report = await MetadataExtractor().probe_with_report(local)
+        source = SourceMedia.probed(video_id, local, metadata, probe_report=report)
+        if measure and source.has_audio:
             source = replace(source, loudness=await measure_loudness(local))
         return source
 
@@ -224,6 +244,16 @@ class Applier:
         if "framerate" in fields:
             rate = segmentation_for(source.metadata).frame_rate
             await self.django_api.set_video_framerate(video_id, round(rate * FRAME_RATE_SCALE))
+
+        if "media" in fields:
+            if source.probe_report is None:
+                # Only a caller that handed in a source it probed itself gets
+                # here, and recording the parsed model instead would record
+                # less than ffprobe said under a version that promises all of
+                # it. Leaving the column empty means the next pass asks again.
+                logger.warning("video %s: no ffprobe report to hand; media metadata left unrecorded", video_id)
+            else:
+                await self.django_api.set_media_metadata(video_id, source.probe_report)
 
         if "loudness" in fields:
             if source.loudness is None:
