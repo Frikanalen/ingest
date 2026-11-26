@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/Frikanalen/ingest/compare/v1.4.2...v1.5.0) (2026-11-26)
+
+
+### Features
+
+* **converge:** record ffprobe's report as media metadata, and a real framerate ([#84](https://github.com/Frikanalen/ingest/issues/84)) ([11ba724](https://github.com/Frikanalen/ingest/commit/11ba72432d9e7a136b442946b6739c6d2f044517))
+
 ## [1.4.2](https://github.com/Frikanalen/ingest/compare/v1.4.1...v1.4.2) (2026-11-25)
 
 
