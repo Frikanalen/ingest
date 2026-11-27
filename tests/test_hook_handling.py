@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import time
@@ -64,6 +65,15 @@ django_api = AsyncMock()
 HOOK_PATH = "/tusdHooks/"
 
 
+def refused_with(response) -> int | None:
+    """The status tusd is told to refuse the upload with, if it is."""
+    assert response.status_code == 200, response.text
+    body = response.json()
+    if not body.get("RejectUpload"):
+        return None
+    return body["HTTPResponse"]["StatusCode"]
+
+
 def get_settings_override():
     return IngestAppSettings(
         api=DjangoApiSettingsPwdAuth(url="http://localhost:8000", username="", password=""),
@@ -85,7 +95,7 @@ def test_pre_create_fails_if_metadata_bad():
     mock_hook_payload = pre_create_rq_missing_metadata.model_dump(by_alias=True)
 
     response = client.post(HOOK_PATH, json=mock_hook_payload)
-    assert response.status_code == 422
+    assert refused_with(response) == 422
 
 
 def test_pre_create_succeeds_if_metadata_parses():
@@ -170,7 +180,7 @@ def test_pre_create_rejects_an_oversized_programme_image():
 
     response = client.post(HOOK_PATH, json=request.model_dump(by_alias=True))
 
-    assert response.status_code == 413
+    assert refused_with(response) == 413
 
 
 def test_pre_create_rejects_a_programme_image_without_a_role():
@@ -186,7 +196,7 @@ def test_pre_create_rejects_a_programme_image_without_a_role():
 
     response = client.post(HOOK_PATH, json=request.model_dump(by_alias=True))
 
-    assert response.status_code == 422
+    assert refused_with(response) == 422
 
 
 def test_pre_create_rejects_a_non_numeric_video_id():
@@ -203,7 +213,7 @@ def test_pre_create_rejects_a_non_numeric_video_id():
 
     response = client.post(HOOK_PATH, json=request.model_dump(by_alias=True))
 
-    assert response.status_code == 422
+    assert refused_with(response) == 422
 
 
 def test_pre_create_forwards_djangos_refusal():
@@ -211,8 +221,8 @@ def test_pre_create_forwards_djangos_refusal():
 
     response = client.post(HOOK_PATH, json=pre_create_request_valid.model_dump(by_alias=True))
 
-    assert response.status_code == 403
-    assert response.json() == {"detail": "Not allowed to upload to this video"}
+    assert refused_with(response) == 403
+    assert json.loads(response.json()["HTTPResponse"]["Body"]) == {"detail": "Not allowed to upload to this video"}
     django_api.authorize_upload.side_effect = None
 
 
@@ -227,7 +237,7 @@ def test_pre_create_without_credentials_asks_the_uploader_to_sign_in():
 
     response = client.post(HOOK_PATH, json=_with_headers({"Tus-Resumable": ["1.0.0"]}))
 
-    assert response.status_code == 401
+    assert refused_with(response) == 401
     django_api.authorize_upload.assert_not_awaited()
 
 
@@ -259,7 +269,7 @@ def test_pre_create_refuses_a_foreign_origin():
         json=_with_headers({"Cookie": ["sessionid=x"], "Origin": ["https://evil.example"]}),
     )
 
-    assert response.status_code == 403
+    assert refused_with(response) == 403
     django_api.authorize_upload.assert_not_awaited()
 
 
@@ -276,4 +286,73 @@ def test_post_create_fails_if_metadata_bad():
     bad_request.event.upload.meta_data = MetaData()
 
     response = client.post(HOOK_PATH, json=bad_request.model_dump(by_alias=True))
-    assert response.status_code == 422
+    assert refused_with(response) == 422
+
+
+def test_a_video_upload_gets_an_unguessable_id_and_a_video_keyed_path():
+    django_api.reset_mock()
+
+    first = client.post(HOOK_PATH, json=pre_create_request_valid.model_dump(by_alias=True))
+    second = client.post(HOOK_PATH, json=pre_create_request_valid.model_dump(by_alias=True))
+
+    first_change = first.json()["ChangeFileInfo"]
+    assert first_change["ID"] != "1234"
+    assert len(first_change["ID"]) == 32
+    assert first_change["ID"] != second.json()["ChangeFileInfo"]["ID"]
+    assert first_change["Storage"]["Path"] == "1234/test.mp4"
+
+
+def _as(hook_type: str, headers: dict[str, list[str]]) -> dict:
+    request = pre_create_request_valid.model_copy(deep=True)
+    request.type = hook_type
+    request.event.http_request.header = Header.model_validate(headers)
+    return request.model_dump(by_alias=True)
+
+
+def test_pre_finish_from_an_allowed_uploader_goes_ahead():
+    django_api.reset_mock()
+
+    response = client.post(HOOK_PATH, json=_as("pre-finish", {"Cookie": ["sessionid=member"]}))
+
+    assert response.status_code == 200
+    django_api.authorize_upload.assert_awaited_once_with("1234", {"Cookie": "sessionid=member"})
+
+
+def test_pre_finish_without_credentials_fails_the_hook():
+    """tusd's only way to stop a finish: post-finish never runs."""
+    django_api.reset_mock()
+
+    response = client.post(HOOK_PATH, json=_as("pre-finish", {"Tus-Resumable": ["1.0.0"]}))
+
+    assert response.status_code == 401
+
+
+def test_pre_finish_refused_by_django_fails_the_hook():
+    django_api.authorize_upload.side_effect = DjangoApiError(403)
+    try:
+        response = client.post(HOOK_PATH, json=_as("pre-finish", {"Cookie": ["sessionid=outsider"]}))
+    finally:
+        django_api.authorize_upload.side_effect = None
+
+    assert response.status_code == 403
+
+
+def test_pre_terminate_by_an_outsider_is_rejected():
+    django_api.authorize_upload.side_effect = DjangoApiError(403)
+    try:
+        response = client.post(HOOK_PATH, json=_as("pre-terminate", {"Cookie": ["sessionid=outsider"]}))
+    finally:
+        django_api.authorize_upload.side_effect = None
+
+    assert response.status_code == 200
+    assert response.json()["RejectTermination"] is True
+    assert response.json()["HTTPResponse"]["StatusCode"] == 403
+
+
+def test_pre_terminate_by_the_uploader_goes_ahead():
+    django_api.reset_mock()
+
+    response = client.post(HOOK_PATH, json=_as("pre-terminate", {"Cookie": ["sessionid=member"]}))
+
+    assert response.status_code == 200
+    assert not response.json().get("RejectTermination")
