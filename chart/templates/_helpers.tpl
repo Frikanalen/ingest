@@ -103,9 +103,10 @@ across a network.
 - -upload-dir={{ .Values.uploads.mountPath }}
 - -base-path={{ .Values.tusd.basePath }}
 - -hooks-http=http://localhost:{{ .Values.service.port }}/tusdHooks/
-# Only the two events ingest implements: pre-create assigns the storage path,
-# post-finish starts the job.
-- -hooks-enabled-events=pre-create,post-finish
+# The events ingest implements: pre-create authorizes the upload and assigns
+# the storage path, pre-finish and pre-terminate authorize the request that
+# completes or deletes it, post-finish starts the job.
+- -hooks-enabled-events=pre-create,pre-finish,pre-terminate,post-finish
 {{- if .Values.tusd.behindProxy }}
 - -behind-proxy=true
 {{- end }}

@@ -1,3 +1,4 @@
+import json
 import logging
 from pathlib import Path
 from uuid import uuid4
@@ -15,7 +16,7 @@ from app.api.hooks.metadata import (
     get_upload_metadata,
 )
 from app.api.hooks.schema.request import HookRequest
-from app.api.hooks.schema.response import FileInfoChanges, HookResponse
+from app.api.hooks.schema.response import FileInfoChanges, HookResponse, HTTPResponse
 from app.api.hooks.spool import IMAGE_UPLOAD_DIR, clear_abandoned_image_uploads
 from app.archive_store import ArchiveStore
 from app.django_client.service import DjangoApiError, DjangoApiService
@@ -61,18 +62,45 @@ def uploader_credentials(hook_request: HookRequest, settings: IngestAppSettings)
     return credentials
 
 
+async def authorize(
+    hook_request: HookRequest,
+    metadata: UploadMetaData,
+    settings: IngestAppSettings,
+    django_api: DjangoApiService,
+) -> None:
+    """Refuse the request unless its sender may upload to the video."""
+    credentials = uploader_credentials(hook_request, settings)
+    try:
+        await django_api.authorize_upload(metadata.video_id, credentials)
+    except DjangoApiError as error:
+        logger.warning("%s for video %s refused (%s)", hook_request.type, metadata.video_id, error.status_code)
+        raise HTTPException(status_code=error.status_code, detail="Not allowed to upload to this video") from error
+
+
+def refusal(error: HTTPException, **reject: bool) -> HookResponse:
+    """Tell tusd to turn the request down, with ingest's own status.
+
+    A hook that answers with an error status only makes tusd answer 500,
+    which tells the uploader nothing. Answering 200 with a rejection and
+    the response to send is how tusd passes a refusal on as it was meant.
+    """
+    return HookResponse(
+        HTTPResponse=HTTPResponse(
+            StatusCode=error.status_code,
+            Body=json.dumps({"detail": error.detail}),
+            Header={"Content-Type": "application/json"},
+        ),
+        **reject,
+    )
+
+
 async def prepare_upload(
     hook_request: HookRequest,
     settings: IngestAppSettings,
     django_api: DjangoApiService,
 ) -> HookResponse:
     metadata = get_upload_metadata(hook_request)
-    credentials = uploader_credentials(hook_request, settings)
-    try:
-        await django_api.authorize_upload(metadata.video_id, credentials)
-    except DjangoApiError as error:
-        logger.warning("Upload to video %s refused (%s)", metadata.video_id, error.status_code)
-        raise HTTPException(status_code=error.status_code, detail="Not allowed to upload to this video") from error
+    await authorize(hook_request, metadata, settings, django_api)
 
     sanitized_filename = secure_filename(metadata.orig_file_name)
     if not sanitized_filename:
@@ -88,8 +116,12 @@ async def prepare_upload(
         # collected here instead.
         clear_abandoned_image_uploads(settings.tusd_dir, metadata.video_id)
     else:
-        upload_id = metadata.video_id
-        new_file = Path(upload_id, sanitized_filename)
+        # The ID is the upload's URL (/upload/<id>), and tusd lets whoever
+        # holds that URL append to the upload or delete it. So it must not
+        # be guessable, as the video ID would be; the spool path can still be
+        # keyed on the video.
+        upload_id = uuid4().hex
+        new_file = Path(metadata.video_id, sanitized_filename)
 
     # A video's spool path is keyed on the video, so a second upload to the
     # same video lands on the first one's leftovers. Dropping them is the same
@@ -135,6 +167,28 @@ async def ingest_program_image(
         raise HTTPException(status_code=500, detail="Could not archive image") from error
 
 
+async def authorize_completion(
+    hook_request: HookRequest, settings: IngestAppSettings, django_api: DjangoApiService
+) -> HookResponse | dict:
+    """Authorize the request that finishes or deletes an upload.
+
+    Appending needs only the upload's URL, so these are checked again: a
+    file whose last bytes came from someone not allowed to upload is not
+    ingested, and nobody else may delete an upload. tusd has no way to
+    reject a finish other than failing the hook, so for pre-finish this
+    raises.
+    """
+    metadata = get_upload_metadata(hook_request)
+    if hook_request.type == "pre-finish":
+        await authorize(hook_request, metadata, settings, django_api)
+        return {}
+    try:
+        await authorize(hook_request, metadata, settings, django_api)
+    except HTTPException as error:
+        return refusal(error, RejectTermination=True)
+    return {}
+
+
 @router.post("/")
 async def receive_hook(
     hook_request: HookRequest,
@@ -145,7 +199,13 @@ async def receive_hook(
 ):
     logger.info("Received hook: %s", hook_request.type)
     if hook_request.type == "pre-create":
-        return await prepare_upload(hook_request, settings, django_api)
+        try:
+            return await prepare_upload(hook_request, settings, django_api)
+        except HTTPException as error:
+            return refusal(error, RejectUpload=True)
+
+    if hook_request.type in ("pre-finish", "pre-terminate"):
+        return await authorize_completion(hook_request, settings, django_api)
 
     if hook_request.type == "post-finish":
         upload_meta = get_upload_metadata(hook_request)
