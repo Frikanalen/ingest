@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/Frikanalen/ingest/compare/v1.5.0...v1.6.0) (2026-11-27)
+
+
+### Features
+
+* authorize uploads with the uploader's own credentials ([#86](https://github.com/Frikanalen/ingest/issues/86)) ([dae999f](https://github.com/Frikanalen/ingest/commit/dae999fd957659900047a23f744cdec3bb97e9dd))
+
 ## [1.5.0](https://github.com/Frikanalen/ingest/compare/v1.4.2...v1.5.0) (2026-11-26)
 
 
