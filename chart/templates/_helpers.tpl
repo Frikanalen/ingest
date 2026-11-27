@@ -115,9 +115,10 @@ across a network.
 {{- with .Values.tusd.corsAllowHeaders }}
 - -cors-allow-headers={{ . }}
 {{- end }}
-{{- with .Values.tusd.corsAllowOrigin }}
-- -cors-allow-origin={{ . }}
-{{- end }}
+# Uploads are authorized by the uploader's session cookie, so tusd must not
+# hand a credentialed CORS response to any other origin. Defaults to the site
+# itself, the origin of api.url.
+- -cors-allow-origin={{ .Values.tusd.corsAllowOrigin | default (printf "^%s$" (regexQuoteMeta (trimSuffix "/" .Values.api.url))) }}
 {{- with .Values.tusd.extraArgs }}
 {{- toYaml . }}
 {{- end }}

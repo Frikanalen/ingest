@@ -24,7 +24,9 @@ class UploadKind(StrEnum):
 class UploadMetaData(BaseModel):
     video_id: str = Field(..., alias="videoID")
     orig_file_name: str = Field(..., alias="origFileName")
-    upload_token: str = Field(..., alias="uploadToken")
+    # Sent by clients from before uploads were authorized by the uploader's
+    # own credentials. Accepted so they keep working, and otherwise ignored.
+    upload_token: str | None = Field(None, alias="uploadToken")
     upload_kind: UploadKind = Field(UploadKind.VIDEO, alias="uploadKind")
     # RoleEnum comes from the generated client: the roles django-api will
     # accept are the roles worth accepting an upload for, so an unknown one

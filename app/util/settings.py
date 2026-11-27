@@ -131,6 +131,12 @@ class IngestAppSettings(BaseSettings):
         default_factory=DjangoApiSettingsPwdAuth,
     )
 
+    upload_origins: str = Field(
+        default="",
+        description="Comma-separated origins browser uploads may come from. Empty means only the "
+        "origin of the API URL, which is the site's own.",
+    )
+
     port: int = Field(default=8000, description="Port for the FastAPI server")
     host: str = Field(default="0.0.0.0", description="Host for the FastAPI server")
 
@@ -175,6 +181,14 @@ class IngestAppSettings(BaseSettings):
     )
 
     worker: WorkerSettings = Field(default_factory=WorkerSettings, description="Queue-draining behaviour")
+
+    def upload_allowed_origins(self) -> frozenset[str]:
+        if self.upload_origins:
+            return frozenset(origin.strip().rstrip("/") for origin in self.upload_origins.split(",") if origin.strip())
+        url = self.api.url
+        default_port = {"http": 80, "https": 443}.get(url.scheme)
+        port = "" if url.port in (None, default_port) else f":{url.port}"
+        return frozenset({f"{url.scheme}://{url.host}{port}"})
 
 
 @lru_cache

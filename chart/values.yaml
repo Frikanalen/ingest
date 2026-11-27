@@ -81,7 +81,8 @@ tusd:
   # The frontend uploads with credentials and a CSRF header.
   corsAllowCredentials: true
   corsAllowHeaders: X-CSRFToken
-  # Empty leaves tusd's default, which reflects the request origin.
+  # A regex. Empty means only the origin of api.url (the site itself); never
+  # tusd's own default, which reflects any origin, cookies included.
   corsAllowOrigin: ""
 
   extraArgs: []

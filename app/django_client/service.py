@@ -3,6 +3,7 @@ from datetime import datetime
 from http import HTTPStatus
 from typing import Any
 
+import httpx
 from frikanalen_django_api_client import AuthenticatedClient
 from frikanalen_django_api_client.api.ingest import ingest_claim
 from frikanalen_django_api_client.api.videofiles import (
@@ -20,7 +21,6 @@ from frikanalen_django_api_client.api.videos import (
     videos_media_metadata_update,
     videos_partial_update,
     videos_retrieve,
-    videos_upload_token_verify,
 )
 from frikanalen_django_api_client.models import (
     IngestClaimRequest,
@@ -32,7 +32,6 @@ from frikanalen_django_api_client.models import (
     PatchedVideoRequest,
     ProgramImageRegistrationRequest,
     RoleEnum,
-    UploadTokenVerificationRequest,
     VideoFileRequest,
     VideoFileVariantEnum,
     VideoMediaMetadataRequest,
@@ -74,13 +73,19 @@ class DjangoApiService:
     def __init__(self, client: AuthenticatedClient):
         self.client = client
 
-    async def verify_upload_token(self, video_id: str, upload_token: str) -> None:
-        response = await videos_upload_token_verify.asyncio_detailed(
-            int(video_id),
-            client=self.client,
-            body=UploadTokenVerificationRequest(upload_token=upload_token),
-        )
-        _expect(response, HTTPStatus.NO_CONTENT)
+    async def authorize_upload(self, video_id: str, credentials: Mapping[str, str]) -> None:
+        """Ask django-api whether the uploader may upload to this video.
+
+        Sent with the uploader's own credentials -- their session cookie or
+        API token, forwarded from the tus request -- and deliberately not
+        with ingest's: django-api is answering for the person uploading. So
+        this uses a client of its own, which never carries ingest's token
+        and never follows a redirect elsewhere with the uploader's cookie.
+        """
+        async with httpx.AsyncClient(base_url=self.client._base_url, follow_redirects=False) as client:
+            response = await client.get(f"/api/videos/{int(video_id)}/upload", headers=dict(credentials))
+        if response.status_code != HTTPStatus.OK:
+            raise DjangoApiError(response.status_code)
 
     async def set_video_duration(self, video_id: str, duration: str):
         return await videos_partial_update.asyncio(
